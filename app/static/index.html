@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="same-origin">
+  <title>FacturaPDF VF</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script type="module" src="/static/app.js"></script>
+</head>
+<body>
+  <button type="button" id="saltar" class="saltar">Saltar al contenido</button>
+  <header id="cabecera" class="cabecera" hidden></header>
+  <main id="contenido" class="contenido" tabindex="-1">
+    <p class="cargando" role="status">Cargando…</p>
+  </main>
+  <footer id="pie" class="pie"></footer>
+  <div id="notificaciones" class="notificaciones" aria-live="polite"></div>
+  <noscript><p class="noscript">Esta aplicación necesita JavaScript activado.</p></noscript>
+</body>
+</html>

@@ -1,0 +1,58 @@
+{
+  "archivo": "var_02_minimalista_times_dos_columnas.pdf",
+  "estilo": "Minimalista en Times a dos columnas: barra lateral con etiquetas en cursiva y valor debajo (Factura núm., Fecha dd.mm.yyyy, Vencimiento, Su pedido, IBAN), columna principal con 'Facturar a', tabla Descripción/Cant./Precio/Importe sin € y totales Subtotal/IVA/Total sin separador de miles",
+  "empresa_nif": "B46871232",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "MA-0187/26",
+  "fecha": "2026-10-27",
+  "emisor": {
+    "nombre": "Traducciones Meridiano Austral, S.L.",
+    "nif": "B46871232",
+    "domicilio_contiene": "46004"
+  },
+  "destinatario": {
+    "nombre": "Ingeniería Hidráulica Cierzo Bajo, S.A.",
+    "nif": "A50234566",
+    "domicilio_contiene": "50015"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Traducción jurada inglés-español",
+      "cantidad": "12500.00",
+      "precio": "0.09",
+      "importe": "1125.00"
+    },
+    {
+      "concepto_contiene": "Revisión terminológica",
+      "cantidad": "3.75",
+      "precio": "38.00",
+      "importe": "142.50"
+    },
+    {
+      "concepto_contiene": "Legalización y envío",
+      "cantidad": "1.00",
+      "precio": "46.00",
+      "importe": "46.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "1313.50",
+      "cuota": "275.84"
+    }
+  ],
+  "base_imponible": "1313.50",
+  "cuota_iva": "275.84",
+  "total_factura": "1589.34",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "pedido": "PED-HID-4471"
+  },
+  "iban": "ES0022223333444455556666",
+  "forma_pago_contiene": "Transferencia a 30 días",
+  "indicios_esperados": [],
+  "notas": "Documento propio sin marcas VERI*FACTU (preparatorio). Barra lateral izquierda y columna principal comparten renglones en la extracción por líneas (texto intercalado). Etiquetas en una línea y valor en la siguiente. Distractor: vencimiento 26.11.2026. NIF del emisor con guion y puntos (B-46.871.232). IBAN partido en dos renglones por la estrechez de la barra lateral ('ES00 2222 3333 4444' / '5555 6666'). Cantidad 12500 palabras a 0,09 sin separador de miles; importes sin separador de miles y sin € salvo el total. Cuota 275,835 -> 275,84 (half-up)."
+}

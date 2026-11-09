@@ -1,0 +1,75 @@
+{
+  "archivo": "hold_02_hostal_folio_iva10_21.pdf",
+  "estilo": "Hostal (factura completa de hostelería): cabecera centrada con nombre comercial + razón social, 'Facturar a:' a la izquierda, bloque FACTURA a la derecha con etiquetas sin separador (Nº Fra., Fecha en letra, habitación, llegada/salida, huésped, reserva, pedido), folio con fecha por línea y columna % IVA, cuadro de desglose 10 %/21 % con total por tipo, sello PAGADO, Times, A4",
+  "empresa_nif": "B05417290",
+  "tipo_documento": "factura",
+  "situacion_esperada": "emitida_propia",
+  "numero": "H26/03187",
+  "fecha": "2026-11-07",
+  "emisor": {
+    "nombre": "Alojamientos Peñanegra del Tormes, S.L.",
+    "nif": "B05417290",
+    "domicilio_contiene": "05635"
+  },
+  "destinatario": {
+    "nombre": "Ingeniería Térmica Arapiles Norte, S.L.",
+    "nif": "B37652187",
+    "domicilio_contiene": "37006"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Alojamiento habitación doble",
+      "cantidad": "3.00",
+      "precio": "78.00",
+      "importe": "234.00"
+    },
+    {
+      "concepto_contiene": "Desayuno buffet",
+      "cantidad": "3.00",
+      "precio": "9.50",
+      "importe": "28.50"
+    },
+    {
+      "concepto_contiene": "Cena en restaurante",
+      "cantidad": "1.00",
+      "precio": "26.40",
+      "importe": "26.40"
+    },
+    {
+      "concepto_contiene": "Servicio de lavandería",
+      "cantidad": "1.00",
+      "precio": "14.00",
+      "importe": "14.00"
+    },
+    {
+      "concepto_contiene": "Alquiler sala de reuniones",
+      "cantidad": "1.00",
+      "precio": "120.00",
+      "importe": "120.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "10.00",
+      "base": "288.90",
+      "cuota": "28.89"
+    },
+    {
+      "tipo_iva": "21.00",
+      "base": "134.00",
+      "cuota": "28.14"
+    }
+  ],
+  "base_imponible": "422.90",
+  "cuota_iva": "57.03",
+  "total_factura": "479.93",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "pedido": "PO-4471/26"
+  },
+  "iban": null,
+  "forma_pago_contiene": "Tarjeta",
+  "indicios_esperados": [],
+  "notas": "Factura completa propia del hostal, ya entregada y cobrada con tarjeta al hacer el check-out (sello PAGADO): se registra como emitida_propia; sin firma ni QR el clasificador solo puede proponer pendiente_confirmar, que el evaluador acepta. Dos tipos de IVA: 10 % (alojamiento, desayuno, cena: base 288,90, cuota 28,89) y 21 % (lavandería y sala de reuniones: base 134,00, cuota 28,14). Trampas: fecha de factura en letra ('7 de noviembre de 2026') frente a fechas de línea 04-06/11, llegada 04/11 y salida 07/11 en formato numérico; huésped (persona) distinto del cliente (empresa); nº de reserva y habitación como distractores; totales por tipo IVA incluido (317,79 y 162,14) en el cuadro de desglose; etiquetas sin separador ('Nº Fra.  H26/03187')."
+}

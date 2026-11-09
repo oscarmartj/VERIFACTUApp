@@ -1,0 +1,62 @@
+{
+  "archivo": "obra_04_proforma_apaisada.pdf",
+  "estilo": "A4 apaisado con líneas de división de Excel: título FACTURA PROFORMA, etiquetas en celdas sombreadas sin separador, columna IVA %, resumen a la derecha y forma de pago a su izquierda en las mismas filas, fecha dd.mm.yyyy",
+  "empresa_nif": "B98711906",
+  "tipo_documento": "proforma",
+  "situacion_esperada": "preparatorio",
+  "numero": "PF-031/2026",
+  "fecha": "2026-11-04",
+  "emisor": {
+    "nombre": "QUELVAR INGENIEROS CONSULTORES, S.L.P.",
+    "nif": "B98711906",
+    "domicilio_contiene": "46006"
+  },
+  "destinatario": {
+    "nombre": "LINDAMAR SUELOS Y PROMOCIONES, S.A.",
+    "nif": "A46320750",
+    "domicilio_contiene": "46020"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Coordinación de seguridad y salud en fase de ejecución",
+      "cantidad": "1.00",
+      "precio": "1150.00",
+      "importe": "1150.00"
+    },
+    {
+      "concepto_contiene": "Visitas extraordinarias de inspección",
+      "cantidad": "3.00",
+      "precio": "95.00",
+      "importe": "285.00"
+    },
+    {
+      "concepto_contiene": "Revisión e informe del anexo",
+      "cantidad": "1.00",
+      "precio": "380.00",
+      "importe": "380.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "1815.00",
+      "cuota": "381.15"
+    }
+  ],
+  "base_imponible": "1815.00",
+  "cuota_iva": "381.15",
+  "total_factura": "2196.15",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "obra": "RESIDENCIAL LINDAMAR MARE - 64 VIVIENDAS, LOCALES Y GARAJE",
+    "contrato": "CSS-LND-2025-07",
+    "certificacion": "11",
+    "pedido": "LND/PO/26-0533",
+    "expediente": "EXP-LND-0458"
+  },
+  "iban": "ES0022223333444455556666",
+  "forma_pago_contiene": "Transferencia a 30 días",
+  "indicios_esperados": [],
+  "notas": "Proforma (documento preparatorio) del propio emisor. Página A4 apaisada. El número se rotula 'Proforma nº' en una celda y el valor en la contigua. La certificación se rotula solo 'Certificación' (sin nº). El bloque de forma de pago comparte filas con el resumen (texto intercalado en la extracción). Sociedad profesional (S.L.P.): sin retención de IRPF."
+}

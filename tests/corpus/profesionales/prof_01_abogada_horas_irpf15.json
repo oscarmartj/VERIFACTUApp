@@ -1,0 +1,55 @@
+{
+  "archivo": "prof_01_abogada_horas_irpf15.pdf",
+  "estilo": "Abogada autónoma: emisor arriba-izquierda con DNI, caja 'Cliente', tabla Horas/Precio hora, dos partidas al 21 %, totales apilados, IRPF 15 %, Helvetica, A4",
+  "empresa_nif": "50123456Q",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "2026/045",
+  "fecha": "2026-10-14",
+  "emisor": {
+    "nombre": "Lucía Ferrándiz Olmedo",
+    "nif": "50123456Q",
+    "domicilio_contiene": "28014"
+  },
+  "destinatario": {
+    "nombre": "Inmobiliaria Arcoíris del Tajo, S.L.",
+    "nif": "B45123452",
+    "domicilio_contiene": "45004"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Estudio de la documentación",
+      "cantidad": "6.50",
+      "precio": "120.00",
+      "importe": "780.00"
+    },
+    {
+      "concepto_contiene": "Asistencia a la audiencia",
+      "cantidad": "2.50",
+      "precio": "95.00",
+      "importe": "237.50"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "1017.50",
+      "cuota": "213.68"
+    }
+  ],
+  "base_imponible": "1017.50",
+  "cuota_iva": "213.68",
+  "total_factura": "1231.18",
+  "retencion": {
+    "porcentaje": "15.00",
+    "importe": "152.63"
+  },
+  "total_a_pagar": "1078.55",
+  "referencias": {
+    "expediente": "EXP-118/26"
+  },
+  "iban": "ES0012345678901234567890",
+  "forma_pago_contiene": "Transferencia bancaria",
+  "indicios_esperados": [],
+  "notas": "Documento de la propia profesional (usuaria de la aplicación) titulado 'FACTURA' sin marcas VERI*FACTU: se espera tratarlo como documento preparatorio. Distractor: fecha de vencimiento 13/11/2026 bajo la fecha de emisión. IRPF 15 % sobre la base: Total factura 1.231,18 frente a Total a pagar 1.078,55. Cuota y retención con redondeo half-up (213,675 y 152,625)."
+}

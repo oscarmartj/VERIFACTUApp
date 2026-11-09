@@ -1,0 +1,71 @@
+{
+  "archivo": "hold2_02_miles_espacio_fecha_abreviada.pdf",
+  "estilo": "Factura minimalista de estilo suizo de una empresa de mantenimiento industrial: logotipo tipográfico, número grande a la derecha bajo un rótulo 'FACTURA' espaciado, fila de 5 campos con etiqueta en MAYÚSCULAS pequeñas sobre el valor (EMITIDA / VENCIMIENTO / PEDIDO / ALBARÁN / CLIENTE Nº), bloque 'FACTURAR A', importe total grande en color arriba a la derecha, tabla sin rejilla con columna de FECHA ISO por línea, importes con ESPACIO como separador de miles ('10 653,32 €'), fecha de emisión '3 nov. 2026' y vencimiento ISO '2026-12-03', Helvetica, A4",
+  "empresa_nif": "B26481937",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "EV-26-1093",
+  "fecha": "2026-11-03",
+  "emisor": {
+    "nombre": "Mantenimientos Hidráulicos Ebrovalle, S.L.",
+    "nif": "B26481937",
+    "domicilio_contiene": "26009"
+  },
+  "destinatario": {
+    "nombre": "Bodegas Cerrolobo Alto, S.A.",
+    "nif": "A26173021",
+    "domicilio_contiene": "26200"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Revisión anual de prensa neumática",
+      "cantidad": "1.00",
+      "precio": "2450.00",
+      "importe": "2450.00"
+    },
+    {
+      "concepto_contiene": "Sustitución de bomba de trasiego",
+      "cantidad": "1.00",
+      "precio": "4180.00",
+      "importe": "4180.00"
+    },
+    {
+      "concepto_contiene": "Horas de técnico especialista",
+      "cantidad": "36.00",
+      "precio": "48.50",
+      "importe": "1746.00"
+    },
+    {
+      "concepto_contiene": "Juego de juntas y retenes",
+      "cantidad": "6.00",
+      "precio": "38.90",
+      "importe": "233.40"
+    },
+    {
+      "concepto_contiene": "Desplazamiento y dietas",
+      "cantidad": "3.00",
+      "precio": "65.00",
+      "importe": "195.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "8804.40",
+      "cuota": "1848.92"
+    }
+  ],
+  "base_imponible": "8804.40",
+  "cuota_iva": "1848.92",
+  "total_factura": "10653.32",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "pedido": "OC-26/1182",
+    "albaran": "AT-26-0457"
+  },
+  "iban": "ES0022223333444455552601",
+  "forma_pago_contiene": "Transferencia a 30 días",
+  "indicios_esperados": [],
+  "notas": "Factura propia de la empresa de mantenimiento sin marcas VERI*FACTU: documento preparatorio. Trampas: todos los importes usan ESPACIO como separador de miles y coma decimal ('2 450,00', '10 653,32 €'); la fecha de emisión está abreviada ('3 nov. 2026') y el vencimiento y las fechas de servicio de cada línea van en ISO (2026-12-03, 2026-10-21...); las etiquetas son MAYÚSCULAS pequeñas encima del valor; el total aparece dos veces (arriba en grande con 'IVA incluido' y en el pie de la tabla); 'CLIENTE Nº 4471' y la potencia '7,5 kW' del concepto son distractores numéricos. El CIF del emisor se imprime con guion (B-…). Base 8.804,40 x 21 % = 1.848,924 -> 1.848,92; total 10.653,32."
+}

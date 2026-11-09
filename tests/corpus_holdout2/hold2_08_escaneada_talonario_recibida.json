@@ -1,0 +1,62 @@
+{
+  "archivo": "hold2_08_escaneada_talonario_recibida.pdf",
+  "estilo": "Factura RECIBIDA ESCANEADA (solo imagen JPEG a 200 ppp en gris, sin capa de texto, giro de -0,8°, desenfoque, ruido y motas): talonario preimpreso con caja del emisor, caja 'FACTURA' con celdas Nº y FECHA, campos 'Sr./Sres.:', 'Domicilio:', 'C.P. y Población:' y 'N.I.F.:' con línea de puntos, tabla con rejilla CANTIDAD | CONCEPTO | PRECIO | IMPORTE y renglones vacíos, caja de totales SUMA / I.V.A. 21 % / TOTAL €, valores mecanografiados en Courier, A4",
+  "empresa_nif": "B47916028",
+  "tipo_documento": "factura",
+  "situacion_esperada": "recibida",
+  "numero": "26-0347",
+  "fecha": "2026-10-28",
+  "emisor": {
+    "nombre": "Fontanería y Calefacción Pisuerga Norte, S.L.",
+    "nif": "B47283569",
+    "domicilio_contiene": "47012"
+  },
+  "destinatario": {
+    "nombre": "Asesoría Laboral Campos Góticos, S.L.",
+    "nif": "B47916028",
+    "domicilio_contiene": "47001"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Sustitución de grifo monomando",
+      "cantidad": "1.00",
+      "precio": "68.00",
+      "importe": "68.00"
+    },
+    {
+      "concepto_contiene": "Latiguillos flexibles",
+      "cantidad": "2.00",
+      "precio": "4.75",
+      "importe": "9.50"
+    },
+    {
+      "concepto_contiene": "Mano de obra oficial fontanero",
+      "cantidad": "2.50",
+      "precio": "32.00",
+      "importe": "80.00"
+    },
+    {
+      "concepto_contiene": "Desplazamiento",
+      "cantidad": "1.00",
+      "precio": "18.00",
+      "importe": "18.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "175.50",
+      "cuota": "36.86"
+    }
+  ],
+  "base_imponible": "175.50",
+  "cuota_iva": "36.86",
+  "total_factura": "212.36",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {},
+  "iban": "ES0077778888999900004701",
+  "forma_pago_contiene": "Transferencia",
+  "indicios_esperados": [],
+  "notas": "La sube la empresa DESTINATARIA (asesoría laboral): factura recibida de un proveedor en papel, escaneada. PDF solo imagen (requiere OCR): rasterizado a 200 ppp en escala de grises, girado -0,8°, con desenfoque gaussiano, ruido, motas y sombra del borde del escáner, guardado como JPEG calidad 70 dentro de un PDF sin fuentes. Talonario preimpreso (etiquetas en Helvetica, emisor en mayúsculas) con los datos mecanografiados en Courier; el NIF del cliente va en el campo 'N.I.F.:' sin prefijo, y el del emisor como 'C.I.F.'. Cantidad decimal 2,5 h. Sin referencias. Base 175,50 x 21 % = 36,855 -> 36,86; total 212,36."
+}

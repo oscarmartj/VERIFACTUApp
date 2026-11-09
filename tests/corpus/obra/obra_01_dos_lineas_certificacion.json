@@ -1,0 +1,56 @@
+{
+  "archivo": "obra_01_dos_lineas_certificacion.pdf",
+  "estilo": "Excel tipo referencia: rejilla Nº FACTURA/FECHA/CONTRATO/CERTIFICACIÓN, 2 líneas de certificación con UDS. antes del concepto, resumen en fila de cabecera, IBAN 'ES 00 1234 ...', emisor en pie",
+  "empresa_nif": "B87612347",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "0214/26",
+  "fecha": "2026-10-30",
+  "emisor": {
+    "nombre": "OLMERAL GESTIÓN DE PROYECTOS, S.L.",
+    "nif": "B87612347",
+    "domicilio_contiene": "28760"
+  },
+  "destinatario": {
+    "nombre": "BREZOMAR DESARROLLOS RESIDENCIALES, S.A.",
+    "nif": "A28944171",
+    "domicilio_contiene": "28050"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Dirección de ejecución material",
+      "cantidad": "1.00",
+      "precio": "2450.00",
+      "importe": "2450.00"
+    },
+    {
+      "concepto_contiene": "Project monitoring",
+      "cantidad": "0.25",
+      "precio": "7380.00",
+      "importe": "1845.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "4295.00",
+      "cuota": "901.95"
+    }
+  ],
+  "base_imponible": "4295.00",
+  "cuota_iva": "901.95",
+  "total_factura": "5196.95",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "obra": "RESIDENCIAL BREZOMAR JARDINES",
+    "contrato": "CT-BRZ-2025/09",
+    "certificacion": "9",
+    "pedido": "PC26-00318",
+    "partida_presupuestaria": "G02040117"
+  },
+  "iban": "ES0012345678901234567890",
+  "forma_pago_contiene": "transferencia a la cuenta corriente",
+  "indicios_esperados": [],
+  "notas": "Factura propia sin QR tributario subida por el emisor (documento a expedir con la aplicación). Razón social y NIF del emisor solo en el pie; arriba solo lema y domicilio. Destinatario sin etiqueta arriba a la derecha. Dos líneas de la certificación nº 9 (segunda con cantidad 0,25). Fila 'TOTAL' de la tabla repite la base. IBAN con espaciado irregular."
+}

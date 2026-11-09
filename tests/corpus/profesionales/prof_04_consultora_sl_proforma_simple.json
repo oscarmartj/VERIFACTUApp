@@ -1,0 +1,46 @@
+{
+  "archivo": "prof_04_consultora_sl_proforma_simple.pdf",
+  "estilo": "Pequeña consultora S.L.: FACTURA PROFORMA en Courier, nombre comercial arriba y datos fiscales del emisor en el pie, cliente en recuadro sin etiqueta, separador '. -', fecha dd.mm.yyyy, una sola línea, sin retención, 'Base'/'Cuota IVA'/'Importe total', pago por confirming sin IBAN",
+  "empresa_nif": "B50112234",
+  "tipo_documento": "proforma",
+  "situacion_esperada": "preparatorio",
+  "numero": "PF-26/0093",
+  "fecha": "2026-11-05",
+  "emisor": {
+    "nombre": "Brezo Analítica Consultores, S.L.",
+    "nif": "B50112234",
+    "domicilio_contiene": "50005"
+  },
+  "destinatario": {
+    "nombre": "Clínica Dental Sonrisa Norte, S.L.P.",
+    "nif": "B50998871",
+    "domicilio_contiene": "50012"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Auditoría RGPD y plan",
+      "cantidad": "1.00",
+      "precio": "1450.00",
+      "importe": "1450.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "1450.00",
+      "cuota": "304.50"
+    }
+  ],
+  "base_imponible": "1450.00",
+  "cuota_iva": "304.50",
+  "total_factura": "1754.50",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "contrato": "CT-2026-015"
+  },
+  "iban": null,
+  "forma_pago_contiene": "confirming a 60 días",
+  "indicios_esperados": [],
+  "notas": "Caso simple sin retención: total_a_pagar es null porque no figura un importe a pagar distinto del total. Proforma de la propia empresa usuaria (documento preparatorio). El nombre comercial 'BREZO ANALÍTICA' aparece arriba sin NIF; la razón social, CIF y domicilio del emisor solo están en el pie. El recuadro del cliente no tiene rótulo. Sin IBAN (pago por confirming)."
+}

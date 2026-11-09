@@ -1,0 +1,67 @@
+{
+  "archivo": "obra_03_iva10_vivienda_recibida.pdf",
+  "estilo": "ERP monoespaciado (Courier): rejilla etiqueta|valor con ':', fecha 'd de mes de yyyy', importes sin separador de miles, IVA 10 % vivienda, resumen BASE|TIPO|CUOTA|TOTAL con valores debajo",
+  "empresa_nif": "B91824565",
+  "tipo_documento": "factura",
+  "situacion_esperada": "recibida",
+  "numero": "RB-26-118",
+  "fecha": "2026-10-31",
+  "emisor": {
+    "nombre": "OBRAS Y CONTRATAS RIBAZUL, S.A.",
+    "nif": "A41780230",
+    "domicilio_contiene": "41500"
+  },
+  "destinatario": {
+    "nombre": "VALDORNIZ PROMOCIONES, S.L.",
+    "nif": "B91824565",
+    "domicilio_contiene": "41011"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Cubierta plana invertida",
+      "cantidad": "1240.00",
+      "precio": "46.30",
+      "importe": "57412.00"
+    },
+    {
+      "concepto_contiene": "Tabiquería de placa de yeso",
+      "cantidad": "2315.50",
+      "precio": "31.85",
+      "importe": "73748.68"
+    },
+    {
+      "concepto_contiene": "Ventana de PVC oscilobatiente",
+      "cantidad": "96.00",
+      "precio": "412.00",
+      "importe": "39552.00"
+    },
+    {
+      "concepto_contiene": "Seguridad y salud",
+      "cantidad": "1.00",
+      "precio": "2180.00",
+      "importe": "2180.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "10.00",
+      "base": "172892.68",
+      "cuota": "17289.27"
+    }
+  ],
+  "base_imponible": "172892.68",
+  "cuota_iva": "17289.27",
+  "total_factura": "190181.95",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "obra": "RESIDENCIAL OLIVAR DE VALDORNIZ - 48 VIVIENDAS, GARAJES Y TRASTEROS",
+    "contrato": "CEO-VLD-2024/02",
+    "certificacion": "14",
+    "proyecto": "PBE-2024-031"
+  },
+  "iban": "ES0098765432109876543210",
+  "forma_pago_contiene": "Transferencia a 60 días",
+  "indicios_esperados": [],
+  "notas": "La sube la PROMOTORA destinataria (empresa_nif = destinatario): factura recibida de proveedor. IVA reducido 10 % por ejecución de obra de vivienda contratada directamente con el promotor (no es exención ni ISP; la cita al art. 91 no debe disparar indicios). Importes sin separador de miles (172892,68) y total con sufijo EUR. Datos del emisor (NIF, domicilio, registro) solo en el pie."
+}

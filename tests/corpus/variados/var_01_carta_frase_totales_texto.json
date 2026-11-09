@@ -1,0 +1,56 @@
+{
+  "archivo": "var_01_carta_frase_totales_texto.pdf",
+  "estilo": "Carta de procesador de textos (Helvetica, A4): membrete, lugar y fecha, destinatario particular sin etiqueta, 'Factura nº 2026-045 de fecha 3 de noviembre de 2026' dentro de un párrafo, tabla Word con rejilla y totales como renglones de texto en euros",
+  "empresa_nif": "B26112342",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "2026-045",
+  "fecha": "2026-11-03",
+  "emisor": {
+    "nombre": "Carpintería Hermanos Valdeoliva, S.L.",
+    "nif": "B26112342",
+    "domicilio_contiene": "26006"
+  },
+  "destinatario": {
+    "nombre": "Ernesto Galarreta Ruiz",
+    "nif": "16612345C",
+    "domicilio_contiene": "26200"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Fabricación e instalación de armario",
+      "cantidad": "1.00",
+      "precio": "1480.00",
+      "importe": "1480.00"
+    },
+    {
+      "concepto_contiene": "Puertas de paso lacadas",
+      "cantidad": "3.00",
+      "precio": "215.50",
+      "importe": "646.50"
+    },
+    {
+      "concepto_contiene": "Desplazamiento y retirada",
+      "cantidad": null,
+      "precio": null,
+      "importe": "85.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "2211.50",
+      "cuota": "464.42"
+    }
+  ],
+  "base_imponible": "2211.50",
+  "cuota_iva": "464.42",
+  "total_factura": "2675.92",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {},
+  "iban": "ES1234567890123456789012",
+  "forma_pago_contiene": "transferencia bancaria",
+  "indicios_esperados": [],
+  "notas": "Documento de la propia empresa (usuaria) redactado como carta y sin marcas VERI*FACTU: se espera tratarlo como documento preparatorio. Número y fecha solo dentro de la frase del primer párrafo (la fecha también encabeza la carta: 'Logroño, 3 de noviembre de 2026'). Distractores: presupuesto P-118/26 de 2 de octubre de 2026 citado en el texto (no es el número ni el tipo de documento) y firmante persona física al pie. Destinatario particular con 'D.' delante y NIF con guion (16612345-C). Tercera línea sin cantidad ni precio. Totales sin tabla, como frases terminadas en 'euros.'; cuota con redondeo half-up (464,415 -> 464,42)."
+}

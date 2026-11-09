@@ -1,0 +1,42 @@
+[
+ {
+  "secuencia": 1,
+  "tipo": "alta",
+  "num_serie": "166/26",
+  "subsanacion": null,
+  "rechazo_previo": null,
+  "huella_anterior": null,
+  "huella": "ED2468E79896686426E3E16A4BC76AA8B2E1924A4BC9527A2373972B6BF5F41B",
+  "estado_envio": "aceptado"
+ },
+ {
+  "secuencia": 2,
+  "tipo": "alta",
+  "num_serie": "166/26",
+  "subsanacion": "S",
+  "rechazo_previo": null,
+  "huella_anterior": "ED2468E79896686426E3E16A4BC76AA8B2E1924A4BC9527A2373972B6BF5F41B",
+  "huella": "4FA6CE8950206F228B4617BD7A1143BD777D86068F656FC13A73788DCD4A2F1D",
+  "estado_envio": "aceptado"
+ },
+ {
+  "secuencia": 3,
+  "tipo": "alta",
+  "num_serie": "R1/26",
+  "subsanacion": null,
+  "rechazo_previo": null,
+  "huella_anterior": "4FA6CE8950206F228B4617BD7A1143BD777D86068F656FC13A73788DCD4A2F1D",
+  "huella": "9AD0D0AAA7D5B779C18C8E7FFECFE51F141557286D2E496DA749A75C6CBB6E7E",
+  "estado_envio": "aceptado"
+ },
+ {
+  "secuencia": 4,
+  "tipo": "anulacion",
+  "num_serie": "R1/26",
+  "subsanacion": null,
+  "rechazo_previo": null,
+  "huella_anterior": "9AD0D0AAA7D5B779C18C8E7FFECFE51F141557286D2E496DA749A75C6CBB6E7E",
+  "huella": "43D2784A8E04487CA6E0A08C099BFB90C5C458D2438CA2C5784FDFF877829C99",
+  "estado_envio": "aceptado"
+ }
+]

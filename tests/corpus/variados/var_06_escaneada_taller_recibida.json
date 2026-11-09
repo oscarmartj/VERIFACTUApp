@@ -1,0 +1,62 @@
+{
+  "archivo": "var_06_escaneada_taller_recibida.pdf",
+  "estilo": "Factura ESCANEADA de taller mecánico (solo imagen, 200 ppp, gris, giro 0,6°, ruido y motas, JPEG): cabecera centrada, 'Cliente:' a la izquierda y caja FACTURA a la derecha, tabla con rejilla Ref./Descripción/Cant./P. unit./Importe, 'TOTAL A PAGAR' sin retención",
+  "empresa_nif": "B29881109",
+  "tipo_documento": "factura",
+  "situacion_esperada": "recibida",
+  "numero": "T-26/0912",
+  "fecha": "2026-11-02",
+  "emisor": {
+    "nombre": "Talleres Mecánicos Cardoncillo, S.L.",
+    "nif": "B29556677",
+    "domicilio_contiene": "29590"
+  },
+  "destinatario": {
+    "nombre": "Transportes Urgentes Pinsapar, S.L.",
+    "nif": "B29881109",
+    "domicilio_contiene": "29004"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Filtro de aceite",
+      "cantidad": "1.00",
+      "precio": "12.40",
+      "importe": "12.40"
+    },
+    {
+      "concepto_contiene": "Aceite motor 5W30",
+      "cantidad": "5.50",
+      "precio": "9.80",
+      "importe": "53.90"
+    },
+    {
+      "concepto_contiene": "Pastillas de freno delanteras",
+      "cantidad": "1.00",
+      "precio": "68.75",
+      "importe": "68.75"
+    },
+    {
+      "concepto_contiene": "Mano de obra mecánica",
+      "cantidad": "2.25",
+      "precio": "42.00",
+      "importe": "94.50"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "229.55",
+      "cuota": "48.21"
+    }
+  ],
+  "base_imponible": "229.55",
+  "cuota_iva": "48.21",
+  "total_factura": "277.76",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {},
+  "iban": null,
+  "forma_pago_contiene": "Tarjeta de crédito",
+  "indicios_esperados": [],
+  "notas": "PDF escaneado SIN capa de texto (requiere OCR): se rasterizó a 200 ppp en gris, con giro de 0,6°, ruido, motas y compresión JPEG. La sube la empresa DESTINATARIA (transportista) -> 'recibida'. Valores esperados tal como están impresos. 'TOTAL A PAGAR' es el total de la factura (no hay retención: total_a_pagar null). Distractores: kilometraje 148.300, fecha de entrada del vehículo 31-10-26, garantía '3 meses o 2.000 km'. Cuota 48,2055 -> 48,21."
+}

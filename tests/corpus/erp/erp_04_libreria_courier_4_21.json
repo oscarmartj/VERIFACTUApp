@@ -1,0 +1,102 @@
+{
+  "archivo": "erp_04_libreria_courier_4_21.pdf",
+  "estilo": "ERP antiguo de librería-papelería en Courier (estilo impresora matricial, mayúsculas): rótulos con puntos de relleno ('NÚM. FACTURA..: '), caja del cliente sin rótulo, tabla con guiones CÓDIGO/DESCRIPCIÓN/CANT./PRECIO/%DTO/%IVA/IMPORTE, desglose 4 % + 21 % en columnas monoespaciadas, 'LÍQUIDO A PAGAR (EUR)' como total, fecha dd-mm-yy, A4",
+  "empresa_nif": "B04123782",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "A26-001947",
+  "fecha": "2026-11-07",
+  "emisor": {
+    "nombre": "Librería Papelería Los Almendros de Oria, S.L.",
+    "nif": "B04123782",
+    "domicilio_contiene": "04810"
+  },
+  "destinatario": {
+    "nombre": "Centro de Formación Alcántara del Sur, S. Coop.",
+    "nif": "F10938470",
+    "domicilio_contiene": "10500"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Matemáticas 3.º ESO. Libro",
+      "cantidad": "25.00",
+      "precio": "38.90",
+      "importe": "923.88"
+    },
+    {
+      "concepto_contiene": "Lengua Castellana y Literatura",
+      "cantidad": "25.00",
+      "precio": "36.40",
+      "importe": "864.50"
+    },
+    {
+      "concepto_contiene": "Atlas geográfico escolar de",
+      "cantidad": "12.00",
+      "precio": "19.95",
+      "importe": "227.43"
+    },
+    {
+      "concepto_contiene": "Diccionario escolar de la",
+      "cantidad": "10.00",
+      "precio": "14.50",
+      "importe": "145.00"
+    },
+    {
+      "concepto_contiene": "Cuaderno espiral A4 cuadrícula",
+      "cantidad": "150.00",
+      "precio": "1.85",
+      "importe": "244.20"
+    },
+    {
+      "concepto_contiene": "Bolígrafo tinta gel azul",
+      "cantidad": "20.00",
+      "precio": "9.60",
+      "importe": "168.96"
+    },
+    {
+      "concepto_contiene": "Papel multifunción A4 80",
+      "cantidad": "8.00",
+      "precio": "21.75",
+      "importe": "174.00"
+    },
+    {
+      "concepto_contiene": "Calculadora científica 240 funciones",
+      "cantidad": "15.00",
+      "precio": "13.90",
+      "importe": "208.50"
+    },
+    {
+      "concepto_contiene": "Tóner compatible impresora láser",
+      "cantidad": "3.00",
+      "precio": "42.35",
+      "importe": "127.05"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "4.00",
+      "base": "2160.81",
+      "cuota": "86.43"
+    },
+    {
+      "tipo_iva": "21.00",
+      "base": "922.71",
+      "cuota": "193.77"
+    }
+  ],
+  "base_imponible": "3083.52",
+  "cuota_iva": "280.20",
+  "total_factura": "3363.72",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "pedido": "PED-4471",
+    "contrato": "CS-2026/03"
+  },
+  "iban": "ES0013572468000011223344",
+  "forma_pago_contiene": "TRANSF. 30 DÍAS",
+  "indicios_esperados": [
+    "descuento"
+  ],
+  "notas": "Factura de la empresa usuaria (emisora) impresa por un ERP antiguo: todo en mayúsculas y Courier. Libros al 4 % y material de papelería al 21 %. El total se rotula 'LÍQUIDO A PAGAR (EUR)' aunque no hay retención (total_a_pagar null; total_factura = ese importe). Rótulos con puntos de relleno, fecha con año de 2 cifras (07-11-26), caja del destinatario sin rótulo ('N.I.F.:' de cooperativa F). Distractores: 'CÓD. CLIENTE..: 000312', vencimiento 07-12-26, suma de bases y de cuotas antes del total. Redondeo half-up: 25 x 38,90 -5 % = 923,875 -> 923,88."
+}

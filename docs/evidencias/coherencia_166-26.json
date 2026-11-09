@@ -1,0 +1,31 @@
+{
+ "verificacion_pdf": {
+  "num_serie": true,
+  "importe_total": true,
+  "nif_emisor": true,
+  "nif_destinatario": true,
+  "fecha_expedicion": true,
+  "leyenda_qr": true,
+  "qr_primera_pagina": true,
+  "qr_una_sola_vez": true
+ },
+ "coherencia": {
+  "ok": true,
+  "comprobaciones": {
+   "nif": true,
+   "num_serie": true,
+   "fecha": true,
+   "importe_total": true,
+   "cuota_total": true,
+   "destinatario": true,
+   "desglose": true
+  }
+ },
+ "qr_decodificado": [
+  [
+   "https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?nif=B82991316&numserie=166%2F26&fecha=09-11-2026&importe=1028.50"
+  ]
+ ],
+ "cadena_huella": "IDEmisorFactura=B82991316&NumSerieFactura=166/26&FechaExpedicionFactura=09-11-2026&TipoFactura=F1&CuotaTotal=178.50&ImporteTotal=1028.50&Huella=&FechaHoraHusoGenRegistro=2026-11-09T12:57:11+01:00",
+ "huella": "788C93298354326719DD861096C70655CF903B065FBE91B57F5AFD763BD19BB7"
+}

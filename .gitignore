@@ -1,0 +1,11 @@
+data/
+data-demo/
+diario/
+secretos/
+copias/
+__pycache__/
+*.pyc
+.pytest_cache/
+data-demo-diario/
+data-demo-secretos/
+tests/privado/

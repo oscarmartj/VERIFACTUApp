@@ -1,0 +1,61 @@
+{
+  "archivo": "prof_05_consultor_recibida_frase_irpf15.pdf",
+  "estilo": "Consultor autónomo, factura recibida por la empresa cliente: tamaño Letter, emisor arriba-izquierda con DNI, bloque 'Destinatario:', tabla con cabecera en dos renglones (Fecha servicio, Horas, Precio hora), totales redactados en una frase, importes sin € ni separador de miles, fecha dd-mm-yyyy, IRPF 15 %",
+  "empresa_nif": "B41778895",
+  "tipo_documento": "factura",
+  "situacion_esperada": "recibida",
+  "numero": "117/2026",
+  "fecha": "2026-10-31",
+  "emisor": {
+    "nombre": "Íñigo Valdés Carrasco",
+    "nif": "30654987N",
+    "domicilio_contiene": "41010"
+  },
+  "destinatario": {
+    "nombre": "Talleres Metálicos Guadaíra Sur, S.L.",
+    "nif": "B41778895",
+    "domicilio_contiene": "41500"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Análisis de procesos de",
+      "cantidad": "14.50",
+      "precio": "62.00",
+      "importe": "899.00"
+    },
+    {
+      "concepto_contiene": "Sesiones de formación a",
+      "cantidad": "8.00",
+      "precio": "62.00",
+      "importe": "496.00"
+    },
+    {
+      "concepto_contiene": "Documentación final y reunión",
+      "cantidad": "3.25",
+      "precio": "62.00",
+      "importe": "201.50"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "1596.50",
+      "cuota": "335.27"
+    }
+  ],
+  "base_imponible": "1596.50",
+  "cuota_iva": "335.27",
+  "total_factura": "1931.77",
+  "retencion": {
+    "porcentaje": "15.00",
+    "importe": "239.48"
+  },
+  "total_a_pagar": "1692.29",
+  "referencias": {
+    "proyecto": "PRJ-0926"
+  },
+  "iban": "ES1234560000111122223333",
+  "forma_pago_contiene": "transferencia bancaria a 30 días",
+  "indicios_esperados": [],
+  "notas": "La empresa usuaria es el DESTINATARIO (factura de proveedor). Columna 'Fecha servicio' con fechas parciales dd/mm como distractor de la fecha de factura. Totales solo en una frase: base 1596,50, IVA 21 % 335,27 (redondeo de 335,265), total factura 1931,77, retención 239,48 (de 239,475), líquido a pagar 1692,29. Tamaño de página Letter."
+}

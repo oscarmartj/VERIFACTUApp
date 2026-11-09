@@ -1,0 +1,49 @@
+{
+  "archivo": "var_04_formacion_exenta_letter.pdf",
+  "estilo": "Centro de formación, papel carta (Letter) en Helvetica: banda de color con razón social, datos con 'Núm. factura'/'Fecha de emisión' dd-mm-yyyy, caja 'CLIENTE', tabla Código/Acción formativa/Alumnos/Precio/IVA con 'Exento', conceptos en dos renglones, totales con ':' y leyenda de exención",
+  "empresa_nif": "B37790128",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "F-2026/0233",
+  "fecha": "2026-10-15",
+  "emisor": {
+    "nombre": "Centro de Formación Alcotán Norte, S.L.",
+    "nif": "B37790128",
+    "domicilio_contiene": "37008"
+  },
+  "destinatario": {
+    "nombre": "Frigoríficos Logísticos Mirandilla, S.L.",
+    "nif": "B09456120",
+    "domicilio_contiene": "09200"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Prevención de Riesgos Laborales",
+      "cantidad": "8.00",
+      "precio": "145.00",
+      "importe": "1160.00"
+    },
+    {
+      "concepto_contiene": "Operador de carretillas elevadoras",
+      "cantidad": "5.00",
+      "precio": "95.00",
+      "importe": "475.00"
+    }
+  ],
+  "desglose": [],
+  "base_imponible": "1635.00",
+  "cuota_iva": "0.00",
+  "total_factura": "1635.00",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "pedido": "PO-55120",
+    "expediente": "EXP-FOR-26/0712"
+  },
+  "iban": "ES0011112222333344445555",
+  "forma_pago_contiene": "Transferencia a la vista",
+  "indicios_esperados": [
+    "exencion"
+  ],
+  "notas": "Factura propia de un centro de formación autorizado (preparatorio) con operación EXENTA: leyenda 'Exenta de IVA art. 20.Uno.9º LIVA'; la columna IVA dice 'Exento' y la cuota es 0,00 (desglose vacío, cuota_iva 0.00, total = base). Debe aparecer el indicio de exención. Página US Letter. Distractores: fechas de impartición del curso en el segundo renglón de cada concepto, IBAN con guiones (ES00-1111-...) y separador ' - ' en la forma de pago."
+}

@@ -1,0 +1,64 @@
+{
+  "archivo": "var_05_presupuesto_courier.pdf",
+  "estilo": "PRESUPUESTO en Courier (ERP de impresión matricial): renglones de ancho fijo, datos 'ETIQUETA : valor', cliente en ventana sin etiqueta, tabla CANT./DESCRIPCIÓN/P.UNIT./IMPORTE con cantidad delante y conceptos en dos renglones, totales con I.V.A. y sufijo EUR, fecha dd/mm/yy",
+  "empresa_nif": "B27334457",
+  "tipo_documento": "presupuesto",
+  "situacion_esperada": "preparatorio",
+  "numero": "P-2026-0091",
+  "fecha": "2026-11-06",
+  "emisor": {
+    "nombre": "Instalaciones Térmicas Brañavella, S.L.",
+    "nif": "B27334457",
+    "domicilio_contiene": "27003"
+  },
+  "destinatario": {
+    "nombre": "Comunidad de Propietarios Olmo Blanco 14",
+    "nif": "H27661230",
+    "domicilio_contiene": "27004"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "CALDERA DE CONDENSACIÓN A GAS NATURAL",
+      "cantidad": "1.00",
+      "precio": "4850.00",
+      "importe": "4850.00"
+    },
+    {
+      "concepto_contiene": "KIT DE EVACUACIÓN DE HUMOS",
+      "cantidad": "1.00",
+      "precio": "690.00",
+      "importe": "690.00"
+    },
+    {
+      "concepto_contiene": "MANO DE OBRA OFICIAL INSTALADOR",
+      "cantidad": "14.50",
+      "precio": "36.00",
+      "importe": "522.00"
+    },
+    {
+      "concepto_contiene": "PUESTA EN MARCHA, LEGALIZACIÓN",
+      "cantidad": "1.00",
+      "precio": "358.00",
+      "importe": "358.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "6420.00",
+      "cuota": "1348.20"
+    }
+  ],
+  "base_imponible": "6420.00",
+  "cuota_iva": "1348.20",
+  "total_factura": "7768.20",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "obra": "SUSTITUCIÓN DE CALDERA COMUNITARIA"
+  },
+  "iban": null,
+  "forma_pago_contiene": "40 % a la aceptación",
+  "indicios_esperados": [],
+  "notas": "Presupuesto propio (documento preparatorio, tipo 'presupuesto'): no es una factura y no lleva IBAN. Todo en Courier con columnas de ancho fijo y mayúsculas. Cliente comunidad de propietarios (CIF H) en ventana sin etiqueta. Distractores: 'VÁLIDO HASTA : 06/12/26', código de cliente 000318 y la advertencia 'ESTE DOCUMENTO NO TIENE VALIDEZ COMO FACTURA'. El total se rotula 'TOTAL PRESUPUESTO'."
+}

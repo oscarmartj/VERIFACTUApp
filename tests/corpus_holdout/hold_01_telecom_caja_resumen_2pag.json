@@ -1,0 +1,72 @@
+{
+  "archivo": "hold_01_telecom_caja_resumen_2pag.pdf",
+  "estilo": "Compañía de telecomunicaciones (estilo factura de suministros): marca comercial en cabecera y razón social SOLO en el pie, gran caja-resumen 'IMPORTE TOTAL' arriba a la derecha con Nº/fecha/periodo/contrato, bloque 'Titular del contrato' + dirección de instalación, resumen por categorías y gráfico de evolución en pág. 1, detalle de conceptos con precio a 4 decimales en pág. 2, línea de descuento negativa, domiciliación con cuenta enmascarada, Helvetica, A4",
+  "empresa_nif": "B50731488",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "OND-2611-004517",
+  "fecha": "2026-11-03",
+  "emisor": {
+    "nombre": "Redes Ondalia del Cierzo, S.L.",
+    "nif": "B50731488",
+    "domicilio_contiene": "50197"
+  },
+  "destinatario": {
+    "nombre": "Gestoría Moncayo Albarracín, S.L.",
+    "nif": "B50914274",
+    "domicilio_contiene": "50014"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Cuota Fibra Empresa 600 Mb",
+      "cantidad": "1.00",
+      "precio": "39.90",
+      "importe": "39.90"
+    },
+    {
+      "concepto_contiene": "Líneas móviles Tarifa Pyme",
+      "cantidad": "3.00",
+      "precio": "12.50",
+      "importe": "37.50"
+    },
+    {
+      "concepto_contiene": "Centralita virtual en la nube",
+      "cantidad": "5.00",
+      "precio": "4.00",
+      "importe": "20.00"
+    },
+    {
+      "concepto_contiene": "Llamadas fuera de bono",
+      "cantidad": null,
+      "precio": null,
+      "importe": "6.35"
+    },
+    {
+      "concepto_contiene": "Descuento fidelización",
+      "cantidad": null,
+      "precio": null,
+      "importe": "-3.99"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "99.76",
+      "cuota": "20.95"
+    }
+  ],
+  "base_imponible": "99.76",
+  "cuota_iva": "20.95",
+  "total_factura": "120.71",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "contrato": "CT-77821-B"
+  },
+  "iban": null,
+  "forma_pago_contiene": "Domiciliación bancaria",
+  "indicios_esperados": [
+    "descuento"
+  ],
+  "notas": "Factura propia (la empresa usuaria es la operadora) sin marcas VERI*FACTU: documento preparatorio. Trampas: la razón social y el CIF del emisor solo aparecen en el pie (la cabecera muestra la marca 'ondalia'); el importe total aparece en grande en la caja-resumen separado de su etiqueta; hay tres direcciones (fiscal del titular 50014, instalación 50015 y la del emisor 50197 en el pie); distractores de fecha (periodo 01.10.2026-31.10.2026 y fecha de cargo 13.11.2026), Nº de cliente 0048213, importes del resumen por categorías (97,40 / 6,35 / -3,99) y del gráfico de evolución (meses anteriores). Precios unitarios con 4 decimales (39,9000). La línea de descuento es negativa (-3,99) y forma parte de la base. La cuenta de domiciliación está enmascarada: no hay IBAN extraíble (iban null). Cuota 99,76 x 21 % = 20,9496 -> 20,95."
+}

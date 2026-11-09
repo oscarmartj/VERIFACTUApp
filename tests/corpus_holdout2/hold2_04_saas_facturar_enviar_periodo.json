@@ -1,0 +1,72 @@
+{
+  "archivo": "hold2_04_saas_facturar_enviar_periodo.pdf",
+  "estilo": "Factura de suscripción SaaS al estilo de las plataformas de facturación: logotipo cuadrado con marca 'nubaria', título 'Factura' grande a la derecha con bloque de metadatos etiqueta a la izquierda / valor alineado a la derecha (Nº de factura, Fecha de factura en formato largo, Fecha de vencimiento, ID de cliente, Nº de pedido (PO), Contrato de suscripción, Periodo de servicio), dos bloques 'Facturar a' / 'Enviar a' con direcciones distintas, tabla Descripción | Periodo | Cant. | Precio unit. | Importe con descripción en negrita y detalle gris, NIF-IVA del emisor con prefijo ES, 'Importe adeudado' en banda de color, DejaVu Sans (TrueType), US Letter",
+  "empresa_nif": "B46593182",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "NB-2026-110482",
+  "fecha": "2026-11-01",
+  "emisor": {
+    "nombre": "Nubaria Software de Gestión, S.L.",
+    "nif": "B46593182",
+    "domicilio_contiene": "46024"
+  },
+  "destinatario": {
+    "nombre": "Asesores Turianos Albufera, S.L.",
+    "nif": "B97342612",
+    "domicilio_contiene": "46005"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Plan Profesional",
+      "cantidad": "25.00",
+      "precio": "18.00",
+      "importe": "450.00"
+    },
+    {
+      "concepto_contiene": "Licencias adicionales prorrateadas",
+      "cantidad": "4.00",
+      "precio": "9.00",
+      "importe": "36.00"
+    },
+    {
+      "concepto_contiene": "Módulo de conciliación bancaria",
+      "cantidad": "1.00",
+      "precio": "59.00",
+      "importe": "59.00"
+    },
+    {
+      "concepto_contiene": "Almacenamiento adicional 100 GB",
+      "cantidad": "3.00",
+      "precio": "4.50",
+      "importe": "13.50"
+    },
+    {
+      "concepto_contiene": "Implantación y formación remota",
+      "cantidad": "6.00",
+      "precio": "55.00",
+      "importe": "330.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "888.50",
+      "cuota": "186.59"
+    }
+  ],
+  "base_imponible": "888.50",
+  "cuota_iva": "186.59",
+  "total_factura": "1075.09",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "pedido": "PO-ATA-2611",
+    "contrato": "SUB-2025-00841",
+    "periodo": "01/11/2026 - 30/11/2026"
+  },
+  "iban": "ES0044445555666677774601",
+  "forma_pago_contiene": "Transferencia bancaria",
+  "indicios_esperados": [],
+  "notas": "Factura propia de la empresa de software sin marcas VERI*FACTU: documento preparatorio. Trampas: bloques 'Facturar a' (domicilio fiscal 46005 València, el esperado) y 'Enviar a' (oficina de Paterna 46988, distractor) con el mismo nombre de cliente; fecha en formato largo '1 de noviembre de 2026' y vencimiento '16 de noviembre de 2026'; columna Periodo con fechas en cada línea (una línea prorrateada del mes anterior, 16/10/2026 - 31/10/2026, y otra 'octubre 2026'); el NIF del emisor se imprime como NIF-IVA con prefijo ES (ESB…) y sin prefijo en el pie; ID de cliente CUS-00841 y BIC como distractores. Referencias: pedido del cliente (PO), contrato de suscripción y periodo de servicio del bloque de metadatos. Base 888,50 x 21 % = 186,585 -> 186,59 (redondeo half-up; half-even daría 186,58); total 1.075,09."
+}

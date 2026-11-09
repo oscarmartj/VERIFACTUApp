@@ -1,0 +1,57 @@
+{
+  "archivo": "obra_05_rectificativa.pdf",
+  "estilo": "Rectificativa por diferencias: rejilla 'etiqueta - valor' con factura rectificada, importes negativos (cantidad negativa en una línea), resumen en fila de cabecera y frase final con el total",
+  "empresa_nif": "B73402182",
+  "tipo_documento": "rectificativa",
+  "situacion_esperada": "preparatorio",
+  "numero": "R-004/26",
+  "fecha": "2026-11-06",
+  "emisor": {
+    "nombre": "CASTREDO ARQUITECTURA TÉCNICA Y SEGURIDAD, S.L.",
+    "nif": "B73402182",
+    "domicilio_contiene": "30004"
+  },
+  "destinatario": {
+    "nombre": "GRUPO INMOBILIARIO ALCAZÉN, S.A.",
+    "nif": "A30586143",
+    "domicilio_contiene": "30008"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Abono del exceso certificado",
+      "cantidad": "1.00",
+      "precio": "-640.00",
+      "importe": "-640.00"
+    },
+    {
+      "concepto_contiene": "facturadas en exceso",
+      "cantidad": "-6.00",
+      "precio": "45.00",
+      "importe": "-270.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "-910.00",
+      "cuota": "-191.10"
+    }
+  ],
+  "base_imponible": "-910.00",
+  "cuota_iva": "-191.10",
+  "total_factura": "-1101.10",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "obra": "EDIFICIO ALCAZÉN CENTRO (32 VIVIENDAS Y LOCAL COMERCIAL)",
+    "certificacion": "6",
+    "pedido": "ALC-PED-26/0091",
+    "partida_presupuestaria": "PP-0402-117"
+  },
+  "iban": "ES0099990001234567890123",
+  "forma_pago_contiene": "Compensación en la próxima certificación",
+  "indicios_esperados": [
+    "rectificativa"
+  ],
+  "notas": "Rectifica la factura 0187/26 de 30-09-2026 (no hay clave de referencias para la factura rectificada; su fecha NO es la fecha del documento). Rectificación por diferencias con importes negativos: línea 1 con precio negativo y línea 2 con cantidad negativa (-6,00 × 45,00). Emisor y destinatario con domicilio en Murcia (30004 / 30008). El IBAN es del emisor aunque el importe es a favor del cliente."
+}

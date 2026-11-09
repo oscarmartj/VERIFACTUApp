@@ -1,0 +1,16 @@
+# Despliegue de una sola instancia. Ponga delante un proxy HTTPS (Caddy/nginx) con acceso restringido.
+services:
+  facturas:
+    build: .
+    restart: unless-stopped
+    ports: ["127.0.0.1:8000:8000"]
+    environment:
+      VERIFACTU_PERMITIR_PRUEBAS_AEAT: "0"   # 1 para habilitar el entorno de pruebas de la AEAT
+      VERIFACTU_PERMITIR_PRODUCCION: "0"     # 1 solo tras completar docs/pendientes-produccion.md
+    volumes:
+      - datos:/datos          # base de datos y almacén de documentos
+      - diario:/diario        # diario de recuperación: en otro disco/volumen que /datos
+      - ./secretos:/secretos  # clave maestra (fuera de las copias de la base de datos)
+volumes:
+  datos: {}
+  diario: {}

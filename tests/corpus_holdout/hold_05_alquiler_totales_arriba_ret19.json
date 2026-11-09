@@ -1,0 +1,61 @@
+{
+  "archivo": "hold_05_alquiler_totales_arriba_ret19.pdf",
+  "estilo": "Factura de alquiler de local comercial emitida por una sociedad patrimonial: bloque de TOTALES ARRIBA, justo bajo la cabecera, como tabla de 5 columnas (Base imponible | IVA 21 % | Total factura | Retención 19 % | Total a pagar) con los valores en la fila de abajo; datos con separador ' - '; 'Arrendatario' con domicilio fiscal distinto del inmueble arrendado; conceptos sin cantidad ni precio; importes sin punto de miles; Courier + Helvetica, A4",
+  "empresa_nif": "B33924176",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "ALQ/2026/011",
+  "fecha": "2026-11-01",
+  "emisor": {
+    "nombre": "Patrimonial Somoza Ibarrola, S.L.",
+    "nif": "B33924176",
+    "domicilio_contiene": "33012"
+  },
+  "destinatario": {
+    "nombre": "Veterinaria Nalón Azabache, S.L.P.",
+    "nif": "B33184755",
+    "domicilio_contiene": "33930"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Renta mensual noviembre 2026",
+      "cantidad": null,
+      "precio": null,
+      "importe": "1150.00"
+    },
+    {
+      "concepto_contiene": "Gastos de comunidad",
+      "cantidad": null,
+      "precio": null,
+      "importe": "85.00"
+    },
+    {
+      "concepto_contiene": "Repercusión IBI 2026",
+      "cantidad": null,
+      "precio": null,
+      "importe": "46.25"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "1281.25",
+      "cuota": "269.06"
+    }
+  ],
+  "base_imponible": "1281.25",
+  "cuota_iva": "269.06",
+  "total_factura": "1550.31",
+  "retencion": {
+    "porcentaje": "19.00",
+    "importe": "243.44"
+  },
+  "total_a_pagar": "1306.87",
+  "referencias": {
+    "contrato": "ARR-OV-2024-03"
+  },
+  "iban": "ES1234560000111122223333",
+  "forma_pago_contiene": "Transferencia bancaria",
+  "indicios_esperados": [],
+  "notas": "Factura propia de una sociedad patrimonial (arrendadora) sin marcas VERI*FACTU: documento preparatorio. Trampas: el bloque de totales está ARRIBA, antes de las partes y de los conceptos, como fila de cabeceras con los valores en la fila inferior; la retención (19 %, arrendamiento de inmueble urbano, a cuenta del Impuesto sobre Sociedades) se rotula 'Retención 19 %' sin 'IRPF' y se muestra en negativo; importes sin punto de miles (1281,25); el inmueble arrendado (Calle Peñavieja 21, 33012 Oviedo) está junto al domicilio del emisor (Calle Peñavieja 19, 33012) y no es el domicilio del arrendatario (33930 Langreo); fecha del contrato 15-03-2024 como distractor. Base 1281,25 x 21 % = 269,0625 -> 269,06; retención 243,4375 -> 243,44; total a pagar 1306,87."
+}

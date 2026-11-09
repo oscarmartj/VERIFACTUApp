@@ -1,0 +1,84 @@
+{
+  "archivo": "hold2_07_apaisada_8_columnas_lotes.pdf",
+  "estilo": "Factura APAISADA (A4 horizontal) de una cooperativa de suministros agrarios: razón social en mayúsculas arriba a la izquierda, 'FACTURA' y metadatos con separador ' - ' alineados a la derecha (Nº factura - / Fecha - / Su pedido - / Albarán - / Vencimiento -), cajas 'DESTINATARIO' y 'DIRECCIÓN DE ENTREGA', tabla con rejilla completa de 8 columnas Código | Descripción | Lote | Uds. | Precio ud. | Dto. % | IVA % | Importe con descripciones largas de 2-3 líneas, cuadro de IVA por tipo (10 % y 21 %), suma bruta y descuentos como distractores, caja de totales, fecha dd.mm.aaaa, Helvetica 8,5 pt",
+  "empresa_nif": "F06472815",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "TB/26/02871",
+  "fecha": "2026-10-30",
+  "emisor": {
+    "nombre": "Suministros Agrarios Tierra de Barros, S. Coop.",
+    "nif": "F06472815",
+    "domicilio_contiene": "06200"
+  },
+  "destinatario": {
+    "nombre": "Viveros Hermanos Zurbarán Lobón, S.L.",
+    "nif": "B06195739",
+    "domicilio_contiene": "06498"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Semilla de tomate híbrido",
+      "cantidad": "12.00",
+      "precio": "38.50",
+      "importe": "438.90"
+    },
+    {
+      "concepto_contiene": "Plantón de pimiento italiano",
+      "cantidad": "25.00",
+      "precio": "21.60",
+      "importe": "540.00"
+    },
+    {
+      "concepto_contiene": "Sustrato de fibra de coco",
+      "cantidad": "40.00",
+      "precio": "9.75",
+      "importe": "351.00"
+    },
+    {
+      "concepto_contiene": "Bandeja de alveolos de poliestireno",
+      "cantidad": "150.00",
+      "precio": "1.18",
+      "importe": "177.00"
+    },
+    {
+      "concepto_contiene": "Fertilizante hidrosoluble NPK",
+      "cantidad": "8.00",
+      "precio": "46.20",
+      "importe": "341.88"
+    },
+    {
+      "concepto_contiene": "Tubería de riego por goteo",
+      "cantidad": "3.00",
+      "precio": "112.40",
+      "importe": "337.20"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "10.00",
+      "base": "978.90",
+      "cuota": "97.89"
+    },
+    {
+      "tipo_iva": "21.00",
+      "base": "1207.08",
+      "cuota": "253.49"
+    }
+  ],
+  "base_imponible": "2185.98",
+  "cuota_iva": "351.38",
+  "total_factura": "2537.36",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "pedido": "PED-VZ-0458",
+    "albaran": "ALB-26-3312"
+  },
+  "iban": "ES0066667777888899990601",
+  "forma_pago_contiene": "Transferencia bancaria a 60 días",
+  "indicios_esperados": [
+    "descuento"
+  ],
+  "notas": "Factura propia de la cooperativa sin marcas VERI*FACTU: documento preparatorio. Página apaisada con 8 columnas y descripciones largas que ocupan 2-3 renglones dentro de la celda (concepto_contiene = comienzo del primer renglón); columna de lote alfanumérico (L26-0871...) y de código (SEM-TOM-0412...) junto a la descripción; descripciones con números (1.000 semillas, 0,5 mS/cm, 15-15-15, 60 x 40 cm, 2 L/h). Columna Dto. % en tres líneas (5,00 / 10,00 / 7,50): el precio esperado es el unitario sin descuento y el importe es neto (12 x 38,50 = 462,00 - 5 % = 438,90; 40 x 9,75 = 390,00 - 10 % = 351,00; 8 x 46,20 = 369,60 - 7,5 % = 341,88). Dos tipos de IVA por línea (10 % semillas y plantones; 21 % resto). Distractores: suma bruta 2.275,80 y descuentos -89,82, dirección de entrega en otra localidad (06480 Montijo), bultos y peso, vencimiento 29.12.2026. 10 %: 978,90 -> 97,89; 21 %: 1.207,08 x 21 % = 253,4868 -> 253,49; base 2.185,98, IVA 351,38, total 2.537,36."
+}

@@ -1,0 +1,63 @@
+{
+  "archivo": "hold_04_emisor_derecha_carpinteria_irpf1.pdf",
+  "estilo": "Carpintero autónomo: bloque del emisor alineado a la DERECHA arriba (nombre comercial + titular + DNI con guion), cliente a la IZQUIERDA en ventana de sobre SIN etiqueta y en mayúsculas, datos con separador '. -' (Núm. - / Fecha. - / Obra. -), tabla con rejilla Código|Descripción|Cant.|Precio|Dto. %|Importe y concepto multilínea, totales apilados con puntos guía, I.V.A. 21 % y retención IRPF 1 % (estimación objetiva), Times, A4",
+  "empresa_nif": "09384726J",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "2026-0112",
+  "fecha": "2026-10-21",
+  "emisor": {
+    "nombre": "Teodoro Arrabal Quintanilla",
+    "nif": "09384726J",
+    "domicilio_contiene": "24400"
+  },
+  "destinatario": {
+    "nombre": "Hostelería Valdeprados del Bierzo, S.L.",
+    "nif": "B24618738",
+    "domicilio_contiene": "24500"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Puerta de paso lacada",
+      "cantidad": "4.00",
+      "precio": "185.00",
+      "importe": "703.00"
+    },
+    {
+      "concepto_contiene": "Revestimiento de barra en madera",
+      "cantidad": "6.40",
+      "precio": "96.50",
+      "importe": "617.60"
+    },
+    {
+      "concepto_contiene": "Mano de obra de montaje",
+      "cantidad": "9.00",
+      "precio": "32.00",
+      "importe": "288.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "1608.60",
+      "cuota": "337.81"
+    }
+  ],
+  "base_imponible": "1608.60",
+  "cuota_iva": "337.81",
+  "total_factura": "1946.41",
+  "retencion": {
+    "porcentaje": "1.00",
+    "importe": "16.09"
+  },
+  "total_a_pagar": "1930.32",
+  "referencias": {
+    "obra": "Reforma del comedor de planta baja"
+  },
+  "iban": "ES0000001111222233334444",
+  "forma_pago_contiene": "Transferencia",
+  "indicios_esperados": [
+    "descuento"
+  ],
+  "notas": "Factura propia de un carpintero autónomo (persona física, DNI con cero inicial impreso con guion '09384726-…') sin marcas VERI*FACTU: documento preparatorio. Trampas: el emisor está a la derecha y el cliente a la izquierda sin ninguna etiqueta (ventana de sobre, en mayúsculas); el nombre comercial 'CARPINTERÍA ARRABAL' precede al nombre del titular; mención a un presupuesto aceptado (nº P-2026-031, 02/09/2026) que no convierte el documento en presupuesto; separador '. -'; columna Dto. % (5 % en la primera línea: 4 x 185,00 = 740,00 - 5 % = 703,00; el precio esperado es el unitario sin descuento); cantidad decimal 6,40 m; totales con puntos guía. Retención IRPF 1 % por actividad en estimación objetiva: 1.608,60 x 1 % = 16,086 -> 16,09; IVA 337,806 -> 337,81; 'Líquido a pagar' 1.930,32."
+}

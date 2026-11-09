@@ -1,0 +1,215 @@
+{
+  "archivo": "erp_02_mayorista_2paginas_recibida.pdf",
+  "estilo": "ERP de mayorista (Times): 2 páginas, metadatos en rejilla de cabeceras con valores debajo, 'Facturar a' + 'Dirección de entrega', líneas agrupadas por albarán con columna Ud., cantidades en kg con 3 decimales, 'Suma y sigue'/'Suma anterior', desglose 10 % + 21 % y fila de totales en la página 2, emisor (razón social, CIF, domicilio) solo en el pie, fecha dd.mm.yyyy, importes 1.234,56 sin €",
+  "empresa_nif": "B47182639",
+  "tipo_documento": "factura",
+  "situacion_esperada": "recibida",
+  "numero": "FV26-004512",
+  "fecha": "2026-11-05",
+  "emisor": {
+    "nombre": "Ultramarinos Mayoristas Riberaseca, S.A.",
+    "nif": "A09513748",
+    "domicilio_contiene": "09007"
+  },
+  "destinatario": {
+    "nombre": "Casa de Comidas La Alcazaba de Tiedra, S.L.",
+    "nif": "B47182639",
+    "domicilio_contiene": "47123"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Aceite de girasol alto",
+      "cantidad": "6.00",
+      "precio": "9.85",
+      "importe": "59.10"
+    },
+    {
+      "concepto_contiene": "Vinagre de vino blanco",
+      "cantidad": "12.00",
+      "precio": "0.79",
+      "importe": "9.48"
+    },
+    {
+      "concepto_contiene": "Azúcar blanco 1 kg",
+      "cantidad": "10.00",
+      "precio": "1.15",
+      "importe": "11.50"
+    },
+    {
+      "concepto_contiene": "Atún claro en aceite",
+      "cantidad": "8.00",
+      "precio": "11.40",
+      "importe": "86.64"
+    },
+    {
+      "concepto_contiene": "Chorizo de León sarta",
+      "cantidad": "4.35",
+      "precio": "8.95",
+      "importe": "38.93"
+    },
+    {
+      "concepto_contiene": "Jamón serrano bodega deshuesado",
+      "cantidad": "7.82",
+      "precio": "10.60",
+      "importe": "80.41"
+    },
+    {
+      "concepto_contiene": "Lomo de cerdo fresco",
+      "cantidad": "12.50",
+      "precio": "6.45",
+      "importe": "80.63"
+    },
+    {
+      "concepto_contiene": "Pechuga de pollo fileteada",
+      "cantidad": "9.75",
+      "precio": "7.20",
+      "importe": "70.20"
+    },
+    {
+      "concepto_contiene": "Merluza congelada en rodajas,",
+      "cantidad": "3.00",
+      "precio": "34.50",
+      "importe": "103.50"
+    },
+    {
+      "concepto_contiene": "Café molido mezcla 70/30,",
+      "cantidad": "5.00",
+      "precio": "12.30",
+      "importe": "55.35"
+    },
+    {
+      "concepto_contiene": "Agua mineral 1,5 l",
+      "cantidad": "10.00",
+      "precio": "2.10",
+      "importe": "21.00"
+    },
+    {
+      "concepto_contiene": "Refresco de cola lata",
+      "cantidad": "4.00",
+      "precio": "11.90",
+      "importe": "45.22"
+    },
+    {
+      "concepto_contiene": "Vino tinto D.O. crianza,",
+      "cantidad": "24.00",
+      "precio": "4.75",
+      "importe": "104.88"
+    },
+    {
+      "concepto_contiene": "Cerveza lager barril 30",
+      "cantidad": "2.00",
+      "precio": "68.00",
+      "importe": "136.00"
+    },
+    {
+      "concepto_contiene": "Detergente lavavajillas industrial 12",
+      "cantidad": "2.00",
+      "precio": "27.40",
+      "importe": "54.80"
+    },
+    {
+      "concepto_contiene": "Lejía apta para la",
+      "cantidad": "6.00",
+      "precio": "2.35",
+      "importe": "14.10"
+    },
+    {
+      "concepto_contiene": "Servilletas de papel 2",
+      "cantidad": "3.00",
+      "precio": "18.90",
+      "importe": "56.70"
+    },
+    {
+      "concepto_contiene": "Film transparente 45 cm",
+      "cantidad": "4.00",
+      "precio": "6.80",
+      "importe": "27.20"
+    },
+    {
+      "concepto_contiene": "Bolsas de basura 85x105",
+      "cantidad": "15.00",
+      "precio": "1.95",
+      "importe": "26.33"
+    },
+    {
+      "concepto_contiene": "Guantes de nitrilo talla",
+      "cantidad": "5.00",
+      "precio": "7.45",
+      "importe": "37.25"
+    },
+    {
+      "concepto_contiene": "Salchichón ibérico (peso variable)",
+      "cantidad": "2.18",
+      "precio": "14.30",
+      "importe": "31.17"
+    },
+    {
+      "concepto_contiene": "Sal marina gruesa 1",
+      "cantidad": "6.00",
+      "precio": "0.65",
+      "importe": "3.90"
+    },
+    {
+      "concepto_contiene": "Chocolate a la taza",
+      "cantidad": "3.00",
+      "precio": "6.10",
+      "importe": "18.30"
+    },
+    {
+      "concepto_contiene": "Calamar limpio congelado, caja",
+      "cantidad": "2.00",
+      "precio": "29.80",
+      "importe": "56.62"
+    },
+    {
+      "concepto_contiene": "Carne picada de ternera",
+      "cantidad": "6.40",
+      "precio": "9.15",
+      "importe": "58.56"
+    },
+    {
+      "concepto_contiene": "Néctar de naranja 1",
+      "cantidad": "3.00",
+      "precio": "10.20",
+      "importe": "30.60"
+    },
+    {
+      "concepto_contiene": "Vino blanco D.O. verdejo,",
+      "cantidad": "18.00",
+      "precio": "5.20",
+      "importe": "86.11"
+    },
+    {
+      "concepto_contiene": "Mejillones en escabeche, lata",
+      "cantidad": "12.00",
+      "precio": "3.95",
+      "importe": "47.40"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "10.00",
+      "base": "908.51",
+      "cuota": "90.85"
+    },
+    {
+      "tipo_iva": "21.00",
+      "base": "543.37",
+      "cuota": "114.11"
+    }
+  ],
+  "base_imponible": "1451.88",
+  "cuota_iva": "204.96",
+  "total_factura": "1656.84",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "pedido": "PC-88213"
+  },
+  "iban": "ES1234567890123456789012",
+  "forma_pago_contiene": "Transferencia 30 días",
+  "indicios_esperados": [
+    "descuento"
+  ],
+  "notas": "Factura de proveedor recibida por la empresa usuaria (destinataria, CIF con guion). 28 líneas en dos albaranes; la página 1 termina con 'Suma y sigue' (importe parcial que NO es la base) y la página 2 empieza con 'Suma anterior' y repite la cabecera. Distractores: dirección de entrega en Tordesillas (47100), código de cliente 430.0217, fechas de albarán, vencimiento 05.12.2026. Cantidades por peso con 3 decimales (12,500 kg x 6,45 = 80,625 -> 80,63 half-up). El nombre comercial 'RIBERASECA' encabeza; la razón social, el CIF y el domicilio fiscal del emisor solo figuran en el pie de cada página."
+}

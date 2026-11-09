@@ -1,0 +1,89 @@
+{
+  "archivo": "hold2_06_recibida_suministro_electrico.pdf",
+  "estilo": "Factura RECIBIDA de una comercializadora eléctrica (2 páginas): marca 'valdeluz energía' en cabecera, caja 'Datos de la factura' y caja verde 'Importe total de la factura' grande, bloque 'Titular del contrato' con dirección fiscal y dirección de suministro distintas y CUPS, 'Resumen de la factura' por conceptos agregados con puntos guía, barra '¿A qué se destina el importe?' con importes y porcentajes, gráfico de barras de 13 meses de consumo; en pág. 2 'Detalle de la factura' Concepto | Cálculo | Importe con precios de 6 decimales, tabla de lecturas, maxímetro, datos del contrato y domiciliación con cuenta enmascarada, CIF del emisor solo en el pie, Helvetica, A4",
+  "empresa_nif": "B09418757",
+  "tipo_documento": "factura",
+  "situacion_esperada": "recibida",
+  "numero": "FE26-0338271",
+  "fecha": "2026-11-05",
+  "emisor": {
+    "nombre": "Valdeluz Energía Comercializadora, S.A.",
+    "nif": "A87291456",
+    "domicilio_contiene": "28050"
+  },
+  "destinatario": {
+    "nombre": "Obrador Panadero Trigal de Aranda, S.L.",
+    "nif": "B09418757",
+    "domicilio_contiene": "09400"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Término de potencia P1",
+      "cantidad": null,
+      "precio": null,
+      "importe": "26.49"
+    },
+    {
+      "concepto_contiene": "Término de potencia P2",
+      "cantidad": null,
+      "precio": null,
+      "importe": "2.80"
+    },
+    {
+      "concepto_contiene": "Término de energía P1",
+      "cantidad": null,
+      "precio": null,
+      "importe": "77.22"
+    },
+    {
+      "concepto_contiene": "Término de energía P2",
+      "cantidad": null,
+      "precio": null,
+      "importe": "76.05"
+    },
+    {
+      "concepto_contiene": "Término de energía P3",
+      "cantidad": null,
+      "precio": null,
+      "importe": "77.31"
+    },
+    {
+      "concepto_contiene": "Financiación del bono social",
+      "cantidad": null,
+      "precio": null,
+      "importe": "1.19"
+    },
+    {
+      "concepto_contiene": "Impuesto sobre la electricidad",
+      "cantidad": null,
+      "precio": null,
+      "importe": "13.35"
+    },
+    {
+      "concepto_contiene": "Alquiler del equipo de medida",
+      "cantidad": null,
+      "precio": null,
+      "importe": "0.83"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "275.24",
+      "cuota": "57.80"
+    }
+  ],
+  "base_imponible": "275.24",
+  "cuota_iva": "57.80",
+  "total_factura": "333.04",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "contrato": "VLZ-2041-778120",
+    "periodo": "01/10/2026 - 31/10/2026"
+  },
+  "iban": null,
+  "forma_pago_contiene": "Domiciliación bancaria",
+  "indicios_esperados": [],
+  "notas": "La sube la empresa DESTINATARIA (obrador, titular del contrato): factura recibida (empresa_nif = destinatario). Las líneas son las 8 filas del 'Detalle de la factura' (pág. 2) cuyo cálculo combina potencia x días x precio o kWh x precio con 6 decimales: por eso cantidad y precio son null. El Impuesto sobre la electricidad y el alquiler del equipo forman parte de la base del IVA (21 %). Números que NO son líneas: resumen agregado (potencia 29,29, energía 230,58), base del impuesto eléctrico (261,06), destino del importe (peajes 91,80, impuestos, energía y comercialización, porcentajes), consumo 1.640 kWh, medias diarias (52,90 kWh y 10,74 €), lecturas de contador, histórico de 13 meses, maxímetro (8,74 / 5,12 kW), potencias contratadas 9,90 kW, mix de origen y emisiones. Fechas distractoras: periodo 01/10/2026 - 31/10/2026, fecha de cargo 20/11/2026, lecturas 30/09/2026 y 31/10/2026, alta 14/02/2024. Dos direcciones del titular: fiscal (09400 Aranda de Duero, la esperada) y de suministro (09471 Fuentespina). La cuenta de domiciliación está enmascarada: iban null. El CIF del emisor solo aparece en el pie. Base 275,24 x 21 % = 57,8004 -> 57,80; total 333,04."
+}

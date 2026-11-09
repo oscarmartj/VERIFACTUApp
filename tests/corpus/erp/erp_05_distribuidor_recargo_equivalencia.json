@@ -1,0 +1,108 @@
+{
+  "archivo": "erp_05_distribuidor_recargo_equivalencia.pdf",
+  "estilo": "ERP de distribución alimentaria: logotipo + emisor arriba-izquierda, metadatos en tabla de dos columnas con rótulos sombreados, caja 'Cliente' con código y régimen, columna R.E. % en las líneas, cuadro de desglose estilo a3 (Base/% IVA/Cuota IVA/% R.E./Cuota R.E.) con 10 % y 21 %, totales apilados con recargo, IBAN del cliente enmascarado, Helvetica 8 pt, A4",
+  "empresa_nif": "73519264V",
+  "tipo_documento": "factura",
+  "situacion_esperada": "recibida",
+  "numero": "SB26/10592",
+  "fecha": "2026-10-30",
+  "emisor": {
+    "nombre": "Distribuciones Alimentarias Somontano Bajo, S.A.",
+    "nif": "A22163901",
+    "domicilio_contiene": "22300"
+  },
+  "destinatario": {
+    "nombre": "Rosendo Alcaraz Pinilla",
+    "nif": "73519264V",
+    "domicilio_contiene": "22430"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Refresco de naranja 2",
+      "cantidad": "10.00",
+      "precio": "6.30",
+      "importe": "60.48"
+    },
+    {
+      "concepto_contiene": "Agua mineral natural 1,5",
+      "cantidad": "20.00",
+      "precio": "1.98",
+      "importe": "39.60"
+    },
+    {
+      "concepto_contiene": "Galletas tipo maría, caja",
+      "cantidad": "24.00",
+      "precio": "1.62",
+      "importe": "38.88"
+    },
+    {
+      "concepto_contiene": "Café soluble descafeinado 200",
+      "cantidad": "12.00",
+      "precio": "5.85",
+      "importe": "66.69"
+    },
+    {
+      "concepto_contiene": "Aceitunas manzanilla rellenas de",
+      "cantidad": "12.00",
+      "precio": "1.45",
+      "importe": "17.40"
+    },
+    {
+      "concepto_contiene": "Cerveza rubia lata 33",
+      "cantidad": "6.00",
+      "precio": "13.45",
+      "importe": "78.28"
+    },
+    {
+      "concepto_contiene": "Vino tinto de mesa",
+      "cantidad": "24.00",
+      "precio": "1.09",
+      "importe": "26.16"
+    },
+    {
+      "concepto_contiene": "Detergente líquido para ropa",
+      "cantidad": "8.00",
+      "precio": "6.75",
+      "importe": "51.30"
+    },
+    {
+      "concepto_contiene": "Suavizante concentrado 2 l",
+      "cantidad": "8.00",
+      "precio": "3.20",
+      "importe": "25.60"
+    },
+    {
+      "concepto_contiene": "Papel higiénico doble capa",
+      "cantidad": "10.00",
+      "precio": "4.35",
+      "importe": "43.50"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "10.00",
+      "base": "223.05",
+      "cuota": "22.31"
+    },
+    {
+      "tipo_iva": "21.00",
+      "base": "224.84",
+      "cuota": "47.22"
+    }
+  ],
+  "base_imponible": "447.89",
+  "cuota_iva": "69.53",
+  "total_factura": "532.23",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "pedido": "PV-26-3318"
+  },
+  "iban": null,
+  "forma_pago_contiene": "Recibo domiciliado a 60 días",
+  "indicios_esperados": [
+    "recargo_equivalencia",
+    "descuento"
+  ],
+  "notas": "Factura de proveedor recibida por un comerciante minorista persona física (usuario, DNI con guion) acogido al recargo de equivalencia. El desglose esperado recoge solo IVA (10 % y 21 %); el recargo va aparte (R.E. 1,40 % sobre 223,05 = 3,12; R.E. 5,20 % sobre 224,84 = 11,69; total R.E. 14,81) y SÍ forma parte del total_factura (447,89 + 69,53 + 14,81 = 532,23), por lo que base + cuota IVA != total. Sin retención (total_a_pagar null). IBAN null: solo figura la cuenta de cargo del cliente enmascarada (ES12 3456 **** **** **** 6677). Distractores: código de cliente 43001588, nombre comercial 'Alimentación Rosendo', vencimiento 29/12/2026, columna R.E. % en cada línea."
+}

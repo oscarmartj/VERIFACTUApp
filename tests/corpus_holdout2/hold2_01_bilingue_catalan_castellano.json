@@ -1,0 +1,71 @@
+{
+  "archivo": "hold2_01_bilingue_catalan_castellano.pdf",
+  "estilo": "Factura bilingüe catalán/castellano de una imprenta de Barcelona: banda superior de color con la razón social en blanco y 'FACTURA / FACTURA', fila de 4 celdas con borde etiqueta-sobre-valor ('Núm. factura / Nº factura', 'Data / Fecha', 'Venciment / Vencimiento', 'Comanda / Pedido'), caja 'Client / Cliente' con fondo y caja 'Forma de pagament / Forma de pago' con el IBAN junto a ella, tabla con cabecera en dos idiomas y conceptos en dos líneas (catalán arriba, castellano en cursiva debajo), totales 'Base imposable / Base imponible', 'Quota d'IVA 21 % / Cuota de IVA 21 %' y 'Total factura' en banda de color, fuente Carlito (TrueType), A4",
+  "empresa_nif": "B08615379",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "FB-2026/0412",
+  "fecha": "2026-11-04",
+  "emisor": {
+    "nombre": "Impremta Fontanella Badia, S.L.",
+    "nif": "B08615379",
+    "domicilio_contiene": "08025"
+  },
+  "destinatario": {
+    "nombre": "Celler Vallmorena del Penedès, S.L.",
+    "nif": "B08274193",
+    "domicilio_contiene": "08720"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Impressió de catàleg comercial",
+      "cantidad": "1500.00",
+      "precio": "1.84",
+      "importe": "2760.00"
+    },
+    {
+      "concepto_contiene": "Etiquetes adhesives per a ampolla",
+      "cantidad": "12000.00",
+      "precio": "0.12",
+      "importe": "1440.00"
+    },
+    {
+      "concepto_contiene": "Disseny i maquetació de fitxes",
+      "cantidad": "16.00",
+      "precio": "35.00",
+      "importe": "560.00"
+    },
+    {
+      "concepto_contiene": "Proves de color certificades",
+      "cantidad": "4.00",
+      "precio": "22.50",
+      "importe": "90.00"
+    },
+    {
+      "concepto_contiene": "Ports i lliurament",
+      "cantidad": "1.00",
+      "precio": "45.00",
+      "importe": "45.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "4895.00",
+      "cuota": "1027.95"
+    }
+  ],
+  "base_imponible": "4895.00",
+  "cuota_iva": "1027.95",
+  "total_factura": "5922.95",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "pedido": "VMP-2026-118",
+    "albaran": "AF-26-0981"
+  },
+  "iban": "ES0011112222333344440801",
+  "forma_pago_contiene": "Transferencia bancaria",
+  "indicios_esperados": [],
+  "notas": "Factura propia de la imprenta (empresa usuaria = emisor) sin marcas VERI*FACTU: documento preparatorio. Todas las etiquetas van en catalán y castellano separadas por ' / '. Los conceptos se imprimen en dos líneas: la primera en catalán (la que recoge concepto_contiene) y la segunda, traducción al castellano en cursiva gris. Cantidades con punto de miles (1.500 y 12.000 unidades) y precio unitario 0,12. Distractores: fecha de vencimiento 04/12/2026 junto a la fecha de emisión, fecha de entrega 30/10/2026 en observaciones, referencia de albarán 'Albarà / Albarán: AF-26-0981' en observaciones (al pie de la tabla) y el IBAN arriba, al lado del cliente. Base 4.895,00 x 21 % = 1.027,95; total 5.922,95."
+}

@@ -1,0 +1,58 @@
+{
+  "archivo": "hold_06_autocares_ud_pu_iva10_frase.pdf",
+  "estilo": "Empresa de autocares: banda de marca de color con nombre comercial y razón social debajo, rejilla 'Nº FACTURA | FECHA' con valores en la fila inferior, caja 'DATOS DEL CLIENTE', tabla 'Ud. | Descripción | P.U. | Total' (cantidad primero) con descripciones multilínea, IVA 10 % (transporte de viajeros), totales en una frase de texto + importe en letra + caja 'TOTAL FACTURA', fecha dd/mm/aa, cliente asociación (NIF G), Helvetica, A4",
+  "empresa_nif": "B09372616",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "A-26/0348",
+  "fecha": "2026-11-05",
+  "emisor": {
+    "nombre": "Viajes en Autocar Hermanos Garrandés, S.L.",
+    "nif": "B09372616",
+    "domicilio_contiene": "09340"
+  },
+  "destinatario": {
+    "nombre": "Asociación Cultural Peña Viajera El Almiar",
+    "nif": "G09583162",
+    "domicilio_contiene": "09002"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Servicio de autocar de 55 plazas",
+      "cantidad": "2.00",
+      "precio": "640.00",
+      "importe": "1280.00"
+    },
+    {
+      "concepto_contiene": "Microbús de 25 plazas",
+      "cantidad": "1.00",
+      "precio": "310.00",
+      "importe": "310.00"
+    },
+    {
+      "concepto_contiene": "Hora de espera adicional",
+      "cantidad": "6.00",
+      "precio": "28.50",
+      "importe": "171.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "10.00",
+      "base": "1761.00",
+      "cuota": "176.10"
+    }
+  ],
+  "base_imponible": "1761.00",
+  "cuota_iva": "176.10",
+  "total_factura": "1937.10",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "pedido": "77/2026"
+  },
+  "iban": "ES0099998888777766665555",
+  "forma_pago_contiene": "Transferencia bancaria",
+  "indicios_esperados": [],
+  "notas": "Factura propia de una empresa de autocares sin marcas VERI*FACTU: documento preparatorio. IVA único del 10 % (transporte de viajeros): 1.761,00 x 10 % = 176,10; total 1.937,10. Trampas: cabecera de tabla abreviada 'Ud. | Descripción | P.U. | Total' con la cantidad en la primera columna; descripciones de 2-3 líneas con una fecha de servicio (24/10/2026) y guiones dentro; nº de factura y fecha en una rejilla con las etiquetas en la fila superior y los valores debajo; fecha corta dd/mm/aa (05/11/26); los totales solo aparecen en una frase de texto y en una caja 'TOTAL FACTURA', además del importe en letra; la palabra 'Total' es también cabecera de columna; nombre comercial 'GARRANDÉS BUS' distinto de la razón social; cliente asociación con NIF G."
+}

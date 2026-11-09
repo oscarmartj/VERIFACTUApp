@@ -1,0 +1,95 @@
+{
+  "archivo": "erp_01_reformas_rejilla_10_21_dto.pdf",
+  "estilo": "ERP de reformas: logotipo arriba-izquierda, rejilla 2x2 (Número/Fecha/Vencimiento/Forma de pago) a la derecha, caja 'Cliente' persona física, tabla Código/Descripción/Cant./Precio/Dto. %/IVA %/Importe con conceptos multilínea, cuadro de desglose 10 % + 21 % y totales apilados con importe bruto y descuentos, 1.234,56 €, Helvetica, A4",
+  "empresa_nif": "B82345174",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "F-2026-00318",
+  "fecha": "2026-11-03",
+  "emisor": {
+    "nombre": "Obras y Reformas Peñaclara, S.L.",
+    "nif": "B82345174",
+    "domicilio_contiene": "28947"
+  },
+  "destinatario": {
+    "nombre": "Marta Quiroga Bermúdez",
+    "nif": "47382915V",
+    "domicilio_contiene": "28019"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Demolición de alicatado y",
+      "cantidad": "1.00",
+      "precio": "480.00",
+      "importe": "480.00"
+    },
+    {
+      "concepto_contiene": "Instalación de fontanería: tomas",
+      "cantidad": "1.00",
+      "precio": "650.00",
+      "importe": "617.50"
+    },
+    {
+      "concepto_contiene": "Azulejo porcelánico 30x60 gris",
+      "cantidad": "18.50",
+      "precio": "24.90",
+      "importe": "414.59"
+    },
+    {
+      "concepto_contiene": "Mano de obra de",
+      "cantidad": "26.00",
+      "precio": "32.00",
+      "importe": "832.00"
+    },
+    {
+      "concepto_contiene": "Montaje de muebles de",
+      "cantidad": "1.00",
+      "precio": "720.00",
+      "importe": "720.00"
+    },
+    {
+      "concepto_contiene": "Electricista: línea independiente para",
+      "cantidad": "3.50",
+      "precio": "38.50",
+      "importe": "134.75"
+    },
+    {
+      "concepto_contiene": "Campana extractora de acero",
+      "cantidad": "1.00",
+      "precio": "289.00",
+      "importe": "245.65"
+    },
+    {
+      "concepto_contiene": "Placa de inducción de",
+      "cantidad": "1.00",
+      "precio": "415.00",
+      "importe": "352.75"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "10.00",
+      "base": "3198.84",
+      "cuota": "319.88"
+    },
+    {
+      "tipo_iva": "21.00",
+      "base": "598.40",
+      "cuota": "125.66"
+    }
+  ],
+  "base_imponible": "3797.24",
+  "cuota_iva": "445.54",
+  "total_factura": "4242.78",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "obra": "Reforma integral de baño y cocina"
+  },
+  "iban": "ES0098765432109876543210",
+  "forma_pago_contiene": "Transferencia bancaria",
+  "indicios_esperados": [
+    "descuento"
+  ],
+  "notas": "Factura de la propia empresa usuaria (emisora) generada con un ERP, sin marcas VERI*FACTU: documento preparatorio. Dos tipos: 10 % (renovación de vivienda de particular) y 21 % (electrodomésticos). Importes de línea con el descuento ya aplicado (18,50 x 24,90 -10 % = 414,585 -> 414,59 half-up). Distractores: 'Importe bruto' y 'Descuentos' antes de la base, vencimiento 03/12/2026, 'Según presupuesto P-2026-0144 aceptado el 02/09/2026' (el documento es una factura, no un presupuesto) y dirección de la obra repetida. Valores de la rejilla debajo de su rótulo."
+}

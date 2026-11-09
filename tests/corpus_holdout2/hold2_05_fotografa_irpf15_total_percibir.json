@@ -1,0 +1,67 @@
+{
+  "archivo": "hold2_05_fotografa_irpf15_total_percibir.pdf",
+  "estilo": "Factura de fotógrafa autónoma (persona física con DNI), maquetación editorial elegante: nombre en versalitas espaciadas centrado con subtítulo en cursiva, título 'FACTURA' muy espaciado, bloques 'Emisora —' y 'Cliente —' a dos columnas, etiquetas con raya ('NIF —', 'Factura nº —', 'Fecha —', 'Proyecto —', 'IBAN —'), tabla sin rejilla con detalle en cursiva bajo cada concepto, totales apilados con IRPF 15 % en negativo y 'Total a percibir' en lugar de 'Total a pagar', fuente Caladea (TrueType), A4",
+  "empresa_nif": "74213958L",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "NC-031/26",
+  "fecha": "2026-10-27",
+  "emisor": {
+    "nombre": "Nerea Cifuentes Albaladejo",
+    "nif": "74213958L",
+    "domicilio_contiene": "29012"
+  },
+  "destinatario": {
+    "nombre": "Comunicación Costa Azahar Ediciones, S.L.",
+    "nif": "B12067484",
+    "domicilio_contiene": "12003"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Sesión fotográfica de producto",
+      "cantidad": "1.00",
+      "precio": "640.00",
+      "importe": "640.00"
+    },
+    {
+      "concepto_contiene": "Retoque avanzado y entrega",
+      "cantidad": "45.00",
+      "precio": "7.50",
+      "importe": "337.50"
+    },
+    {
+      "concepto_contiene": "Licencia de uso editorial",
+      "cantidad": "1.00",
+      "precio": "280.00",
+      "importe": "280.00"
+    },
+    {
+      "concepto_contiene": "Desplazamiento en vehículo propio",
+      "cantidad": "1124.00",
+      "precio": "0.26",
+      "importe": "292.24"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "1549.74",
+      "cuota": "325.45"
+    }
+  ],
+  "base_imponible": "1549.74",
+  "cuota_iva": "325.45",
+  "total_factura": "1875.19",
+  "retencion": {
+    "porcentaje": "15.00",
+    "importe": "232.46"
+  },
+  "total_a_pagar": "1642.73",
+  "referencias": {
+    "proyecto": "CCP-27-04"
+  },
+  "iban": "ES0055556666777788882901",
+  "forma_pago_contiene": "Transferencia bancaria",
+  "indicios_esperados": [],
+  "notas": "Factura propia de una fotógrafa autónoma (persona física, DNI) sin marcas VERI*FACTU: documento preparatorio. Trampas: el nombre comercial de la cabecera ('NEREA CIFUENTES', espaciado) es parcial; el nombre completo y el NIF están en el bloque 'Emisora —'; etiquetas separadas del valor por una raya larga (—); cantidad con punto de miles y unidad ('1.124 km') con precio 0,26; detalle de cada línea en cursiva con fechas y números (21/10/2026, 8 h, 32 referencias, 16 bits); la retención se rotula 'Retención IRPF 15 %' con importe negativo y el líquido se llama 'Total a percibir'. Base 1.549,74 x 21 % = 325,4454 -> 325,45; total factura 1.875,19; IRPF 15 % = 232,461 -> 232,46; total a percibir 1.642,73."
+}

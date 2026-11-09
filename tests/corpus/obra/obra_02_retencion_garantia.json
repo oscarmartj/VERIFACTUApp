@@ -1,0 +1,68 @@
+{
+  "archivo": "obra_02_retencion_garantia.pdf",
+  "estilo": "Contratista en Times: rejilla 'etiqueta. - valor', tabla Código|Cant.|Ud.|Descripción, resumen en fila de cabecera más segunda fila Retención garantía 5 % | LÍQUIDO A PAGAR, fecha dd-mm-yy",
+  "empresa_nif": "B99451023",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "FV26-00047",
+  "fecha": "2026-10-15",
+  "emisor": {
+    "nombre": "EDIFICACIONES TORMARÉN, S.L.",
+    "nif": "B99451023",
+    "domicilio_contiene": "50197"
+  },
+  "destinatario": {
+    "nombre": "ARDANEL INVERSIONES INMOBILIARIAS, S.L.",
+    "nif": "B50338714",
+    "domicilio_contiene": "50012"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Hormigón HA-25/B/20/IIa",
+      "cantidad": "42.50",
+      "precio": "118.40",
+      "importe": "5032.00"
+    },
+    {
+      "concepto_contiene": "Acero corrugado B 500 S",
+      "cantidad": "3860.00",
+      "precio": "1.12",
+      "importe": "4323.20"
+    },
+    {
+      "concepto_contiene": "Fábrica de ladrillo cerámico",
+      "cantidad": "186.75",
+      "precio": "24.65",
+      "importe": "4603.39"
+    },
+    {
+      "concepto_contiene": "Medios auxiliares y protecciones",
+      "cantidad": "1.00",
+      "precio": "1150.00",
+      "importe": "1150.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "15108.59",
+      "cuota": "3172.80"
+    }
+  ],
+  "base_imponible": "15108.59",
+  "cuota_iva": "3172.80",
+  "total_factura": "18281.39",
+  "retencion": null,
+  "total_a_pagar": "17525.96",
+  "referencias": {
+    "obra": "EDIFICIO DE OFICINAS ARDANEL PLAZA (PARCELA T-3)",
+    "contrato": "CO-ARD-2025-014",
+    "certificacion": "4",
+    "pedido": "PED/ARD/2611",
+    "partida_presupuestaria": "OF-305-112"
+  },
+  "iban": "ES1234567890123456789012",
+  "forma_pago_contiene": "Transferencia bancaria a 90 días",
+  "indicios_esperados": [],
+  "notas": "La 'retención por garantía' del 5 % (755,43 € sobre la base) es una retención COMERCIAL pactada en contrato, NO es IRPF: retencion debe ser null y total_factura sigue siendo 18281.39; el líquido a pagar (17525.96) = total − garantía. Ejecución de obra directa al promotor (dueño de obra), sin inversión del sujeto pasivo. Fecha en formato dd-mm-yy. Cantidades con miles (3.860,00) y unidades m³/m²/kg/PA. El emisor solo figura con logotipo arriba; razón social, NIF y domicilio en el pie."
+}

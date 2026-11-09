@@ -1,0 +1,62 @@
+{
+  "archivo": "hold_03_bilingue_es_en_letter_irpf15.pdf",
+  "estilo": "Factura bilingüe español/inglés ('FACTURA / INVOICE'): emisor y cliente en dos columnas ('Emisor / From', 'Cliente / Bill to'), fila de 4 celdas etiqueta-sobre-valor bilingüe, tabla con cabecera en dos líneas (ES arriba, EN abajo) y conceptos bilingües en dos líneas, cantidades con separador de miles (5.120 palabras), totales bilingües apilados con IRPF 15 %, condiciones en dos columnas ES | EN, fecha dd-mm-aa, CIF del cliente con prefijo ES, Helvetica, US Letter",
+  "empresa_nif": "46271839W",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "IC-2026-0119",
+  "fecha": "2026-10-30",
+  "emisor": {
+    "nombre": "Irene Castañar Wolff",
+    "nif": "46271839W",
+    "domicilio_contiene": "08011"
+  },
+  "destinatario": {
+    "nombre": "Laboratorios Quernal Biofarma, S.A.",
+    "nif": "A08264178",
+    "domicilio_contiene": "08290"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Traducción al español del manual",
+      "cantidad": "5120.00",
+      "precio": "0.09",
+      "importe": "460.80"
+    },
+    {
+      "concepto_contiene": "Revisión bilingüe del etiquetado",
+      "cantidad": "3.50",
+      "precio": "35.00",
+      "importe": "122.50"
+    },
+    {
+      "concepto_contiene": "Traducción jurada del certificado",
+      "cantidad": "1.00",
+      "precio": "95.00",
+      "importe": "95.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "678.30",
+      "cuota": "142.44"
+    }
+  ],
+  "base_imponible": "678.30",
+  "cuota_iva": "142.44",
+  "total_factura": "820.74",
+  "retencion": {
+    "porcentaje": "15.00",
+    "importe": "101.75"
+  },
+  "total_a_pagar": "718.99",
+  "referencias": {
+    "pedido": "4500219873",
+    "proyecto": "PRJ-QB-0457"
+  },
+  "iban": "ES1234567890123456789012",
+  "forma_pago_contiene": "Transferencia bancaria",
+  "indicios_esperados": [],
+  "notas": "Factura propia de una traductora autónoma (persona física, DNI) sin marcas VERI*FACTU: documento preparatorio. Etiquetas y conceptos en español e inglés; el cliente lleva el CIF con prefijo 'ES' (ESA0826417…). Trampas: la cantidad '5.120' (palabras) usa punto de miles y no es 5,12; precio por palabra 0,09; fecha corta dd-mm-aa (30-10-26) y vencimiento 29-11-26 como distractor; nº de pedido del cliente (4500219873) y proyecto (PRJ-QB-0457) en celdas etiqueta-sobre-valor; totales con etiquetas bilingües. IVA 678,30 x 21 % = 142,443 -> 142,44; IRPF 15 % = 101,745 -> 101,75 (half-up); total factura 820,74 frente a total a pagar 718,99."
+}

@@ -1,0 +1,63 @@
+{
+  "archivo": "prof_03_disenadora_dto_irpf15.pdf",
+  "estilo": "Diseñadora autónoma: logotipo + emisor arriba-izquierda con DNI con guion, recuadro 'Datos del cliente' a la derecha, tabla Cód./Cant./Descripción/Precio/Dto. %/Importe, importes sin separador de miles con €, fecha dd-mm-yy, separador ' - ', IRPF 15 %",
+  "empresa_nif": "78456123H",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "D26-019",
+  "fecha": "2026-10-28",
+  "emisor": {
+    "nombre": "Nerea Goikoetxea Prado",
+    "nif": "78456123H",
+    "domicilio_contiene": "48006"
+  },
+  "destinatario": {
+    "nombre": "Sidrería Mendi Urdina, S.L.",
+    "nif": "B20345674",
+    "domicilio_contiene": "20180"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Diseño de identidad corporativa:",
+      "cantidad": "1.00",
+      "precio": "1200.00",
+      "importe": "1080.00"
+    },
+    {
+      "concepto_contiene": "Adaptación de piezas gráficas",
+      "cantidad": "12.00",
+      "precio": "45.00",
+      "importe": "540.00"
+    },
+    {
+      "concepto_contiene": "Maquetación de folleto díptico",
+      "cantidad": "3.00",
+      "precio": "85.50",
+      "importe": "243.68"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "1863.68",
+      "cuota": "391.37"
+    }
+  ],
+  "base_imponible": "1863.68",
+  "cuota_iva": "391.37",
+  "total_factura": "2255.05",
+  "retencion": {
+    "porcentaje": "15.00",
+    "importe": "279.55"
+  },
+  "total_a_pagar": "1975.50",
+  "referencias": {
+    "pedido": "PO-7731"
+  },
+  "iban": "ES0022223333444455556666",
+  "forma_pago_contiene": "transferencia en 15 días",
+  "indicios_esperados": [
+    "descuento"
+  ],
+  "notas": "Cantidad antes de la descripción y columnas extra (Cód., Dto. %): el importe de línea ya incluye el descuento (1 x 1200,00 -10 % = 1080,00; 3 x 85,50 -5 % = 243,68 con redondeo half-up de 243,675). Primera descripción en 2 renglones. 'Subtotal' como etiqueta de base y 'Total' a secas como total factura; Total a pagar 1975,50 tras IRPF 15 %. Fecha con año de 2 cifras."
+}

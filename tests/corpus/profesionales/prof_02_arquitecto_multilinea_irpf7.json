@@ -1,0 +1,56 @@
+{
+  "archivo": "prof_02_arquitecto_multilinea_irpf7.pdf",
+  "estilo": "Arquitecto autónomo: Times, NIF con puntos (21.987.654-E), 'Facturar a' sin caja, fecha en letra, concepto multilínea sin cantidad/precio, totales en fila de cabecera con valores debajo, IRPF 7 %, 'Líquido a pagar', A4",
+  "empresa_nif": "21987654E",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "A-26/0112",
+  "fecha": "2026-11-03",
+  "emisor": {
+    "nombre": "Andrés Lucena Barrachina",
+    "nif": "21987654E",
+    "domicilio_contiene": "46002"
+  },
+  "destinatario": {
+    "nombre": "Promociones Ribera Calma, S.L.",
+    "nif": "B46987657",
+    "domicilio_contiene": "46100"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Honorarios profesionales. Fase 2:",
+      "cantidad": null,
+      "precio": null,
+      "importe": "4862.40"
+    },
+    {
+      "concepto_contiene": "Redacción del estudio básico",
+      "cantidad": null,
+      "precio": null,
+      "importe": "615.75"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "5478.15",
+      "cuota": "1150.41"
+    }
+  ],
+  "base_imponible": "5478.15",
+  "cuota_iva": "1150.41",
+  "total_factura": "6628.56",
+  "retencion": {
+    "porcentaje": "7.00",
+    "importe": "383.47"
+  },
+  "total_a_pagar": "6245.09",
+  "referencias": {
+    "proyecto": "P-26/07",
+    "expediente": "LU-2026/0412"
+  },
+  "iban": "ES1234567890123456789012",
+  "forma_pago_contiene": "transferencia a 30 días",
+  "indicios_esperados": [],
+  "notas": "Etiquetas sin separador ('Núm. factura  A-26/0112', 'Fecha de emisión  3 de noviembre de 2026'). NIF del emisor escrito con puntos y guion. Primera línea de detalle de 4 renglones. Totales en una fila de etiquetas con la fila de importes debajo (retención en negativo). IRPF 7 % por inicio de actividad: Total factura 6.628,56 frente a Líquido a pagar 6.245,09. IBAN dentro de una frase."
+}

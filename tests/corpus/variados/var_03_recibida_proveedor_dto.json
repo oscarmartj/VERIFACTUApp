@@ -1,0 +1,72 @@
+{
+  "archivo": "var_03_recibida_proveedor_dto.pdf",
+  "estilo": "Factura RECIBIDA de proveedor tipo ERP (Helvetica): logotipo en caja, emisor arriba con C.I.F. con guion, caja 'DATOS DEL CLIENTE' y 'DIRECCIÓN DE ENTREGA', rejilla de cabecera con valores en la fila de abajo, líneas agrupadas por albarán con Código y Dto. %, resumen en fila de cabecera",
+  "empresa_nif": "B26112342",
+  "tipo_documento": "factura",
+  "situacion_esperada": "recibida",
+  "numero": "A-26/03418",
+  "fecha": "2026-10-30",
+  "emisor": {
+    "nombre": "Herrajes y Suministros Zarzalera, S.L.",
+    "nif": "B31456783",
+    "domicilio_contiene": "31500"
+  },
+  "destinatario": {
+    "nombre": "Carpintería Hermanos Valdeoliva, S.L.",
+    "nif": "B26112342",
+    "domicilio_contiene": "26006"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Bisagra cazoleta 35 mm",
+      "cantidad": "200.00",
+      "precio": "0.85",
+      "importe": "153.00"
+    },
+    {
+      "concepto_contiene": "Guía de cajón extracción",
+      "cantidad": "24.00",
+      "precio": "11.40",
+      "importe": "246.24"
+    },
+    {
+      "concepto_contiene": "Tirador aluminio anodizado",
+      "cantidad": "60.00",
+      "precio": "2.35",
+      "importe": "141.00"
+    },
+    {
+      "concepto_contiene": "Tornillo rosca madera",
+      "cantidad": "6.00",
+      "precio": "9.95",
+      "importe": "56.72"
+    },
+    {
+      "concepto_contiene": "Cola vinílica D3",
+      "cantidad": "3.00",
+      "precio": "18.60",
+      "importe": "55.80"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "652.76",
+      "cuota": "137.08"
+    }
+  ],
+  "base_imponible": "652.76",
+  "cuota_iva": "137.08",
+  "total_factura": "789.84",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "pedido": "CHV-0915"
+  },
+  "iban": "ES1234560000111122223333",
+  "forma_pago_contiene": "Transferencia 30 días",
+  "indicios_esperados": [
+    "descuento"
+  ],
+  "notas": "La sube la empresa DESTINATARIA (Carpintería Hermanos Valdeoliva, la misma usuaria del documento 01): factura de proveedor, situación 'recibida'. Precios unitarios con 3 decimales (0,850) y descuento por línea: el importe de línea ya lo descuenta (200 x 0,85 -10 % = 153,00; 6 x 9,95 -5 % = 56,715 -> 56,72). Distractores: dirección de entrega distinta (26140) junto a la fiscal (26006), fechas de albarán (14/10/2026, 22/10/2026) y vencimiento 29/11/2026, importe bruto 700,10 y descuentos 47,34 en el resumen antes de la base. Cuota 137,0796 -> 137,08."
+}

@@ -1,0 +1,96 @@
+{
+  "archivo": "erp_03_catering_apaisado_proforma.pdf",
+  "estilo": "ERP de catering en A4 apaisado: FACTURA PROFORMA, logotipo + emisor arriba-izquierda, caja 'Datos del cliente' en el centro, metadatos apilados 'Etiqueta: valor' a la derecha, tabla ancha con Fecha serv. y columna Bruto antes de Dto. %, importes 1234,56 € sin separador de miles, fecha en letra, desglose en frases y anticipo del 50 % como distractor",
+  "empresa_nif": "B50237940",
+  "tipo_documento": "proforma",
+  "situacion_esperada": "preparatorio",
+  "numero": "PF-2026-0087",
+  "fecha": "2026-11-06",
+  "emisor": {
+    "nombre": "Catering y Eventos Mirador del Jalón, S.L.",
+    "nif": "B50237940",
+    "domicilio_contiene": "50300"
+  },
+  "destinatario": {
+    "nombre": "Congresos Tramontana Azul, S.L.",
+    "nif": "B87612453",
+    "domicilio_contiene": "28045"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Coffee break de media",
+      "cantidad": "120.00",
+      "precio": "6.50",
+      "importe": "780.00"
+    },
+    {
+      "concepto_contiene": "Almuerzo tipo cóctel con",
+      "cantidad": "120.00",
+      "precio": "28.00",
+      "importe": "3192.00"
+    },
+    {
+      "concepto_contiene": "Coffee break de media",
+      "cantidad": "110.00",
+      "precio": "6.50",
+      "importe": "715.00"
+    },
+    {
+      "concepto_contiene": "Cena de gala: menú",
+      "cantidad": "85.00",
+      "precio": "54.00",
+      "importe": "4245.75"
+    },
+    {
+      "concepto_contiene": "Alquiler de equipo audiovisual:",
+      "cantidad": "2.00",
+      "precio": "640.00",
+      "importe": "1152.00"
+    },
+    {
+      "concepto_contiene": "Decoración floral de mesas",
+      "cantidad": "1.00",
+      "precio": "485.00",
+      "importe": "485.00"
+    },
+    {
+      "concepto_contiene": "Personal de sala y",
+      "cantidad": "36.00",
+      "precio": "22.50",
+      "importe": "810.00"
+    },
+    {
+      "concepto_contiene": "Transporte, montaje y desmontaje",
+      "cantidad": "1.00",
+      "precio": "260.00",
+      "importe": "260.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "10.00",
+      "base": "8932.75",
+      "cuota": "893.28"
+    },
+    {
+      "tipo_iva": "21.00",
+      "base": "2707.00",
+      "cuota": "568.47"
+    }
+  ],
+  "base_imponible": "11639.75",
+  "cuota_iva": "1461.75",
+  "total_factura": "13101.50",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "proyecto": "Jornadas Técnicas de Otoño 2026",
+    "pedido": "OC-2026-0412"
+  },
+  "iban": "ES1234560011223344556677",
+  "forma_pago_contiene": "Transferencia (50 % anticipo)",
+  "indicios_esperados": [
+    "descuento"
+  ],
+  "notas": "Proforma de la empresa usuaria (documento preparatorio). Página A4 apaisada. La columna 'Bruto' (cant. x precio) precede a 'Dto. %' e 'Importe neto': el importe de línea es el neto (85 x 54,00 -7,5 % = 4245,75). Dos líneas con el mismo código y concepto (coffee break de dos días). Distractores: fechas de servicio por línea, vencimiento 20 de noviembre de 2026, 'Anticipo a la confirmación (50 %)' = 6550,75 € que no es total a pagar (total_a_pagar null). Desglose de IVA escrito en frases ('Base imponible al 10 %: ... · Cuota IVA 10 %: ...')."
+}

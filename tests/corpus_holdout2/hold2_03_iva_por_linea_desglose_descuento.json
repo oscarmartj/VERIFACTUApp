@@ -1,0 +1,100 @@
+{
+  "archivo": "hold2_03_iva_por_linea_desglose_descuento.pdf",
+  "estilo": "Factura de distribuidor alimentario a un mesón, estilo 'Etiqueta:' en Times: cabecera con monograma, título FACTURA con filete verde, caja 'Datos de la factura:' (Número:/Fecha:/Fecha de entrega:/Albarán:/Código de cliente:) y caja 'Datos del cliente:', tabla rayada en cebra Artículo | Cant. | Ud. | Precio | % IVA | Importe con un tipo de IVA distinto por línea (4, 10 y 21 %) y una línea de descuento negativa sin cantidad ni precio, debajo un cuadro 'Desglose por tipo de IVA:' con tres filas y fila Total, y a la derecha caja de totales, A4",
+  "empresa_nif": "B18630277",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "GA-26/04417",
+  "fecha": "2026-10-29",
+  "emisor": {
+    "nombre": "Distribuciones Alimentarias Genil Alto, S.L.",
+    "nif": "B18630277",
+    "domicilio_contiene": "18220"
+  },
+  "destinatario": {
+    "nombre": "Mesón Collado Alpujarreño, S.L.",
+    "nif": "B18391540",
+    "domicilio_contiene": "18420"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Pan de hogaza artesano",
+      "cantidad": "40.00",
+      "precio": "2.15",
+      "importe": "86.00"
+    },
+    {
+      "concepto_contiene": "Leche entera UHT",
+      "cantidad": "20.00",
+      "precio": "6.30",
+      "importe": "126.00"
+    },
+    {
+      "concepto_contiene": "Descuento promoción lácteos",
+      "cantidad": null,
+      "precio": null,
+      "importe": "-6.30"
+    },
+    {
+      "concepto_contiene": "Huevos camperos talla L",
+      "cantidad": "8.00",
+      "precio": "7.90",
+      "importe": "63.20"
+    },
+    {
+      "concepto_contiene": "Pechuga de pollo fileteada",
+      "cantidad": "18.50",
+      "precio": "7.40",
+      "importe": "136.90"
+    },
+    {
+      "concepto_contiene": "Agua mineral natural",
+      "cantidad": "15.00",
+      "precio": "2.64",
+      "importe": "39.60"
+    },
+    {
+      "concepto_contiene": "Detergente lavavajillas industrial",
+      "cantidad": "2.00",
+      "precio": "34.50",
+      "importe": "69.00"
+    },
+    {
+      "concepto_contiene": "Servilletas de papel 2 capas",
+      "cantidad": "3.00",
+      "precio": "18.75",
+      "importe": "56.25"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "4.00",
+      "base": "268.90",
+      "cuota": "10.76"
+    },
+    {
+      "tipo_iva": "10.00",
+      "base": "176.50",
+      "cuota": "17.65"
+    },
+    {
+      "tipo_iva": "21.00",
+      "base": "125.25",
+      "cuota": "26.30"
+    }
+  ],
+  "base_imponible": "570.65",
+  "cuota_iva": "54.71",
+  "total_factura": "625.36",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "albaran": "AV-7712"
+  },
+  "iban": "ES0033334444555566661801",
+  "forma_pago_contiene": "Transferencia a 15 días",
+  "indicios_esperados": [
+    "descuento"
+  ],
+  "notas": "Factura propia del distribuidor sin marcas VERI*FACTU: documento preparatorio. Cada línea lleva su propio tipo de IVA en una columna '% IVA' (4 % pan, leche y huevos; 10 % pollo y agua; 21 % limpieza y menaje). La línea 'Descuento promoción lácteos octubre (5 % s/ leche)' es negativa (-6,30), no tiene cantidad ni precio y tributa al 4 %: reduce la base del 4 %. Cantidad decimal 18,5 kg. Debajo de la tabla hay un desglose por tipo con fila Total y a la derecha los totales. Distractores: fecha de entrega 27-10-2026, vencimiento 13-11-2026, código de cliente 00318, '2.400 uds.' y '1,5 L' dentro de los conceptos. 4 %: 268,90 -> 10,76 (10,756); 10 %: 176,50 -> 17,65; 21 %: 125,25 -> 26,30 (26,3025); base 570,65, IVA 54,71, total 625,36."
+}
