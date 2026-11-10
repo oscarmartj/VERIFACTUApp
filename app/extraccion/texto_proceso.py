@@ -166,6 +166,11 @@ class _Agregador(_pagina_pdfplumber.PDFPageAggregatorWithMarkedContent):
         c = self.cur_item._objs[-1]
         c.modo_tr = getattr(self, "_modo_tr", 0)
         font, cid = args[1], args[5]
+        # Código de control (tabulador, salto de línea…) de una fuente simple sin nombre de glifo: pdfminer lo da como
+        # «(cid:9)»; en el documento era un blanco (las hojas de cálculo exportan así el tabulador de una celda)
+        if (not isinstance(font, PDFCIDFont) and isinstance(cid, int) and cid < 32
+                and re.fullmatch(r"\(cid:\d+\)", c.get_text() or "")):
+            c._text = " "
         gs = args[7] if len(args) > 7 else kwargs.get("graphicstate")
         vis = max(self._pila_oc) if getattr(self, "_pila_oc", None) else VISIBLE
         rec = getattr(gs, "recorte", None)

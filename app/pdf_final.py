@@ -256,10 +256,29 @@ def recortar_logo(original: bytes, extraccion: dict | None) -> bytes | None:
     g = np.asarray(img.convert("L"))
     alto_px, ancho_px = g.shape
     sub = g[:int(alto_px * 0.16), :int(ancho_px * 0.5)]
-    ys, xs = np.where(sub < 235)
-    if len(xs) < 50:
+    # El logotipo es el primer grupo de columnas con tinta empezando por la izquierda: termina en un hueco en blanco
+    # ancho (2 % de la página). Así no se lleva el borde ni el texto de otro bloque que empiece antes de la mitad de la
+    # página (p. ej. el recuadro del cliente); se descartan los grupos finos (filetes y bordes de página)
+    tinta = sub < 235
+    columnas = tinta.any(axis=0)
+    hueco_max, ancho_min = max(4, int(ancho_px * 0.02)), max(4, int(ancho_px * 0.02))
+    grupos, ini, blancos = [], None, 0
+    for x, c in enumerate(columnas):
+        if c:
+            ini, blancos = (x if ini is None else ini), 0
+            fin = x
+        elif ini is not None:
+            blancos += 1
+            if blancos > hueco_max:
+                grupos.append((ini, fin))
+                ini = None
+    if ini is not None:
+        grupos.append((ini, fin))
+    grupo = next(((a, b) for a, b in grupos if b - a + 1 >= ancho_min and tinta[:, a:b + 1].sum() >= 50), None)
+    if grupo is None:
         return None
-    x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
+    ys = np.where(tinta[:, grupo[0]:grupo[1] + 1].any(axis=1))[0]
+    x0, x1, y0, y1 = grupo[0], grupo[1], ys.min(), ys.max()
     # Excluir si el recorte contiene textos de número/fecha/título
     if extraccion:
         for p in extraccion.get("_lineas_cabecera", []):
@@ -407,7 +426,8 @@ def reconstruir(datos: dict, *, modo: str, entorno: str | None, url_qr: str | No
                 if isinstance(k, str) and isinstance(r_datos.get(k), str) and r_datos[k]]
         if refs:
             t = Table([[_p(f"{k}:", est["neg"]), _p(v, est["base"])] for k, v in refs], colWidths=[42 * mm, 138 * mm], splitInRow=partir)
-            t.setStyle(TableStyle([("BOTTOMPADDING", (0, 0), (-1, -1), 1), ("TOPPADDING", (0, 0), (-1, -1), 1)]))
+            t.setStyle(TableStyle([("BOTTOMPADDING", (0, 0), (-1, -1), 1), ("TOPPADDING", (0, 0), (-1, -1), 1),
+                                   ("VALIGN", (0, 0), (-1, -1), "TOP")]))
             story += [t, Spacer(1, 4 * mm)]
         if es_rect and datos.get("rectificativa"):
             r = datos["rectificativa"]
