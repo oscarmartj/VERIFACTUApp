@@ -1,0 +1,81 @@
+{
+  "archivo": "h3c_04_fax_200ppp_binarizado.pdf",
+  "estilo": "Factura RECIBIDA por FAX (PDF solo imagen en blanco y negro puro de 1 bit, CCITT G4, a 200 ppp, sin capa de texto): rasterizada en gris, girada 0,35°, binarizada con umbral, con ruido de sal y pimienta y alguna raya horizontal de transmisión; cabecera de fax en monoespaciada con fecha y hora de envío, teléfono del remitente y 'PAG. 001/001'; maqueta de origen en DejaVuSans: emisor arriba a la izquierda, título 'FACTURA' recuadrado, rejilla Nº factura / Fecha / Cód. cliente / Vencimiento, recuadro 'Cliente', tabla con rejilla Artículo | Descripción | Cantidad | Precio | % IVA | Importe con tipos 10 % y 21 % mezclados, cuadro de desglose por tipo (Base imponible / % IVA / Cuota) y totales a la derecha, forma de pago, IBAN y albarán, A4",
+  "empresa_nif": "F00306217",
+  "tipo_documento": "factura",
+  "situacion_esperada": "recibida",
+  "numero": "FV26-004912",
+  "fecha": "2026-11-03",
+  "emisor": {
+    "nombre": "Suministros Agrícolas Vega del Segura, S.L.",
+    "nif": "B00731950",
+    "domicilio_contiene": "30500"
+  },
+  "destinatario": {
+    "nombre": "Cooperativa Agrícola Vega de Santomera, S. Coop.",
+    "nif": "F00306217",
+    "domicilio_contiene": "30140"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Abono complejo NPK 15-15-15",
+      "cantidad": "20.00",
+      "precio": "18.60",
+      "importe": "372.00"
+    },
+    {
+      "concepto_contiene": "Sustrato universal para semillero",
+      "cantidad": "15.00",
+      "precio": "9.80",
+      "importe": "147.00"
+    },
+    {
+      "concepto_contiene": "Semilla de tomate híbrido",
+      "cantidad": "6.00",
+      "precio": "24.30",
+      "importe": "145.80"
+    },
+    {
+      "concepto_contiene": "Cinta de riego por goteo",
+      "cantidad": "4.00",
+      "precio": "62.50",
+      "importe": "250.00"
+    },
+    {
+      "concepto_contiene": "Tijera de poda profesional",
+      "cantidad": "3.00",
+      "precio": "27.90",
+      "importe": "83.70"
+    },
+    {
+      "concepto_contiene": "Guantes de nitrilo talla",
+      "cantidad": "5.00",
+      "precio": "16.40",
+      "importe": "82.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "10.00",
+      "base": "664.80",
+      "cuota": "66.48"
+    },
+    {
+      "tipo_iva": "21.00",
+      "base": "415.70",
+      "cuota": "87.30"
+    }
+  ],
+  "base_imponible": "1080.50",
+  "cuota_iva": "153.78",
+  "total_factura": "1234.28",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "albaran": "AL-26-3391"
+  },
+  "iban": "ES0030580417662095138804",
+  "forma_pago_contiene": "Transferencia a 45 días",
+  "indicios_esperados": [],
+  "notas": "La sube la empresa DESTINATARIA (cooperativa agrícola, CIF con letra F): factura de un proveedor recibida por fax. PDF solo imagen (requiere OCR): rasterizado con pdftoppm a 200 ppp en gris, girado 0,35°, binarizado a blanco y negro puro (umbral 150 sobre 255), con ruido de sal y pimienta y tres rayas horizontales finas de transmisión, guardado como imagen de 1 bit con compresión CCITT G4 en un PDF sin fuentes. Dos tipos de IVA mezclados por línea (columna '% IVA'): 10 % para abono, sustrato y semillas; 21 % para riego, herramienta y guantes. La primera línea empieza por 'Abono complejo NPK': aquí «abono» es el fertilizante, NO una factura de abono ni una rectificativa (no hay importes negativos). Distractores: cabecera de transmisión del fax con fecha 04/11/2026 12:07 y 'PAG. 001/001', fax del emisor, código de cliente C-0417, vencimiento 18/12/2026, albarán de 31/10/2026, '15-15-15', '25 kg', '70 l', '1.000 ud', '16 mm', '500 m', 'talla 9', '12 pares'. 10 %: 664,80 -> 66,48; 21 %: 415,70 -> 87,30 (87,297); base 1.080,50, IVA 153,78, total 1.234,28."
+}

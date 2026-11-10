@@ -80,7 +80,7 @@ def test_caso6_14_coherencia_y_qr(app_cliente):
     import pdfplumber
     with pdfplumber.open(io.BytesIO(pdf)) as d:
         txt = d.pages[0].extract_text()
-    for t in ("PC24-00987", "G09876543", "PFDI RESIDENCIAL OLMOS", "Certificación nº", "1.028,50", "QR tributario:", "VERI*FACTU",
+    for t in ("PC24-00987", "G09876543", "DEMO RESIDENCIAL ALAMO", "Certificación nº", "1.028,50", "QR tributario:", "VERI*FACTU",
               "SIMULACIÓN LOCAL"):
         assert t in txt, t
     guardar_evidencia("factura_simulada_166-26.pdf", pdf)

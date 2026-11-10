@@ -54,7 +54,7 @@ Con Docker: `docker compose up --build` (ver `docker-compose.yml`).
 python -m pytest -q
 ```
 
-Más de 90 pruebas: los 14 casos de aceptación del encargo, las regresiones de tres rondas de verificación adversarial y la extracción sobre el corpus de diseños variados (ver `docs/pruebas.md`; evaluación detallada con `python scripts/evaluar_extraccion.py tests/corpus tests/corpus_holdout* --detalle`). Todas son **simuladas o locales**; las evidencias (PDF, PNG, XML, JSON y capturas) se guardan en `docs/evidencias/`.
+Más de 500 pruebas: los 14 casos de aceptación del encargo, las regresiones de cuatro rondas de verificación adversarial (tres del núcleo y una del extractor y el flujo de borradores) y la extracción sobre el corpus de diseños variados (ver `docs/pruebas.md`; evaluación detallada con `python scripts/evaluar_extraccion.py tests/corpus tests/corpus_holdout* --detalle`). Todas son **simuladas o locales**; las evidencias (PDF, PNG, XML, JSON y capturas) se guardan en `docs/evidencias/`.
 
 ## Documentación
 

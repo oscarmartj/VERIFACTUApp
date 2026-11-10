@@ -1,0 +1,73 @@
+{
+  "archivo": "h3c_02_tarjetas_conceptos_apilados.pdf",
+  "estilo": "Factura de ilustradora autónoma (persona física con DNI) en FreeSans con maqueta de TARJETAS y sin tabla: título 'Factura' en verde y dos píldoras redondeadas 'Nº' y 'Fecha' (dd.mm.aaaa), monograma circular; emisora ('EMITIDA POR') y cliente ('FACTURADA A') lado a lado en dos cajas redondeadas con fondo claro; sección 'Conceptos' con cada línea en una tarjeta redondeada apilada (descripción en negrita en un renglón y debajo 'cantidad x precio € = importe €'), sin cabecera de columnas; a la derecha tarjeta de totales Base imponible / IVA 21 % / Total factura / Retención IRPF 7 % (negativa) y píldora verde 'Total a pagar'; a la izquierda cajas 'Pago' (IBAN) y 'Referencia' (proyecto), A4",
+  "empresa_nif": "33333333P",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "CM-26/031",
+  "fecha": "2026-11-04",
+  "emisor": {
+    "nombre": "Clara Montesinos Ribelles",
+    "nif": "33333333P",
+    "domicilio_contiene": "46006"
+  },
+  "destinatario": {
+    "nombre": "Editorial Albufera Llibres, S.L.",
+    "nif": "B00518431",
+    "domicilio_contiene": "46024"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Ilustración de cubierta para",
+      "cantidad": "1.00",
+      "precio": "680.00",
+      "importe": "680.00"
+    },
+    {
+      "concepto_contiene": "Ilustraciones interiores a línea",
+      "cantidad": "12.00",
+      "precio": "45.00",
+      "importe": "540.00"
+    },
+    {
+      "concepto_contiene": "Maquetación de páginas interiores",
+      "cantidad": "96.00",
+      "precio": "3.75",
+      "importe": "360.00"
+    },
+    {
+      "concepto_contiene": "Adaptación de la cubierta",
+      "cantidad": "1.00",
+      "precio": "120.00",
+      "importe": "120.00"
+    },
+    {
+      "concepto_contiene": "Rondas de correcciones adicionales",
+      "cantidad": "2.00",
+      "precio": "35.00",
+      "importe": "70.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "1770.00",
+      "cuota": "371.70"
+    }
+  ],
+  "base_imponible": "1770.00",
+  "cuota_iva": "371.70",
+  "total_factura": "2141.70",
+  "retencion": {
+    "porcentaje": "7.00",
+    "importe": "123.90"
+  },
+  "total_a_pagar": "2017.80",
+  "referencias": {
+    "proyecto": "ALB-2026-14"
+  },
+  "iban": "ES0021006734291058827316",
+  "forma_pago_contiene": "Transferencia bancaria",
+  "indicios_esperados": [],
+  "notas": "Factura propia de una ilustradora autónoma (persona física con DNI; empresa usuaria = emisora) sin marcas VERI*FACTU: documento preparatorio. No hay tabla: emisora y cliente van lado a lado en cajas redondeadas y cada concepto es una tarjeta con la descripción en un renglón y debajo la fórmula 'cantidad x precio € = importe €' (p. ej. '2 x 35,00 € = 70,00 €'); no hay cabecera de columnas. Número y fecha en píldoras ('Nº CM-26/031', 'Fecha 04.11.2026', fecha con puntos). Retención IRPF del 7 % (inicio de actividad profesional) en negativo y 'Total a pagar'. Distractores: título del libro entre comillas angulares en el primer concepto, 'vol. 3', 'Tel.', nota sobre el art. 101.5 de la Ley del IRPF. Base 1.770,00 x 21 % = 371,70; total factura 2.141,70; IRPF 7 % = 123,90; total a pagar 2.017,80."
+}

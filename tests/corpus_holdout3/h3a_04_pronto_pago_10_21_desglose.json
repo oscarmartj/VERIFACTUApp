@@ -1,0 +1,107 @@
+{
+  "archivo": "h3a_04_pronto_pago_10_21_desglose.pdf",
+  "estilo": "Factura de mayorista de hostelería (S.A.) a un restaurante en DejaVu Sans: emisor con marca en azul arriba a la izquierda, título 'Factura' a la derecha con rejilla Número / Fecha (dd/mm/aa) / Cód. cliente / Albarán / Ruta, recuadro 'Cliente', tabla Código / Descripción / Cant. / Precio / Importe / IVA con tipos 10 % y 21 % mezclados por línea; debajo, a la izquierda, cuadro de desglose por tipo (Tipo IVA / Importe / Dto. P.P. / Base imponible / Cuota IVA con fila Totales) y a la derecha totales apilados 'Suma importes', 'Dto. pronto pago 2 %' en negativo, 'Base imponible', 'Total IVA' y 'TOTAL FACTURA', A4",
+  "empresa_nif": "B00716928",
+  "tipo_documento": "factura",
+  "situacion_esperada": "recibida",
+  "numero": "FA26-018734",
+  "fecha": "2026-11-06",
+  "emisor": {
+    "nombre": "Distribuciones Hosteleras Mar de Alborán, S.A.",
+    "nif": "A00581371",
+    "domicilio_contiene": "04710"
+  },
+  "destinatario": {
+    "nombre": "Restaurante Brisa de Cabo Negro, S.L.",
+    "nif": "B00716928",
+    "domicilio_contiene": "04140"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Aceite de oliva virgen extra",
+      "cantidad": "6.00",
+      "precio": "38.90",
+      "importe": "233.40"
+    },
+    {
+      "concepto_contiene": "Arroz bomba, saco de",
+      "cantidad": "4.00",
+      "precio": "17.35",
+      "importe": "69.40"
+    },
+    {
+      "concepto_contiene": "Vino blanco D.O. Rueda",
+      "cantidad": "24.00",
+      "precio": "5.45",
+      "importe": "130.80"
+    },
+    {
+      "concepto_contiene": "Gamba blanca congelada",
+      "cantidad": "5.00",
+      "precio": "42.80",
+      "importe": "214.00"
+    },
+    {
+      "concepto_contiene": "Tomate triturado natural",
+      "cantidad": "12.00",
+      "precio": "3.15",
+      "importe": "37.80"
+    },
+    {
+      "concepto_contiene": "Cerveza especial botellín",
+      "cantidad": "6.00",
+      "precio": "19.90",
+      "importe": "119.40"
+    },
+    {
+      "concepto_contiene": "Agua mineral natural 1,5",
+      "cantidad": "20.00",
+      "precio": "1.98",
+      "importe": "39.60"
+    },
+    {
+      "concepto_contiene": "Café en grano tueste",
+      "cantidad": "8.00",
+      "precio": "14.60",
+      "importe": "116.80"
+    },
+    {
+      "concepto_contiene": "Lavavajillas industrial para",
+      "cantidad": "3.00",
+      "precio": "31.25",
+      "importe": "93.75"
+    },
+    {
+      "concepto_contiene": "Rollo de papel secamanos",
+      "cantidad": "5.00",
+      "precio": "12.40",
+      "importe": "62.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "10.00",
+      "base": "696.78",
+      "cuota": "69.68"
+    },
+    {
+      "tipo_iva": "21.00",
+      "base": "397.83",
+      "cuota": "83.54"
+    }
+  ],
+  "base_imponible": "1094.61",
+  "cuota_iva": "153.22",
+  "total_factura": "1247.83",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "albaran": "AL-55102"
+  },
+  "iban": "ES0042426262828202028734",
+  "forma_pago_contiene": "Transferencia a 10 días",
+  "indicios_esperados": [
+    "descuento"
+  ],
+  "notas": "Factura RECIBIDA por la empresa usuaria (destinataria, restaurante) de un mayorista (S.A.). El descuento por pronto pago del 2 % se aplica a TODA la factura, no a las líneas: las líneas se imprimen por su importe íntegro (cantidad x precio) y suman 1.116,95 ('Suma importes'), después 'Dto. pronto pago 2 %' -22,34 y 'Base imponible' 1.094,61. Por eso las líneas esperadas suman el importe bruto y NO la base; el desglose esperado es el de bases netas del descuento. Desglose: 10 %: 711,00 - 14,22 = 696,78 -> cuota 69,68 (69,678); 21 %: 405,95 - 8,12 (8,119) = 397,83 -> cuota 83,54 (83,5443); IVA 153,22; total 1.247,83. Trampas: fecha con año de dos cifras (06/11/26), albarán AL-55102 de 04/11/26, vencimiento 16/11/26, código de cliente 004321, ruta R-07, '1,5 l', '75 cl', '33 cl' y '5 kg' en los conceptos; cantidades enteras sin decimales."
+}

@@ -38,7 +38,7 @@ def test_caso3_referencias_obra():
     assert r["certificacion"] == "18"
     assert r["pedido"] == "PC24-00987"
     assert r["partida_presupuestaria"] == "G09876543"
-    assert r["obra"] == "PFDI RESIDENCIAL OLMOS"
+    assert r["obra"] == "DEMO RESIDENCIAL ALAMO"
     assert "60 días" in e["forma_pago"]["valor"]
     assert e["lineas"][0]["unidad"]["valor"] == "mes" and e["lineas"][0]["importe"]["valor"] == "850.00"
 

@@ -1,8 +1,11 @@
 """Extracción con diseños de factura variados (corpus sintético) y con la factura real de referencia (privada).
 
-El corpus de desarrollo (tests/corpus) se usa para ajustar las reglas; el corpus reservado (tests/corpus_holdout) no
-se mira al ajustar y mide la generalidad real. Los umbrales protegen frente a regresiones: un cambio de las reglas que
-mejore un diseño y empeore otros hace fallar estas pruebas.
+El corpus de desarrollo (tests/corpus) se usa para ajustar las reglas. Los corpus reservados (tests/corpus_holdout,
+corpus_holdout2 y corpus_holdout3) se puntuaron a ciegas al recibirlos, antes de mirarlos: esa primera puntuación (en
+docs/pruebas.md) es la única medida de la generalidad. Después se estudiaron para corregir las causas generales de sus
+fallos, así que ya no son ciegos: aquí solo protegen frente a regresiones y su precisión actual no mide la generalidad.
+Medirla de nuevo exige un corpus nuevo que nadie haya visto. Los umbrales protegen frente a regresiones: un cambio de las
+reglas que mejore un diseño y empeore otros hace fallar estas pruebas.
 """
 import sys
 from pathlib import Path
@@ -32,12 +35,15 @@ def test_corpus_desarrollo():
     assert _precision(res, CRITICOS) >= 0.98, res["por_campo"]
 
 
-RESERVADOS = [d for d in (RAIZ / "tests/corpus_holdout", RAIZ / "tests/corpus_holdout2") if d.exists()]
+# Reservados ya estudiados tras su medición ciega (ver el docstring): son corpus de regresión, no de generalidad
+RESERVADOS_ESTUDIADOS = [d for d in (RAIZ / "tests/corpus_holdout", RAIZ / "tests/corpus_holdout2",
+                                     RAIZ / "tests/corpus_holdout3") if d.exists()]
 
 
-@pytest.mark.skipif(not RESERVADOS, reason="sin corpus reservado")
+@pytest.mark.skipif(not RESERVADOS_ESTUDIADOS, reason="sin corpus reservado")
 def test_corpus_reservado():
-    res = ev.evaluar(RESERVADOS)
+    """Regresión sobre los corpus reservados ya estudiados (no es una medida de generalidad)."""
+    res = ev.evaluar(RESERVADOS_ESTUDIADOS)
     assert res["documentos"]
     assert res["global"]["precision"] >= 0.85, res["por_campo"]
     assert _precision(res, CRITICOS) >= 0.9, res["por_campo"]

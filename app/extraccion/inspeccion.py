@@ -207,9 +207,10 @@ def detectar_qr(ruta_png: Path) -> list[dict]:
 
 def rasterizar(datos: bytes, destino: Path, dpi: int = 110, paginas: int | None = None, gris: bool = False,
                primera: int | None = None, ultima: int | None = None, max_px: int = MAX_PX_LADO,
-               max_bytes: int = 200 * 1024 * 1024) -> list[Path]:
+               max_bytes: int = 200 * 1024 * 1024, png: bool = True) -> list[Path]:
     """Rasteriza con límites: resolución reducida si la página es grande (máx. `max_px` por lado según poppler),
-    memoria/CPU limitadas y tamaño de salida acotado (`max_bytes` en total)."""
+    memoria/CPU limitadas y tamaño de salida acotado (`max_bytes` en total). png=False: PGM/PPM sin comprimir (mucho
+    más rápido de escribir, para un uso interno inmediato)."""
     destino.mkdir(parents=True, exist_ok=True)
     ini = primera or 1
     fin = ultima or paginas or ajustes().max_paginas_pdf
@@ -221,14 +222,15 @@ def rasterizar(datos: bytes, destino: Path, dpi: int = 110, paginas: int | None 
     with tempfile.TemporaryDirectory() as td:
         ent = Path(td) / "e.pdf"
         ent.write_bytes(datos)
-        cmd = ["pdftoppm", "-r", str(dpi), "-png", "-cropbox", "-f", str(ini), "-l", str(fin)]
+        cmd = ["pdftoppm", "-r", str(dpi)] + (["-png"] if png else []) + ["-cropbox", "-f", str(ini), "-l", str(fin)]
         if gris:
             cmd.append("-gray")
         cmd += [str(ent), str(destino / "p")]
         r = ejecutar(cmd, timeout=180, fsize=max_bytes)
         if r.returncode != 0:
             raise PDFNoValido("No se pudo representar el PDF dentro de los límites de memoria, tiempo y tamaño")
-    salida = sorted(destino.glob("p-*.png"), key=lambda p: int(re.findall(r"(\d+)\.png$", p.name)[0]))
+    ext = "png" if png else ("pgm" if gris else "ppm")
+    salida = sorted(destino.glob(f"p-*.{ext}"), key=lambda p: int(re.findall(r"(\d+)\.\w+$", p.name)[0]))
     if sum(p.stat().st_size for p in salida) > max_bytes:
         raise PDFNoValido("La representación del PDF supera el tamaño admitido")
     return salida

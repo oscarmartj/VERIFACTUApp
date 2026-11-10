@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from . import (almacen, borradores, certificados, db, emision, importacion, nif as nifmod, produccion, remision,
                seguridad, series, simulador)
 from .config import APP_NOMBRE, APP_VERSION, ajustes
+from . import pdf_final
 from .pdf_final import png_paginas
 
 router = APIRouter(prefix="/api")
@@ -538,8 +539,15 @@ def borrador_patch(bid: int, body: dict, entorno: str = "simulador", s=Depends(s
         if b["estado"] in ("emitido", "descartado") or b["factura_id"]:
             raise HTTPException(409, "El borrador ya no es editable")
         datos = json.loads(b["datos"])
-        for c in body.get("cambios") or []:
+        cambios = body.get("cambios") or []
+        if not isinstance(cambios, list):
+            raise HTTPException(422, "«cambios» debe ser una lista")
+        for c in cambios:
             try:
+                if not isinstance(c, dict) or not isinstance(c.get("motivo") or "", str):
+                    raise ValueError("Cada cambio debe indicar «campo», «valor» y «motivo» (texto)")
+                if not borradores.texto_codificable(c.get("motivo") or ""):
+                    raise ValueError("motivo: el texto contiene caracteres no válidos (sustitutos UTF-16 sueltos)")
                 anterior, datos = borradores.aplicar_cambio(datos, c["campo"], c.get("valor"))
             except (ValueError, KeyError, IndexError, TypeError) as e:
                 raise HTTPException(422, str(e))
@@ -561,7 +569,11 @@ def borrador_confirmar(bid: int, body: dict, entorno: str = "simulador", s=Depen
         if b["estado"] in ("emitido", "descartado") or b["factura_id"]:
             raise HTTPException(409, "El borrador ya no es editable")
         datos = json.loads(b["datos"])
-        datos["confirmaciones"] = sorted(set(datos.get("confirmaciones") or []) | set(body.get("claves") or []))
+        claves = body.get("claves") or []
+        if not isinstance(claves, list) or not all(isinstance(k, str) and len(k) <= 200 for k in claves):
+            raise HTTPException(422, "«claves» debe ser una lista de textos")
+        previas = [k for k in datos.get("confirmaciones") or [] if isinstance(k, str)]
+        datos["confirmaciones"] = sorted(set(previas) | set(claves))
         con.execute("UPDATE borradores SET datos=?, actualizado_en=? WHERE id=?", (json.dumps(datos, ensure_ascii=False), db.ahora_iso(), bid))
         db.actividad(con, "borrador.confirmaciones", usuario_id=s["usuario_id"], empresa_id=b["empresa_id"], objeto="borrador",
                      objeto_id=bid, detalle={"claves": body.get("claves")})
@@ -576,6 +588,8 @@ def _vista_previa_limitada(con, bid):
         raise HTTPException(429, "Demasiadas vistas previas en curso; inténtelo de nuevo en unos segundos")
     try:
         return emision.vista_previa(con, bid)
+    except pdf_final.DocumentoDemasiadoLargo as e:
+        raise HTTPException(422, str(e)) from e
     finally:
         _VISTAS.release()
 

@@ -325,7 +325,7 @@ def test_certificado_caducado_no_cuenta(app_cliente):
 
 # --- PDF ----------------------------------------------------------------------------------------------------
 def test_numero_largo_no_invade_el_qr():
-    d = {"num_serie": "RECT-OBRA-PFDI-RESIDENCIAL-OLMOS-CERT-1234567/26-ABCDEFGHIJ", "emisor": {"nombre": "E", "nif": "B82991316"},
+    d = {"num_serie": "RECT-OBRA-DEMO-RESIDENCIAL-ALAMO-CERT-1234567/26-ABCDEFGHIJ", "emisor": {"nombre": "E", "nif": "B82991316"},
          "destinatario": {"nombre": "D", "nif": "A87754214"}, "lineas": [], "tipo_factura": "F1",
          "desglose": [{"tipo_iva": "21.00", "base": "10.00", "cuota": "2.10"}], "base_imponible": "10.00", "cuota_total": "2.10",
          "importe_total": "12.10"}

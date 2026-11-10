@@ -1,0 +1,233 @@
+{
+  "archivo": "h3b_01_industrial_2pag_kg_t_portes.pdf",
+  "estilo": "Factura de almacén de hierros y aceros (ERP industrial, LiberationSans 7,6 pt): logotipo con monograma y nombre comercial, datos legales del emisor bajo el logotipo con C.I.F. con guion, rejilla de metadatos etiqueta-sobre-valor (Nº factura, Fecha factura, Página, Cód. cliente, Su pedido, Albarán), cajas 'DIRECCIÓN DE ENTREGA' y 'CLIENTE' con banda azul, cuerpo con rejilla vertical y 7 columnas Código | Descripción | Colada | Cantidad | Ud. | Precio | Importe €, 32 líneas repartidas en 2 páginas (23 + 9) con cabecera de columnas repetida en la página 2, cantidades en kg (2 decimales) y t (3 decimales), precios con 4 decimales (€/kg) y 3 decimales (€/t y ud), detalle en cursiva bajo algunas líneas, línea de portes por tonelada, totales en fila horizontal (Suma importes | Base imponible | % IVA | Cuota IVA | TOTAL FACTURA EUR), fecha dd-mm-aaaa, A4",
+  "empresa_nif": "B00280461",
+  "tipo_documento": "factura",
+  "situacion_esperada": "recibida",
+  "numero": "A/26/004318",
+  "fecha": "2026-10-28",
+  "emisor": {
+    "nombre": "Hierros y Perfiles del Jalón, S.A.",
+    "nif": "A00974139",
+    "domicilio_contiene": "50296"
+  },
+  "destinatario": {
+    "nombre": "Calderería y Montajes Moncayo Norte, S.L.",
+    "nif": "B00280461",
+    "domicilio_contiene": "50500"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Chapa laminada en caliente S275JR e=6",
+      "cantidad": "1272.30",
+      "precio": "0.87",
+      "importe": "1111.35"
+    },
+    {
+      "concepto_contiene": "Chapa laminada en caliente S275JR e=10",
+      "cantidad": "2120.40",
+      "precio": "0.86",
+      "importe": "1825.66"
+    },
+    {
+      "concepto_contiene": "Chapa lagrimada S235JR e=5/7 mm 2500x1250",
+      "cantidad": "612.80",
+      "precio": "0.94",
+      "importe": "577.26"
+    },
+    {
+      "concepto_contiene": "Chapa galvanizada Z275 e=1,5 mm 2000x1000",
+      "cantidad": "384.00",
+      "precio": "1.13",
+      "importe": "432.58"
+    },
+    {
+      "concepto_contiene": "Perfil IPE 200 S275JR barra 12",
+      "cantidad": "1.34",
+      "precio": "812.40",
+      "importe": "1091.87"
+    },
+    {
+      "concepto_contiene": "Perfil IPE 240 S275JR barra 12",
+      "cantidad": "1.84",
+      "precio": "808.90",
+      "importe": "1490.80"
+    },
+    {
+      "concepto_contiene": "Perfil HEB 160 S275JR barra 12",
+      "cantidad": "2.05",
+      "precio": "826.75",
+      "importe": "1698.14"
+    },
+    {
+      "concepto_contiene": "Perfil UPN 120 S275JR barra 6",
+      "cantidad": "535.20",
+      "precio": "0.89",
+      "importe": "478.74"
+    },
+    {
+      "concepto_contiene": "Angular L 50x50x5 S275JR barra 6",
+      "cantidad": "226.80",
+      "precio": "0.93",
+      "importe": "211.15"
+    },
+    {
+      "concepto_contiene": "Angular L 80x80x8 S275JR barra 6",
+      "cantidad": "578.40",
+      "precio": "0.92",
+      "importe": "531.26"
+    },
+    {
+      "concepto_contiene": "Pletina laminada 100x10 S275JR barra 6",
+      "cantidad": "471.00",
+      "precio": "0.91",
+      "importe": "426.96"
+    },
+    {
+      "concepto_contiene": "Pletina laminada 50x8 S275JR barra 6",
+      "cantidad": "188.40",
+      "precio": "0.92",
+      "importe": "174.08"
+    },
+    {
+      "concepto_contiene": "Redondo calibrado F-1140 Ø40 h11 barra",
+      "cantidad": "296.04",
+      "precio": "1.39",
+      "importe": "410.76"
+    },
+    {
+      "concepto_contiene": "Redondo corrugado B500S Ø16 barra 12",
+      "cantidad": "1.90",
+      "precio": "694.30",
+      "importe": "1316.39"
+    },
+    {
+      "concepto_contiene": "Redondo corrugado B500S Ø12 barra 12",
+      "cantidad": "1.07",
+      "precio": "701.85",
+      "importe": "748.17"
+    },
+    {
+      "concepto_contiene": "Malla electrosoldada ME 15x15 Ø6-6 B500T",
+      "cantidad": "48.00",
+      "precio": "21.87",
+      "importe": "1049.76"
+    },
+    {
+      "concepto_contiene": "Tubo estructural cuadrado 80x80x4 S275J0H barra",
+      "cantidad": "683.52",
+      "precio": "1.05",
+      "importe": "716.67"
+    },
+    {
+      "concepto_contiene": "Tubo estructural rectangular 120x60x5 S275J0H barra",
+      "cantidad": "773.28",
+      "precio": "1.06",
+      "importe": "816.58"
+    },
+    {
+      "concepto_contiene": "Tubo estructural redondo Ø88,9x3,2 S235JRH barra",
+      "cantidad": "247.20",
+      "precio": "1.09",
+      "importe": "269.82"
+    },
+    {
+      "concepto_contiene": "Tubo de acero negro DIN 2440",
+      "cantidad": "162.36",
+      "precio": "1.17",
+      "importe": "190.45"
+    },
+    {
+      "concepto_contiene": "Chapa de acero inoxidable AISI 304",
+      "cantidad": "159.20",
+      "precio": "3.49",
+      "importe": "555.13"
+    },
+    {
+      "concepto_contiene": "Chapa de aluminio 5754 H111 e=3",
+      "cantidad": "97.20",
+      "precio": "4.13",
+      "importe": "401.68"
+    },
+    {
+      "concepto_contiene": "Barra de inoxidable AISI 316L Ø25",
+      "cantidad": "46.30",
+      "precio": "5.26",
+      "importe": "243.72"
+    },
+    {
+      "concepto_contiene": "Perfil T 60x60x7 S235JR barra 6",
+      "cantidad": "225.36",
+      "precio": "0.98",
+      "importe": "220.63"
+    },
+    {
+      "concepto_contiene": "Viga HEA 200 S355J2 barra 12",
+      "cantidad": "2.54",
+      "precio": "869.25",
+      "importe": "2207.90"
+    },
+    {
+      "concepto_contiene": "Cuadrado macizo laminado 20x20 S275JR barra",
+      "cantidad": "113.04",
+      "precio": "0.96",
+      "importe": "108.24"
+    },
+    {
+      "concepto_contiene": "Electrodo rutilo E6013 Ø3,25 (caja 5",
+      "cantidad": "8.00",
+      "precio": "15.95",
+      "importe": "127.57"
+    },
+    {
+      "concepto_contiene": "Hilo de soldadura SG2 Ø1,0 bobina",
+      "cantidad": "12.00",
+      "precio": "27.44",
+      "importe": "329.26"
+    },
+    {
+      "concepto_contiene": "Disco de corte para acero 230x1,9",
+      "cantidad": "50.00",
+      "precio": "1.96",
+      "importe": "98.20"
+    },
+    {
+      "concepto_contiene": "Granallado e imprimación de perfiles",
+      "cantidad": "2430.00",
+      "precio": "0.12",
+      "importe": "287.96"
+    },
+    {
+      "concepto_contiene": "Corte a medida con sierra de",
+      "cantidad": "64.00",
+      "precio": "1.25",
+      "importe": "80.00"
+    },
+    {
+      "concepto_contiene": "Portes en camión grúa",
+      "cantidad": "19.94",
+      "precio": "7.85",
+      "importe": "156.50"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "20385.24",
+      "cuota": "4280.90"
+    }
+  ],
+  "base_imponible": "20385.24",
+  "cuota_iva": "4280.90",
+  "total_factura": "24666.14",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "pedido": "OC-MN-2026-0917",
+    "albaran": "ALB-26-11873"
+  },
+  "iban": "ES0050961274038816520097",
+  "forma_pago_contiene": "Transferencia bancaria a 60 días",
+  "indicios_esperados": [],
+  "notas": "Factura de proveedor RECIBIDA por la empresa usuaria (la calderería destinataria) sin marcas VERI*FACTU. 32 líneas: 23 en la página 1 (que termina con 'Continúa en la página 2', sin suma parcial) y 9 en la página 2, que repite una cabecera reducida ('FACTURA A/26/004318 (continuación)') y la cabecera de columnas. Cantidades en kg con 2 decimales y punto de miles (1.272,30) y en t con 3 decimales (1,344); precios con 4 decimales en €/kg (0,8735) y 3 en €/t y por unidad (812,400 / 21,870); en el JSON cantidad y precio se redondean a 2 decimales (ningún valor cae en empate half-up/half-even). Descripciones con medidas y calidades (S275JR, 3000x1500, Ø88,9x3,2, F-1140, DN40) y columna de colada alfanumérica (C26-41187). Línea de portes por peso: 19,936 t x 7,850 = 156,50. Distractores: dirección de entrega en Borja (50540), código de cliente 43.0712, fecha de albarán 26-10-2026, vencimiento 27-12-2026, peso total 19.935,80 kg y 46 bultos, certificados 3.1 EN 10204. Totales solo en la página 2, en una fila horizontal. 21 %: base 20.385,24 -> cuota 4.280,90; total 24.666,14."
+}

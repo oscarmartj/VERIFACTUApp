@@ -1,0 +1,74 @@
+{
+  "archivo": "h3c_03_foto_movil_150ppp_sombra.pdf",
+  "estilo": "Factura RECIBIDA de taller mecánico FOTOGRAFIADA CON EL MÓVIL (PDF solo imagen JPEG a 150 ppp en gris, sin capa de texto): página entera sobre fondo oscuro de mesa, girada 1,3°, sombra degradada de izquierda (oscura) a derecha, ligero desenfoque y ruido; maqueta de origen en LiberationSans: emisor arriba a la izquierda, recuadro 'FACTURA' con Nº y Fecha (dd-mm-aaaa) a la derecha, recuadros 'Cliente' y 'Vehículo' (matrícula, km, O.R., fecha de entrada), tabla con rejilla Ref. | Descripción | Cant. | Precio | Importe, totales Base imponible / I.V.A. 21 % / TOTAL FACTURA, forma de pago 'Contado' y firma del cliente, A4",
+  "empresa_nif": "B00248195",
+  "tipo_documento": "factura",
+  "situacion_esperada": "recibida",
+  "numero": "2026/T-0758",
+  "fecha": "2026-10-27",
+  "emisor": {
+    "nombre": "Talleres Cebrián Llanos, S.L.",
+    "nif": "B00275313",
+    "domicilio_contiene": "02007"
+  },
+  "destinatario": {
+    "nombre": "Transportes y Mudanzas Llano de Almansa, S.L.",
+    "nif": "B00248195",
+    "domicilio_contiene": "02640"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Pastillas de freno delanteras",
+      "cantidad": "1.00",
+      "precio": "86.40",
+      "importe": "86.40"
+    },
+    {
+      "concepto_contiene": "Discos de freno ventilados",
+      "cantidad": "1.00",
+      "precio": "142.90",
+      "importe": "142.90"
+    },
+    {
+      "concepto_contiene": "Aceite de motor sintético",
+      "cantidad": "7.50",
+      "precio": "11.20",
+      "importe": "84.00"
+    },
+    {
+      "concepto_contiene": "Filtro de aceite",
+      "cantidad": "1.00",
+      "precio": "14.35",
+      "importe": "14.35"
+    },
+    {
+      "concepto_contiene": "Filtro de aire",
+      "cantidad": "1.00",
+      "precio": "22.80",
+      "importe": "22.80"
+    },
+    {
+      "concepto_contiene": "Mano de obra mecánica",
+      "cantidad": "3.50",
+      "precio": "48.00",
+      "importe": "168.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "518.45",
+      "cuota": "108.87"
+    }
+  ],
+  "base_imponible": "518.45",
+  "cuota_iva": "108.87",
+  "total_factura": "627.32",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {},
+  "iban": null,
+  "forma_pago_contiene": "Contado",
+  "indicios_esperados": [],
+  "notas": "La sube la empresa DESTINATARIA (transportista): factura recibida de un taller, fotografiada con el móvil. PDF solo imagen (requiere OCR): rasterizado con pdftoppm a 150 ppp en gris, colocado sobre un fondo oscuro (borde de la mesa visible), girado 1,3°, con una sombra que oscurece la página de izquierda a derecha (factor 0,50 en el borde izquierdo, 1,0 en el derecho), desenfoque gaussiano y ruido, guardado como JPEG calidad 72 en un PDF sin fuentes. Cantidades decimales 7,5 l y 3,5 h. Sin IBAN: pago al contado con tarjeta. Sin referencias esperadas (la orden de reparación OR-1187 no es un pedido). Distractores: matrícula 4821 LMT, 'Km: 187.430', fecha de entrada 24-10-2026, garantía '3 meses o 2.000 km', '5W30'. Base 518,45 x 21 % = 108,87 (108,8745); total 627,32."
+}

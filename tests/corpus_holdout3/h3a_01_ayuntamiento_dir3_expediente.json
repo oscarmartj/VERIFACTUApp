@@ -1,0 +1,72 @@
+{
+  "archivo": "h3a_01_ayuntamiento_dir3_expediente.pdf",
+  "estilo": "Factura de empresa de jardinería (S.L.) a un ayuntamiento, maquetación institucional en Liberation Sans: banda verde superior, logotipo circular, datos del emisor a la izquierda, caja 'FACTURA' a la derecha (Nº de factura / Fecha de factura / Página) y debajo el bloque 'DESTINATARIO (ADMINISTRACIÓN PÚBLICA)'; tabla 'Códigos DIR3' con Oficina contable, Órgano gestor y Unidad tramitadora (código + denominación), fila de tres celdas Expediente / Contrato / Periodo facturado, párrafo con el decreto de adjudicación, tabla Concepto / Ud. / Cantidad / Precio unitario / Importe con conceptos de dos renglones, totales en caja a la derecha y pago a la izquierda, A4",
+  "empresa_nif": "B00618371",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "A26/0412",
+  "fecha": "2026-11-02",
+  "emisor": {
+    "nombre": "Mantenimientos Urbanos Cierzo Verde, S.L.",
+    "nif": "B00618371",
+    "domicilio_contiene": "50197"
+  },
+  "destinatario": {
+    "nombre": "Ayuntamiento de Torrebermeja del Campo",
+    "nif": "P0098400E",
+    "domicilio_contiene": "50749"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Mantenimiento integral de zonas verdes",
+      "cantidad": "1.00",
+      "precio": "6840.00",
+      "importe": "6840.00"
+    },
+    {
+      "concepto_contiene": "Desbroce mecanizado de márgenes",
+      "cantidad": "14500.00",
+      "precio": "0.18",
+      "importe": "2610.00"
+    },
+    {
+      "concepto_contiene": "Suministro y plantación de flor",
+      "cantidad": "320.00",
+      "precio": "2.37",
+      "importe": "758.40"
+    },
+    {
+      "concepto_contiene": "Reparación de la red de riego",
+      "cantidad": "18.00",
+      "precio": "31.50",
+      "importe": "567.00"
+    },
+    {
+      "concepto_contiene": "Retirada de restos vegetales",
+      "cantidad": "6.00",
+      "precio": "95.00",
+      "importe": "570.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "11345.40",
+      "cuota": "2382.53"
+    }
+  ],
+  "base_imponible": "11345.40",
+  "cuota_iva": "2382.53",
+  "total_factura": "13727.93",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "expediente": "2026/SEM/000214",
+    "contrato": "CSV-PARQ-2025/07",
+    "periodo": "01/10/2026 - 31/10/2026"
+  },
+  "iban": "ES0012123434565678780412",
+  "forma_pago_contiene": "Transferencia bancaria",
+  "indicios_esperados": [],
+  "notas": "Factura propia de la empresa de jardinería (emisora, S.L.) a un ayuntamiento, sin marcas VERI*FACTU: documento preparatorio. El destinatario es una entidad local con NIF P. Trampas: bloque de códigos DIR3 (LA0019843 Intervención Municipal, L01509846 Alcaldía, LA0019851 Servicio de Medio Ambiente y Parques) con aspecto de identificadores; el nombre del ayuntamiento se repite como denominación del órgano gestor; referencias Expediente 2026/SEM/000214, Contrato CSV-PARQ-2025/07 y Periodo facturado 01/10/2026 - 31/10/2026 (fechas que no son la de factura); párrafo con 'Decreto de Alcaldía 2025/0388 de 14/07/2025'; 'Página 1 de 1' en la caja de la factura; inscripción registral en el pie. Cantidad con miles (14.500,00 m²). Base 11.345,40 x 21 % = 2.382,534 -> 2.382,53; total 13.727,93."
+}

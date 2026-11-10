@@ -1,0 +1,77 @@
+{
+  "archivo": "h3b_03_bilingue_ingles_castellano.pdf",
+  "estilo": "Plantilla bilingüe inglés/castellano de un estudio digital de Málaga (DejaVuSans, azul marino y ámbar): marca 'LUMBRE' arriba a la izquierda, 'INVOICE / FACTURA' grande a la derecha con metadatos etiqueta: valor alineados a la derecha ('Invoice no. / Nº factura', 'Issue date / Fecha', 'Due date / Vencimiento', 'PO number / Nº pedido', 'Project / Proyecto'), bloques 'From / Emisor' y 'Bill to / Facturar a' con 'Tax ID / NIF', tabla con banda oscura 'Description / Concepto | Qty | Unit price | Amount' y conceptos en dos renglones (inglés en negrita, castellano en gris), totales 'Subtotal', 'VAT 21%' y 'Total EUR', bloque 'Payment / Forma de pago' con IBAN, importes en formato español (1.850,00), A4",
+  "empresa_nif": "A00071621",
+  "tipo_documento": "factura",
+  "situacion_esperada": "recibida",
+  "numero": "LDS-2026-0193",
+  "fecha": "2026-11-05",
+  "emisor": {
+    "nombre": "Lumbre Digital Studio, S.L.",
+    "nif": "B00864074",
+    "domicilio_contiene": "29001"
+  },
+  "destinatario": {
+    "nombre": "Conservas Hermanos Vidal del Cantábrico, S.A.",
+    "nif": "A00071621",
+    "domicilio_contiene": "39740"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "UX research & wireframes",
+      "cantidad": "1.00",
+      "precio": "1850.00",
+      "importe": "1850.00"
+    },
+    {
+      "concepto_contiene": "Front-end development",
+      "cantidad": "64.00",
+      "precio": "48.00",
+      "importe": "3072.00"
+    },
+    {
+      "concepto_contiene": "CMS integration",
+      "cantidad": "1.00",
+      "precio": "1240.00",
+      "importe": "1240.00"
+    },
+    {
+      "concepto_contiene": "Product photo retouching",
+      "cantidad": "120.00",
+      "precio": "6.50",
+      "importe": "780.00"
+    },
+    {
+      "concepto_contiene": "Hosting plan Business",
+      "cantidad": "12.00",
+      "precio": "29.90",
+      "importe": "358.80"
+    },
+    {
+      "concepto_contiene": "Support hours",
+      "cantidad": "7.50",
+      "precio": "52.00",
+      "importe": "390.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "7690.80",
+      "cuota": "1615.07"
+    }
+  ],
+  "base_imponible": "7690.80",
+  "cuota_iva": "1615.07",
+  "total_factura": "9305.87",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "pedido": "PO-VID-2026-077",
+    "proyecto": "VID-WEB-2027"
+  },
+  "iban": "ES0029100345670012983301",
+  "forma_pago_contiene": "Transferencia bancaria",
+  "indicios_esperados": [],
+  "notas": "Factura de proveedor RECIBIDA por la empresa usuaria (la conservera destinataria) sin marcas VERI*FACTU. Rótulos mezclados inglés/castellano ('Invoice / Factura', 'Bill to / Facturar a', 'Tax ID / NIF', 'Qty', 'Unit price', 'Amount', 'Subtotal', 'VAT 21%', 'Total EUR'); conceptos en dos renglones: el primero en inglés (el que recoge concepto_contiene) y el segundo, castellano en gris. Importes en formato español con punto de miles y coma decimal. Cantidad decimal 7,5 horas. Emisor y cliente españoles, operación interior sujeta al 21 %. Distractores: fecha de vencimiento 05/12/2026 justo debajo de la de emisión, 'October 2026' y '12 months' en los conceptos, 'Attn. / A la atención de'. Subtotal 7.690,80 x 21 % = 1.615,07; Total EUR 9.305,87."
+}

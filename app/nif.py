@@ -71,6 +71,12 @@ def es_persona_juridica(nif: str) -> bool:
     return tipo(nif) == "PERSONA_JURIDICA"
 
 
+def parecidos(a: str | None, b: str | None, max_dif: int = 2) -> bool:
+    """Misma forma y como mucho `max_dif` caracteres distintos: un NIF mal leído (OCR, error de tecleo) del otro."""
+    a, b = normalizar(a), normalizar(b)
+    return bool(a) and len(a) == len(b) and sum(x != y for x, y in zip(a, b)) <= max_dif
+
+
 def buscar_nifs(texto: str) -> list[tuple[str, int, int]]:
     """Devuelve (nif_normalizado, inicio, fin) de los NIF con dígito de control válido."""
     out = []

@@ -30,6 +30,7 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus.doctemplate import LayoutError
 
 from .config import APP_NOMBRE, APP_VERSION
 from .extraccion.inspeccion import ejecutar
@@ -65,7 +66,10 @@ GRIS = colors.HexColor("#555555")
 def _d(fecha_iso: str | None) -> str:
     if not fecha_iso:
         return ""
-    a, m, d = fecha_iso.split("-")
+    partes = str(fecha_iso).split("-")
+    if len(partes) != 3:
+        return str(fecha_iso)  # fecha sin formato ISO en un borrador a medio editar (la validación la bloquea)
+    a, m, d = partes
     return f"{d}/{m}/{a}"
 
 
@@ -288,10 +292,40 @@ def _p(texto, estilo):
     return Paragraph(escape(str(texto or "")).replace("\n", "<br/>"), estilo)
 
 
+def _imp(v, moneda: bool = True) -> str:
+    """Importe para mostrar; vacío si falta o no es un número (vista previa de un borrador a medio editar)."""
+    try:
+        return fmt_es(v, moneda=moneda)
+    except (ArithmeticError, TypeError, ValueError):
+        return ""
+
+
+def _imp_negativo(v) -> str:
+    try:
+        return fmt_es(-Decimal(str(v)))
+    except (ArithmeticError, TypeError, ValueError):
+        return ""
+
+
+def _pct(v) -> str:
+    try:
+        return fmt_porcentaje(v) if v not in (None, "") else "?"
+    except (ArithmeticError, TypeError, ValueError):
+        return "?"
+
+
+def _filas(v) -> list[dict]:
+    return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
+
+
+class DocumentoDemasiadoLargo(ValueError):
+    """El borrador ocuparía demasiadas páginas: su vista previa no se compone (ver borradores.MAX_RENGLONES_PDF; la
+    expedición la impide la validación, y una factura ya expedida siempre se puede volver a componer)."""
+
+
 def reconstruir(datos: dict, *, modo: str, entorno: str | None, url_qr: str | None, logo_png: bytes | None,
                 fecha_expedicion: str | None) -> tuple[bytes, dict]:
     est = _estilos()
-    buf = io.BytesIO()
     W, H = A4
     info: dict = {"estrategia": "reconstruccion"}
     em, de = datos.get("emisor") or {}, datos.get("destinatario") or {}
@@ -350,84 +384,93 @@ def reconstruir(datos: dict, *, modo: str, entorno: str | None, url_qr: str | No
         c.drawRightString(W - 15 * mm, 8 * mm, f"Página {doc.page}")
         c.drawString(15 * mm, 8 * mm, f"Documento generado con {APP_NOMBRE} {APP_VERSION}")
 
-    story = []
-    # Partes
-    partes = Table([
-        [_p("EMISOR", est["tit"]), _p("CLIENTE", est["tit"])],
-        [_p(em.get("nombre"), est["neg"]), _p(de.get("nombre"), est["neg"])],
-        [_p(f"NIF: {em.get('nif') or ''}", est["base"]), _p(f"NIF: {de.get('nif') or ''}", est["base"])],
-        [_p(em.get("domicilio"), est["base"]), _p(de.get("domicilio"), est["base"])],
-    ], colWidths=[90 * mm, 90 * mm])
-    partes.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("BOX", (1, 0), (1, -1), 0.6, AZUL),
-                                ("LEFTPADDING", (0, 0), (-1, -1), 4)]))
-    story += [partes, Spacer(1, 4 * mm)]
-    # Referencias comerciales (se conservan aunque no formen parte del registro)
-    etiquetas = {"obra": "Obra", "certificacion": "Certificación nº", "pedido": "Pedido",
-                 "partida_presupuestaria": "Partida presupuestaria", "periodo": "Periodo facturado",
-                 "contrato": "Contrato", "proyecto": "Proyecto", "expediente": "Expediente"}
-    r_datos = datos.get("referencias") or {}
-    orden = list(etiquetas) + sorted(k for k in r_datos if k not in etiquetas)  # orden fijo: PDF reproducible
-    refs = [(etiquetas.get(k, k.replace("_", " ").capitalize()), r_datos[k]) for k in orden if r_datos.get(k)]
-    if refs:
-        t = Table([[_p(f"{k}:", est["neg"]), _p(v, est["base"])] for k, v in refs], colWidths=[42 * mm, 138 * mm])
-        t.setStyle(TableStyle([("BOTTOMPADDING", (0, 0), (-1, -1), 1), ("TOPPADDING", (0, 0), (-1, -1), 1)]))
-        story += [t, Spacer(1, 4 * mm)]
-    if es_rect and datos.get("rectificativa"):
-        r = datos["rectificativa"]
-        story += [_p(f"Rectifica la factura {r.get('num_serie_rectificada')} de fecha {_d(r.get('fecha_rectificada'))}. "
-                     f"Motivo: {r.get('motivo') or ''}", est["base"]), Spacer(1, 3 * mm)]
-    # Líneas
-    filas = [[_p("CONCEPTO", est["neg"]), _p("CANTIDAD", est["der_neg"]), _p("UD.", est["neg"]),
-              _p("PRECIO", est["der_neg"]), _p("IMPORTE", est["der_neg"])]]
-    for l in datos.get("lineas") or []:
-        filas.append([_p(l.get("concepto"), est["base"]),
-                      _p(fmt_es(l["cantidad"], moneda=False) if l.get("cantidad") else "", est["der"]),
-                      _p(l.get("unidad") or "", est["base"]),
-                      _p(fmt_es(l["precio"], moneda=False) if l.get("precio") else "", est["der"]),
-                      _p(fmt_es(l["importe"], moneda=False) if l.get("importe") else "", est["der"])])
-    tl = Table(filas, colWidths=[96 * mm, 20 * mm, 14 * mm, 24 * mm, 26 * mm], repeatRows=1)
-    tl.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF5")),
-                            ("LINEBELOW", (0, 0), (-1, 0), 0.6, AZUL), ("LINEBELOW", (0, -1), (-1, -1), 0.4, GRIS),
-                            ("VALIGN", (0, 0), (-1, -1), "TOP")]))
-    story += [tl, Spacer(1, 4 * mm)]
-    # Totales
-    tot = []
-    for d in datos.get("desglose") or []:
-        if len(datos.get("desglose") or []) > 1:
-            tot.append([_p(f"Base imponible al {fmt_porcentaje(d['tipo_iva'])} %", est["der"]), _p(fmt_es(d["base"]), est["der"])])
-        tot.append([_p(f"IVA {fmt_porcentaje(d['tipo_iva'])} %", est["der"]), _p(fmt_es(d["cuota"]), est["der"])])
-    tot.insert(0, [_p("BASE IMPONIBLE", est["der"]), _p(fmt_es(datos.get("base_imponible")), est["der"])])
-    tot.append([_p("TOTAL FACTURA", est["der_neg"]), _p(fmt_es(datos.get("importe_total")), est["der_neg"])])
-    ret = datos.get("retencion")
-    if ret and ret.get("importe"):
-        tot.append([_p(f"Retención IRPF {fmt_porcentaje(ret.get('porcentaje') or '0')} %", est["der"]),
-                    _p(fmt_es(-Decimal(ret["importe"])), est["der"])])
-        tot.append([_p("TOTAL A PAGAR", est["der_neg"]), _p(fmt_es(datos.get("total_a_pagar")), est["der_neg"])])
-    tt = Table(tot, colWidths=[150 * mm, 30 * mm])
-    tt.setStyle(TableStyle([("LINEABOVE", (0, -1), (-1, -1), 0.6, AZUL)]))
-    story += [tt, Spacer(1, 5 * mm)]
-    # Condiciones de pago
-    pago = []
-    if datos.get("forma_pago"):
-        pago.append(f"Forma de pago: {datos['forma_pago']}")
-    if datos.get("iban"):
-        iban = re.sub(r"\s", "", datos["iban"])
-        pago.append("IBAN: " + " ".join(iban[i:i + 4] for i in range(0, len(iban), 4)))
-    if datos.get("vencimiento"):
-        pago.append(f"Vencimiento: {_d(datos['vencimiento'])}")
-    for t in pago:
-        story.append(_p(t, est["base"]))
-    if datos.get("observaciones"):
-        story += [Spacer(1, 3 * mm), _p(datos["observaciones"], est["base"])]
-    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm,
-                            topMargin=cabecera_alto, bottomMargin=22 * mm,
-                            title=f"{titulo} {datos.get('num_serie') or ''}", author=em.get("nombre") or "",
-                            creator=f"{APP_NOMBRE} {APP_VERSION}", invariant=1)
+    def _componer(partir: int) -> bytes:
+        buf = io.BytesIO()
+        story = []
+        # Partes
+        partes = Table([
+            [_p("EMISOR", est["tit"]), _p("CLIENTE", est["tit"])],
+            [_p(em.get("nombre"), est["neg"]), _p(de.get("nombre"), est["neg"])],
+            [_p(f"NIF: {em.get('nif') or ''}", est["base"]), _p(f"NIF: {de.get('nif') or ''}", est["base"])],
+            [_p(em.get("domicilio"), est["base"]), _p(de.get("domicilio"), est["base"])],
+        ], colWidths=[90 * mm, 90 * mm], splitInRow=partir)
+        partes.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("BOX", (1, 0), (1, -1), 0.6, AZUL),
+                                    ("LEFTPADDING", (0, 0), (-1, -1), 4)]))
+        story += [partes, Spacer(1, 4 * mm)]
+        # Referencias comerciales (se conservan aunque no formen parte del registro)
+        etiquetas = {"obra": "Obra", "certificacion": "Certificación nº", "pedido": "Pedido",
+                     "partida_presupuestaria": "Partida presupuestaria", "periodo": "Periodo facturado",
+                     "contrato": "Contrato", "proyecto": "Proyecto", "expediente": "Expediente"}
+        r_datos = datos.get("referencias") if isinstance(datos.get("referencias"), dict) else {}
+        orden = list(etiquetas) + sorted(k for k in r_datos if k not in etiquetas)  # orden fijo: PDF reproducible
+        refs = [(etiquetas.get(k, k.replace("_", " ").capitalize()), r_datos[k]) for k in orden
+                if isinstance(k, str) and isinstance(r_datos.get(k), str) and r_datos[k]]
+        if refs:
+            t = Table([[_p(f"{k}:", est["neg"]), _p(v, est["base"])] for k, v in refs], colWidths=[42 * mm, 138 * mm], splitInRow=partir)
+            t.setStyle(TableStyle([("BOTTOMPADDING", (0, 0), (-1, -1), 1), ("TOPPADDING", (0, 0), (-1, -1), 1)]))
+            story += [t, Spacer(1, 4 * mm)]
+        if es_rect and datos.get("rectificativa"):
+            r = datos["rectificativa"]
+            story += [_p(f"Rectifica la factura {r.get('num_serie_rectificada')} de fecha {_d(r.get('fecha_rectificada'))}. "
+                         f"Motivo: {r.get('motivo') or ''}", est["base"]), Spacer(1, 3 * mm)]
+        # Líneas
+        filas = [[_p("CONCEPTO", est["neg"]), _p("CANTIDAD", est["der_neg"]), _p("UD.", est["neg"]),
+                  _p("PRECIO", est["der_neg"]), _p("IMPORTE", est["der_neg"])]]
+        for l in _filas(datos.get("lineas")):
+            filas.append([_p(l.get("concepto"), est["base"]),
+                          _p(_imp(l.get("cantidad"), moneda=False), est["der"]),
+                          _p(l.get("unidad") or "", est["base"]),
+                          _p(_imp(l.get("precio"), moneda=False), est["der"]),
+                          _p(_imp(l.get("importe"), moneda=False), est["der"])])
+        tl = Table(filas, colWidths=[96 * mm, 20 * mm, 14 * mm, 24 * mm, 26 * mm], repeatRows=1, splitInRow=partir)
+        tl.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF5")),
+                                ("LINEBELOW", (0, 0), (-1, 0), 0.6, AZUL), ("LINEBELOW", (0, -1), (-1, -1), 0.4, GRIS),
+                                ("VALIGN", (0, 0), (-1, -1), "TOP")]))
+        story += [tl, Spacer(1, 4 * mm)]
+        # Totales
+        tot = []
+        # (un borrador a medio editar puede tener filas incompletas: la vista previa las muestra en blanco, nunca falla)
+        desglose = _filas(datos.get("desglose"))
+        for d in desglose:
+            if len(desglose) > 1:
+                tot.append([_p(f"Base imponible al {_pct(d.get('tipo_iva'))} %", est["der"]), _p(_imp(d.get("base")), est["der"])])
+            tot.append([_p(f"IVA {_pct(d.get('tipo_iva'))} %", est["der"]), _p(_imp(d.get("cuota")), est["der"])])
+        tot.insert(0, [_p("BASE IMPONIBLE", est["der"]), _p(_imp(datos.get("base_imponible")), est["der"])])
+        tot.append([_p("TOTAL FACTURA", est["der_neg"]), _p(_imp(datos.get("importe_total")), est["der_neg"])])
+        ret = datos.get("retencion") if isinstance(datos.get("retencion"), dict) else None
+        if ret and ret.get("importe"):
+            tot.append([_p(f"Retención IRPF {_pct(ret.get('porcentaje') or '0')} %", est["der"]),
+                        _p(_imp_negativo(ret["importe"]), est["der"])])
+            tot.append([_p("TOTAL A PAGAR", est["der_neg"]), _p(_imp(datos.get("total_a_pagar")), est["der_neg"])])
+        tt = Table(tot, colWidths=[150 * mm, 30 * mm], splitInRow=partir)
+        tt.setStyle(TableStyle([("LINEABOVE", (0, -1), (-1, -1), 0.6, AZUL)]))
+        story += [tt, Spacer(1, 5 * mm)]
+        # Condiciones de pago
+        pago = []
+        if datos.get("forma_pago"):
+            pago.append(f"Forma de pago: {datos['forma_pago']}")
+        if datos.get("iban"):
+            iban = re.sub(r"\s", "", datos["iban"])
+            pago.append("IBAN: " + " ".join(iban[i:i + 4] for i in range(0, len(iban), 4)))
+        if datos.get("vencimiento"):
+            pago.append(f"Vencimiento: {_d(datos['vencimiento'])}")
+        for t in pago:
+            story.append(_p(t, est["base"]))
+        if datos.get("observaciones"):
+            story += [Spacer(1, 3 * mm), _p(datos["observaciones"], est["base"])]
+        doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm,
+                                topMargin=cabecera_alto, bottomMargin=22 * mm,
+                                title=f"{titulo} {datos.get('num_serie') or ''}", author=em.get("nombre") or "",
+                                creator=f"{APP_NOMBRE} {APP_VERSION}", invariant=1)
+        doc.build(story, onFirstPage=primera, onLaterPages=lambda c, d: (setattr(d, "topMargin", 25 * mm), siguientes(c, d)))
+        return buf.getvalue()
 
-    class Doc2(SimpleDocTemplate):
-        pass
-    doc.build(story, onFirstPage=primera, onLaterPages=lambda c, d: (setattr(d, "topMargin", 25 * mm), siguientes(c, d)))
-    pdf = buf.getvalue()
+    try:
+        pdf = _componer(0)
+    except LayoutError:
+        # una fila más alta que la página (un concepto, un nombre o un domicilio muy largos): sin partir las filas entre
+        # páginas no se puede maquetar; solo entonces se parten (el resto de facturas no cambia)
+        pdf = _componer(1)
     info["paginas"] = len(PdfReader(io.BytesIO(pdf)).pages)
     return pdf, info
 

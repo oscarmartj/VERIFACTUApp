@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 from pathlib import Path
 
 from . import almacen, borradores, db
+from . import series as seriesmod
 from . import nif as nifmod
-from .extraccion import campos, inspeccion, texto
+from .extraccion import campos, extraccion_proceso, inspeccion, texto
 
 
 def _nombre_seguro(nombre: str) -> str:
@@ -36,13 +38,11 @@ def importar(con, *, empresa: dict, usuario_id: int, nombre: str, datos: bytes) 
             alta = inspeccion.rasterizar(datos, Path(td) / "qr", dpi=200, primera=1, ultima=1, max_px=2400)
             insp["qr"] = inspeccion.detectar_qr(alta[0]) if alta else []
         paginas = texto.leer(datos)
+        # Extracción de campos (y líneas de cabecera para el recorte del logotipo) en un proceso hijo limitado
+        ext = extraccion_proceso.extraer(paginas, nombre, empresa["nif"])
     except inspeccion.PDFNoValido as e:
         return {"nombre": nombre, "estado": "error", "error": str(e)}
-    ext = campos.Extractor(paginas, nombre, empresa["nif"]).extraer()
-    # Líneas de cabecera para el recorte del logotipo
-    lin = texto.lineas(paginas)
-    ext["_lineas_cabecera"] = [{"texto": l.texto, "bbox": l.bbox()} for l in lin if l.pagina == 1 and l.top < 0.2 * paginas[0].alto]
-    sug = borradores.clasificar(ext, insp, empresa)
+    sug = borradores.clasificar(ext, insp, empresa, duplicados_de(con, empresa["id"], ext))
     nativo = all(p.metodo == "texto_pdf" for p in paginas)
     from . import diario
     ruta = f"empresa_{empresa['id']}/originales/{sha}.pdf"
@@ -90,27 +90,134 @@ def extraccion(con, documento_id: int) -> dict | None:
     return d
 
 
-def duplicados_fiscales(con, empresa_id: int, documento_id: int) -> list[dict]:
-    """Misma identidad fiscal (emisor + número) en otros PDF distintos o en facturas ya expedidas."""
-    ext = extraccion(con, documento_id)
-    if not ext:
+def clave_numero(numero) -> str:
+    """Número de factura comparable: sin espacios, en mayúsculas y sin ceros a la izquierda en cada grupo de cifras.
+    «0166/26», «166/26» y «166 / 26» son el mismo número de la serie (series.probar los lee igual)."""
+    t = re.sub(r"\s+", "", str(numero or "")).upper()
+    return re.sub(r"\d+", lambda m: m.group().lstrip("0") or "0", t)
+
+
+def _filtro_numero(numero) -> tuple[str, str]:
+    """Clave del número y un fragmento que cualquier número equivalente contiene sin espacios (su grupo de cifras más
+    largo sin ceros a la izquierda), para acotar la consulta antes de comparar las claves."""
+    clave = clave_numero(numero)
+    return clave, max(re.findall(r"\d+", clave) or [""], key=len) or clave
+
+
+def _lecturas_serie(con, empresa_id: int, numero: str, patrones: list[str] | None = None) -> list[tuple[str, int, int]]:
+    """(patrón, número, año) con que cada serie de la empresa (o cada uno de `patrones`) lee el número. Con un patrón sin
+    separador entre el año y el número («{aaaa}{n}», «F{aa}{n}»), «20260166» y «2026166» son el mismo número 166 de 2026
+    (series.probar), que clave_numero no iguala: los ceros de relleno del número quedan dentro de un grupo de cifras."""
+    if patrones is None:
+        patrones = [s["patron"] for s in db.filas(con, "SELECT DISTINCT patron FROM series WHERE empresa_id=?", (empresa_id,))]
+    out = []
+    for patron in patrones:
+        try:
+            r = _probar_serie(patron, numero)
+        except (ValueError, re.error, TypeError):
+            continue
+        if r["coincide"]:
+            out.append((patron, r["numero"], r["anio"]))
+    return out
+
+
+def _probar_serie(patron: str, numero) -> dict:
+    """series.probar sin distinguir espacios ni mayúsculas («fra20260166» impreso es el «FRA{aaaa}{n}» de la serie): solo
+    para reconocer el mismo número, nunca para validar el que se expide."""
+    texto = str(numero or "")
+    r = {"coincide": False}
+    for variante in dict.fromkeys([texto, re.sub(r"\s+", "", texto), texto.upper(), re.sub(r"\s+", "", texto).upper()]):
+        r = seriesmod.probar(patron, variante)
+        if r["coincide"]:
+            break
+    return r
+
+
+def _equivalentes(con, empresa_id: int, numero: str, patrones: list[str] | None = None):
+    """Función que dice si otro número es el mismo que `numero` (misma clave_numero, o el mismo número y año leídos por el
+    patrón de una serie de la empresa) y los fragmentos que cualquier número equivalente contiene sin espacios (para acotar
+    la consulta)."""
+    clave, trozo = _filtro_numero(numero)
+    lecturas = _lecturas_serie(con, empresa_id, numero, patrones)
+
+    def igual(otro) -> bool:
+        if not otro:
+            return False
+        if clave_numero(otro) == clave:
+            return True
+        for patron, n, anio in lecturas:
+            try:
+                r = _probar_serie(patron, otro)
+            except (ValueError, re.error, TypeError):
+                continue
+            if r["coincide"] and (r["numero"], r["anio"]) == (n, anio):
+                return True
+        return False
+    trozos = list(dict.fromkeys([trozo] + [str(n) for _, n, _ in lecturas]))
+    return clave, igual, trozos
+
+
+def _sql_trozos(expr: str, trozos: list[str]) -> str:
+    return "(" + " OR ".join(f"instr(REPLACE(UPPER({expr}), ' ', ''), ?) > 0" for _ in trozos) + ")"
+
+
+def documentos_mismo_numero(con, empresa_id: int, numero: str, excluir_id: int | None = None,
+                            patrones: list[str] | None = None) -> list[dict]:
+    """Otros documentos de la empresa cuya última extracción tiene el mismo número (clave_numero: sin distinguir espacios,
+    mayúsculas ni ceros a la izquierda; o el mismo número y año según el patrón de una serie de la empresa), con su
+    clasificación, el NIF del emisor leído y si ya dieron lugar a una factura. `patrones`: los de las series que se
+    comparan (por omisión, todas las de la empresa)."""
+    if not numero:
         return []
+    clave, igual, trozos = _equivalentes(con, empresa_id, numero, patrones)
+    if not clave:
+        return []
+    filas = db.filas(con, f"""
+        SELECT d.id, d.nombre_archivo, d.subido_en, d.clasificacion, d.clasificacion_confirmada_en IS NOT NULL AS confirmado,
+               json_extract(e.datos, '$.emisor.nif.valor') AS emisor_nif,
+               EXISTS (SELECT 1 FROM facturas f WHERE f.documento_id = d.id) AS tiene_factura,
+               json_extract(e.datos, '$.numero.valor') AS numero_leido
+        FROM documentos d JOIN extracciones e ON e.id = (SELECT MAX(id) FROM extracciones WHERE documento_id = d.id)
+        WHERE d.empresa_id = ? AND d.id <> ?
+          AND {_sql_trozos("json_extract(e.datos, '$.numero.valor')", trozos)}
+        ORDER BY d.id""", (empresa_id, excluir_id or 0, *trozos))
+    return [{k: v for k, v in f.items() if k != "numero_leido"} for f in filas if igual(f["numero_leido"])]
+
+
+def facturas_mismo_numero(con, empresa_id: int, emisor_nif: str, numero: str, con_fecha: bool = False,
+                          patrones: list[str] | None = None) -> list[dict]:
+    """Facturas expedidas por el emisor con el mismo número (clave_numero o patrón de la serie), en cualquier entorno."""
+    if not numero:
+        return []
+    clave, igual, trozos = _equivalentes(con, empresa_id, numero, patrones)
+    filas = db.filas(con, f"""SELECT id, entorno, num_serie{', fecha_expedicion' if con_fecha else ''} FROM facturas
+                             WHERE empresa_id=? AND emisor_nif=? AND {_sql_trozos("num_serie", trozos)}
+                             ORDER BY id""", (empresa_id, emisor_nif, *trozos))
+    return [f for f in filas if igual(f["num_serie"])]
+
+
+def duplicados_de(con, empresa_id: int, ext: dict, excluir_id: int | None = None) -> list[dict]:
+    """Misma identidad fiscal (emisor + número) que la extracción `ext` en otros PDF o en facturas ya expedidas."""
     emisor = nifmod.normalizar((ext.get("emisor", {}).get("nif") or {}).get("valor") or "")
     numero = (ext.get("numero") or {}).get("valor")
     if not numero:
         return []
     out = []
-    for d in db.filas(con, "SELECT id, nombre_archivo, subido_en FROM documentos WHERE empresa_id=? AND id<>?", (empresa_id, documento_id)):
-        e2 = extraccion(con, d["id"])
-        if not e2:
-            continue
-        if ((e2.get("numero") or {}).get("valor") == numero
-                and nifmod.normalizar((e2.get("emisor", {}).get("nif") or {}).get("valor") or "") == emisor):
-            out.append({"tipo": "documento", "id": d["id"], "nombre": d["nombre_archivo"], "subido_en": d["subido_en"]})
-    for f in db.filas(con, "SELECT id, entorno, num_serie, fecha_expedicion FROM facturas WHERE empresa_id=? AND emisor_nif=? AND num_serie=?",
-                      (empresa_id, emisor, numero)):
+    for d in documentos_mismo_numero(con, empresa_id, numero, excluir_id):
+        if nifmod.normalizar(d["emisor_nif"] or "") == emisor:
+            out.append({"tipo": "documento", "id": d["id"], "nombre": d["nombre_archivo"], "subido_en": d["subido_en"],
+                        "clasificacion": d["clasificacion"], "confirmado": bool(d["confirmado"])})
+    for f in facturas_mismo_numero(con, empresa_id, emisor, numero, con_fecha=True):
         out.append({"tipo": "factura", **f})
     return out
+
+
+def duplicados_fiscales(con, empresa_id: int, documento_id: int) -> list[dict]:
+    """Misma identidad fiscal (emisor + número) en otros PDF distintos o en facturas ya expedidas."""
+    ext = extraccion(con, documento_id)
+    if not ext:
+        return []
+    return duplicados_de(con, empresa_id, ext, documento_id)
 
 
 def crear_borrador(con, *, documento_id: int, usuario_id: int) -> int:

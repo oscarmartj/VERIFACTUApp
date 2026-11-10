@@ -1,0 +1,78 @@
+{
+  "archivo": "h3c_01_banda_oscura_totales_caja.pdf",
+  "estilo": "Factura de empresa de alquiler audiovisual en Carlito: cabecera en BANDA OSCURA (azul noche) a todo el ancho con TODO el texto en blanco: monograma, razón social, actividad, domicilio, CIF y contacto del emisor a la izquierda y, a la derecha dentro de la misma banda, título 'FACTURA' y rejilla Número / Fecha / Vencimiento; filete ámbar bajo la banda; bloques 'FACTURAR A' y 'DATOS DEL SERVICIO' (evento, lugar, fechas del evento, su pedido); tabla con cabecera gris Concepto | Cant. | Precio | Dto. | Importe (€), detalle gris bajo algunas líneas y un 10 % de descuento en la primera; totales Base imponible / IVA 21 % / TOTAL dentro de una CAJA OSCURA con texto blanco; forma de pago e IBAN a la izquierda; pie registral, A4",
+  "empresa_nif": "B00615724",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "AV-2026-0412",
+  "fecha": "2026-10-31",
+  "emisor": {
+    "nombre": "Audiovisuales Peña Mayor, S.L.",
+    "nif": "B00615724",
+    "domicilio_contiene": "33192"
+  },
+  "destinatario": {
+    "nombre": "Congresos y Eventos Ría de Avilés, S.L.",
+    "nif": "B00286195",
+    "domicilio_contiene": "33402"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Pantalla LED modular P3,9",
+      "cantidad": "2.00",
+      "precio": "690.00",
+      "importe": "1242.00"
+    },
+    {
+      "concepto_contiene": "Proyector láser de 12.000",
+      "cantidad": "2.00",
+      "precio": "285.00",
+      "importe": "570.00"
+    },
+    {
+      "concepto_contiene": "Microfonía inalámbrica de mano",
+      "cantidad": "2.00",
+      "precio": "96.50",
+      "importe": "193.00"
+    },
+    {
+      "concepto_contiene": "Mesa de mezclas digital",
+      "cantidad": "2.00",
+      "precio": "145.00",
+      "importe": "290.00"
+    },
+    {
+      "concepto_contiene": "Técnico de sonido e imagen",
+      "cantidad": "18.50",
+      "precio": "32.00",
+      "importe": "592.00"
+    },
+    {
+      "concepto_contiene": "Transporte, montaje y desmontaje",
+      "cantidad": "1.00",
+      "precio": "340.00",
+      "importe": "340.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "3227.00",
+      "cuota": "677.67"
+    }
+  ],
+  "base_imponible": "3227.00",
+  "cuota_iva": "677.67",
+  "total_factura": "3904.67",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "pedido": "EV-26-0188"
+  },
+  "iban": "ES0001824417209366504412",
+  "forma_pago_contiene": "Transferencia bancaria a 30 días",
+  "indicios_esperados": [
+    "descuento"
+  ],
+  "notas": "Factura propia de una empresa de alquiler audiovisual (empresa usuaria = emisora) sin marcas VERI*FACTU: documento preparatorio. Toda la cabecera va en una banda oscura con texto BLANCO: nombre, actividad, domicilio (33192 Llanera), CIF y contacto del emisor a la izquierda y el título 'FACTURA' con Número AV-2026-0412, Fecha 31/10/2026 y Vencimiento 30/11/2026 a la derecha. Los totales también van en blanco dentro de una caja oscura. La primera línea lleva un 10 % en la columna 'Dto.': 2 x 690,00 = 1.380,00 - 10 % = 1.242,00 (precio esperado = precio unitario antes del descuento, importe = neto de la línea). Cantidad decimal 18,5 h. Distractores: vencimiento 30/11/2026, fechas del evento 28 y 29/10/2026, '4 x 2,5 m', '12.000 lúmenes', '32 canales', 'kit de 4 unidades', 'nave 3' y datos registrales en el pie. Base 3.227,00 x 21 % = 677,67; total 3.904,67."
+}

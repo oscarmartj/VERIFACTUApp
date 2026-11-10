@@ -1,6 +1,6 @@
 """Genera los PDF sintéticos de prueba (tests/fixtures).
 
-IMPORTANTE: el PDF real de referencia («Nº166 PFDI RESIDENCIAL OLMOS 09-26.pdf») no estaba
+IMPORTANTE: el PDF real de referencia (la factura 166/26 del usuario) no estaba
 disponible. "replica_166-26.pdf" es una RÉPLICA SINTÉTICA construida a partir de los datos de
 referencia facilitados (importes, número, fecha, certificación, pedido, partida). Los NIF,
 domicilios, IBAN y textos de detalle son FICTICIOS. No es el documento original ni debe
@@ -43,10 +43,10 @@ REPLICA = {
     "fecha": "25/09/2026",
     "cliente": ["PROMOCIONES FICTICIAS DESARROLLOS INMOBILIARIOS, S.A.", "C/ Ficticia de Pruebas, 1", "28000 MADRID",
                 f"C.I.F.: {NIF_CLIENTE_REPLICA[0]}-{NIF_CLIENTE_REPLICA[1:]}"],
-    "referencias": [("Obra", "PFDI RESIDENCIAL OLMOS"), ("Certificación nº", "18"), ("Pedido", "PC24-00987"),
+    "referencias": [("Obra", "DEMO RESIDENCIAL ALAMO"), ("Certificación nº", "18"), ("Pedido", "PC24-00987"),
                     ("Partida presupuestaria", "G09876543"), ("Periodo facturado", "Septiembre 2026")],
     "lineas": [("Asistencia técnica y coordinación de seguridad y salud en obra", "1,00", "mes", "850,00", "850,00"),
-               ("Residencial Olmos. Certificación nº 18 - septiembre 2026", None, None, None, None)],
+               ("Residencial Alamo. Certificación nº 18 - septiembre 2026", None, None, None, None)],
     "base": "850,00", "iva_pct": "21", "cuota": "178,50", "total": "1.028,50",
     "retencion": None,
     "pago": ["Forma de pago: transferencia bancaria a 60 días fecha factura.",

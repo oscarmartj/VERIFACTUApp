@@ -23,6 +23,35 @@ La aplicación **bloquea** la producción hasta que se cumplen los requisitos qu
 10. Representante en la cabecera (`Cabecera/Representante`) cuando remita un tercero distinto del obligado.
 11. Política de purga de borradores descartados (tarea programada).
 12. Casos no soportados (bloqueados hoy): exentas, inversión del sujeto pasivo, no sujetas, recargo de equivalencia, suplidos, simplificadas (F2), sustitutivas (F3), rectificativas por sustitución, IGIC/IPSI, destinatarios extranjeros, otras divisas, duplicados del art. 14 ROF.
-13. Escaneos de mala calidad: el OCR local acierta ~89 % de los campos en escaneos simulados; los valores dudosos se marcan para revisión. Opcional: IA de extracción solo como propuesta que el usuario confirma, con consentimiento expreso y valorando el envío de datos a terceros.
+13. Escaneos de mala calidad: el OCR local acierta ~90 % de los campos en escaneos simulados; los valores dudosos se marcan para revisión. Opcional: IA de extracción solo como propuesta que el usuario confirma, con consentimiento expreso y valorando el envío de datos a terceros.
 14. Limitaciones conocidas de la recuperación: el diario se lee completo en cada arranque (adecuado para el volumen de una pyme; para volúmenes altos, índice o puntos de control en el manifiesto de la copia); certificados, autorizaciones de producción y series confirmadas sin uso posteriores a la última copia deben volver a introducirse tras restaurar; una línea del diario ilegible exige revisión manual y `forzar=True` para restaurar.
 15. Despliegue de varias instancias: el diseño asume un único proceso de aplicación (SQLite y un remitente por empresa y entorno). Para varias instancias, migrar a PostgreSQL y renovar el bloqueo del remitente.
+16. **Límites conocidos del extractor** (cuarta verificación adversarial, 10/11/2026). Se corrigieron los 23 hallazgos
+    confirmados y lo que salió en dos rondas de reparación, pero los verificadores siguieron construyendo variantes. Las
+    abiertas son maquetas hechas a propósito; ninguna inventa datos ni permite expedir sin que el usuario revise y
+    confirme el borrador, pero algunas proponen un valor erróneo **sin marcarlo en ámbar**. Por eso la revisión del
+    borrador frente al original sigue siendo imprescindible.
+    - **Partes**: nombre comercial solo en el membrete (razón social y CIF solo en el pie) tomado como destinatario; un
+      tercero calificado antes del rótulo del NIF («Cesionario CIF: …», «Pago a favor de: CIF …») bajo el bloque del
+      cliente; NIF del cliente con una letra O o I en lugar de una cifra junto a un tercero presentado como «Obra
+      promovida por»; dirección de envío impresa tras el CIF del cliente que sustituye al domicilio fiscal; razón social
+      del cliente separada dos renglones del resto de su bloque.
+    - **Números e importes**: referencia a otra factura impresa por encima o a la altura del número propio cuando este
+      tiene un rótulo débil; varios tipos de IVA con una sola base impresa y la cuota del tipo reducido con un rótulo no
+      reconocido («IVA reducido», «Imp. 10 %»): la base y la cuota proponen solo las del tipo general (lo detecta el
+      descuadre del total, que bloquea).
+    - **Total**: un total impreso que suma tres o más recargos (tasas, portes, envases) o los cita sin decimales puede
+      no detectarse y proponerse base + cuota como total.
+    - **Retención de garantía** redactada con otras fórmulas: se pide la confirmación genérica de la retención y, si el
+      usuario la confirma, el PDF la rotula como IRPF.
+    - **Texto oculto**: texto invisible sobre una imagen de fondo con contenido (banda de pie, trama de seguridad)
+      manda la página entera al OCR y pierde campos de una factura legítima; sigue habiendo variantes de fuentes
+      cuyo /ToUnicode no dice lo que dibujan (se contrastan las cifras con la imagen, no las letras).
+    - **Confirmaciones de más** en facturas correctas: nombres de cliente con minúsculas antes de la sigla y la forma
+      jurídica; cabecera con razón social sin NIF; código de cliente suelto tomado por NIF ilegible; resúmenes «a
+      origen / anteriores» o «saldo pendiente» (TOTAL_OTRA_CIFRA); renglones de pie sin punto unidos en una frase de
+      garantía; desglose con filas a cero de otros tipos; tablas monoespaciadas con filetes verticales entre cifras;
+      descuento por línea con solo «Concepto | Precio | Importe» (bloqueo LINEA_SIN_CANTIDAD: hay que indicar la
+      cantidad).
+    - **Coste**: un PDF hostil de 30 páginas tarda unos 35 s en extraerse (límite del proceso hijo: 120 s); una factura
+      de 2.500 renglones tarda unos 12 s en expedirse y por encima de 3.000 se bloquea (DOCUMENTO_DEMASIADO_LARGO).

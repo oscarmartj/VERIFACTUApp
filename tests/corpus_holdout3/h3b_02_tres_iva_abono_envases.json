@@ -1,0 +1,134 @@
+{
+  "archivo": "h3b_02_tres_iva_abono_envases.pdf",
+  "estilo": "Factura de distribuidor de bebidas y alimentación para hostelería (Carlito, acentos terracota): emblema circular con iniciales y nombre comercial, datos del emisor debajo, caja 'FACTURA' a la derecha con filas Número / Fecha / Nº cliente / Ruta / Albarán, caja de cliente y punto de entrega, tabla en cebra Código | Descripción | Cant. | Precio | % IVA | Importe con IVA 4 %, 10 % y 21 % mezclados línea a línea (rotulados 4,00 / 10,00 / 21,00), línea de depósito de envases y línea NEGATIVA 'Abono envases' con cantidad -2, resumen de IVA TRASPUESTO (una columna por tipo: IVA 4 % | IVA 10 % | IVA 21 % | Totales, filas Base imponible / Cuota IVA) y caja 'TOTAL FACTURA', pago por recibo domiciliado, A4",
+  "empresa_nif": "B00619759",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "F2611-0874",
+  "fecha": "2026-11-03",
+  "emisor": {
+    "nombre": "Bebidas y Alimentación Ribera del Órbigo, S.L.",
+    "nif": "B00619759",
+    "domicilio_contiene": "24350"
+  },
+  "destinatario": {
+    "nombre": "Hostelería Puerta Obispo, S.L.",
+    "nif": "B00380618",
+    "domicilio_contiene": "24700"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Leche entera UHT",
+      "cantidad": "12.00",
+      "precio": "5.34",
+      "importe": "64.08"
+    },
+    {
+      "concepto_contiene": "Huevos frescos clase L",
+      "cantidad": "4.00",
+      "precio": "7.95",
+      "importe": "31.80"
+    },
+    {
+      "concepto_contiene": "Queso tierno de vaca",
+      "cantidad": "6.42",
+      "precio": "9.85",
+      "importe": "63.24"
+    },
+    {
+      "concepto_contiene": "Pan de barra precocido",
+      "cantidad": "3.00",
+      "precio": "11.60",
+      "importe": "34.80"
+    },
+    {
+      "concepto_contiene": "Tomate de rama",
+      "cantidad": "8.50",
+      "precio": "1.92",
+      "importe": "16.32"
+    },
+    {
+      "concepto_contiene": "Café en grano tueste",
+      "cantidad": "6.00",
+      "precio": "14.90",
+      "importe": "89.40"
+    },
+    {
+      "concepto_contiene": "Azúcar en sobres",
+      "cantidad": "2.00",
+      "precio": "17.25",
+      "importe": "34.50"
+    },
+    {
+      "concepto_contiene": "Agua mineral natural",
+      "cantidad": "5.00",
+      "precio": "4.68",
+      "importe": "23.40"
+    },
+    {
+      "concepto_contiene": "Zumo de melocotón",
+      "cantidad": "2.00",
+      "precio": "13.44",
+      "importe": "26.88"
+    },
+    {
+      "concepto_contiene": "Cerveza rubia barril",
+      "cantidad": "3.00",
+      "precio": "79.50",
+      "importe": "238.50"
+    },
+    {
+      "concepto_contiene": "Refresco de cola",
+      "cantidad": "4.00",
+      "precio": "14.64",
+      "importe": "58.56"
+    },
+    {
+      "concepto_contiene": "Vino tinto joven",
+      "cantidad": "2.00",
+      "precio": "27.90",
+      "importe": "55.80"
+    },
+    {
+      "concepto_contiene": "Depósito envase barril",
+      "cantidad": "3.00",
+      "precio": "30.00",
+      "importe": "90.00"
+    },
+    {
+      "concepto_contiene": "Abono envases",
+      "cantidad": "-2.00",
+      "precio": "30.00",
+      "importe": "-60.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "4.00",
+      "base": "210.24",
+      "cuota": "8.41"
+    },
+    {
+      "tipo_iva": "10.00",
+      "base": "174.18",
+      "cuota": "17.42"
+    },
+    {
+      "tipo_iva": "21.00",
+      "base": "382.86",
+      "cuota": "80.40"
+    }
+  ],
+  "base_imponible": "767.28",
+  "cuota_iva": "106.23",
+  "total_factura": "873.51",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "albaran": "AL-88412"
+  },
+  "iban": null,
+  "forma_pago_contiene": "Recibo domiciliado",
+  "indicios_esperados": [],
+  "notas": "Factura propia del distribuidor (empresa usuaria = emisor) sin marcas VERI*FACTU: documento preparatorio. Tres tipos de IVA en la misma tabla, con columna '% IVA' rotulada con dos decimales (4,00 / 10,00 / 21,00) y líneas de distinto tipo intercaladas. Envases retornables: 'Depósito envase barril 30 L' (3 x 30,00 = 90,00) y la línea NEGATIVA 'Abono envases barril 30 L devueltos' con cantidad -2 x 30,00 = -60,00, ambas al 21 % (siguen al producto). El abono de envases reduce la base del 21 %: NO es una factura rectificativa ni un descuento. Cantidades decimales en kg (6,42 y 8,5). Resumen de IVA traspuesto: los tipos van en columnas y las bases y cuotas en filas, con columna 'Totales'. Pago por recibo domiciliado con la cuenta del cliente enmascarada (****3312): no hay IBAN completo. Distractores: Nº cliente 4417, ruta R-07, 52 bultos y peso aproximado, vencimiento 03/12/2026, '1.000 ud.' y '0,5 L' en los conceptos. 4 %: 210,24 -> 8,41; 10 %: 174,18 -> 17,42; 21 %: 382,86 -> 80,40; base 767,28, IVA 106,23, total 873,51."
+}

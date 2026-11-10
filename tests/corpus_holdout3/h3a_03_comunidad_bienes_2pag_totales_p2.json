@@ -1,0 +1,214 @@
+{
+  "archivo": "h3a_03_comunidad_bienes_2pag_totales_p2.pdf",
+  "estilo": "Factura de una comunidad de bienes (C.B., CIF E con guion) de electricidad y fontanería a una comunidad de propietarios (CIF H), aspecto de impresora de líneas en JetBrains Mono y US Letter: cabecera de texto con datos 'Nº ......: / Fecha ...: / Página ..:' con puntos guía, recuadro CLIENTE, línea 'Obra:', tabla CÓDIGO / DESCRIPCIÓN / UD / CANTIDAD / PRECIO / IMPORTE entre filetes que llena la página 1 (conceptos de dos renglones) y continúa sin 'Suma y sigue'; la página 2 repite en una línea el emisor, el número y la fecha y contiene solo los totales con puntos guía, la forma de pago, las observaciones y la composición de la C.B. con los DNI de los comuneros; fecha dd-mm-aaaa, importes 1.234,56 sin €",
+  "empresa_nif": "E00728154",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "LO-2026/093",
+  "fecha": "2026-10-30",
+  "emisor": {
+    "nombre": "Instalaciones Lasheras Ortín, C.B.",
+    "nif": "E00728154",
+    "domicilio_contiene": "44600"
+  },
+  "destinatario": {
+    "nombre": "Comunidad de Propietarios Residencial Las Acacias",
+    "nif": "H00690271",
+    "domicilio_contiene": "44580"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Mano de obra oficial",
+      "cantidad": "32.00",
+      "precio": "27.50",
+      "importe": "880.00"
+    },
+    {
+      "concepto_contiene": "Mano de obra ayudante",
+      "cantidad": "32.00",
+      "precio": "19.80",
+      "importe": "633.60"
+    },
+    {
+      "concepto_contiene": "Cable RZ1-K 0,6/1 kV 1x16",
+      "cantidad": "96.00",
+      "precio": "3.42",
+      "importe": "328.32"
+    },
+    {
+      "concepto_contiene": "Cable RZ1-K 0,6/1 kV 1x10",
+      "cantidad": "64.00",
+      "precio": "2.27",
+      "importe": "145.28"
+    },
+    {
+      "concepto_contiene": "Tubo rígido PVC M40",
+      "cantidad": "22.00",
+      "precio": "4.15",
+      "importe": "91.30"
+    },
+    {
+      "concepto_contiene": "Abrazadera metálica M40",
+      "cantidad": "60.00",
+      "precio": "0.48",
+      "importe": "28.80"
+    },
+    {
+      "concepto_contiene": "Centralización de contadores modular",
+      "cantidad": "1.00",
+      "precio": "612.00",
+      "importe": "612.00"
+    },
+    {
+      "concepto_contiene": "Interruptor general de maniobra",
+      "cantidad": "1.00",
+      "precio": "148.70",
+      "importe": "148.70"
+    },
+    {
+      "concepto_contiene": "Caja general de protección",
+      "cantidad": "1.00",
+      "precio": "96.40",
+      "importe": "96.40"
+    },
+    {
+      "concepto_contiene": "Fusible NH-00 100 A",
+      "cantidad": "3.00",
+      "precio": "7.85",
+      "importe": "23.55"
+    },
+    {
+      "concepto_contiene": "Pica de toma de tierra",
+      "cantidad": "2.00",
+      "precio": "18.90",
+      "importe": "37.80"
+    },
+    {
+      "concepto_contiene": "Cable de cobre desnudo",
+      "cantidad": "18.00",
+      "precio": "4.96",
+      "importe": "89.28"
+    },
+    {
+      "concepto_contiene": "Regleta de conexión y bornas",
+      "cantidad": "8.00",
+      "precio": "6.35",
+      "importe": "50.80"
+    },
+    {
+      "concepto_contiene": "Luminaria LED estanca 36",
+      "cantidad": "2.00",
+      "precio": "41.60",
+      "importe": "83.20"
+    },
+    {
+      "concepto_contiene": "Tubo PVC evacuación 110",
+      "cantidad": "9.00",
+      "precio": "14.75",
+      "importe": "132.75"
+    },
+    {
+      "concepto_contiene": "Codo PVC 87º",
+      "cantidad": "12.00",
+      "precio": "3.10",
+      "importe": "37.20"
+    },
+    {
+      "concepto_contiene": "Injerto simple PVC",
+      "cantidad": "6.00",
+      "precio": "5.85",
+      "importe": "35.10"
+    },
+    {
+      "concepto_contiene": "Manguito de dilatación PVC",
+      "cantidad": "4.00",
+      "precio": "6.40",
+      "importe": "25.60"
+    },
+    {
+      "concepto_contiene": "Abrazadera isofónica 110",
+      "cantidad": "16.00",
+      "precio": "2.95",
+      "importe": "47.20"
+    },
+    {
+      "concepto_contiene": "Adhesivo para PVC",
+      "cantidad": "2.00",
+      "precio": "11.20",
+      "importe": "22.40"
+    },
+    {
+      "concepto_contiene": "Limpiador desengrasante para PVC",
+      "cantidad": "1.00",
+      "precio": "7.90",
+      "importe": "7.90"
+    },
+    {
+      "concepto_contiene": "Andamio tubular en patio",
+      "cantidad": "2.00",
+      "precio": "145.00",
+      "importe": "290.00"
+    },
+    {
+      "concepto_contiene": "Contenedor de escombros",
+      "cantidad": "1.00",
+      "precio": "165.00",
+      "importe": "165.00"
+    },
+    {
+      "concepto_contiene": "Gestión de residuos de obra",
+      "cantidad": "1.35",
+      "precio": "38.00",
+      "importe": "51.30"
+    },
+    {
+      "concepto_contiene": "Albañilería: apertura y cierre",
+      "cantidad": "6.00",
+      "precio": "24.50",
+      "importe": "147.00"
+    },
+    {
+      "concepto_contiene": "Mortero de reparación tixotrópico",
+      "cantidad": "4.00",
+      "precio": "16.80",
+      "importe": "67.20"
+    },
+    {
+      "concepto_contiene": "Pintura plástica blanca",
+      "cantidad": "2.00",
+      "precio": "23.45",
+      "importe": "46.90"
+    },
+    {
+      "concepto_contiene": "Revisión final, pruebas de",
+      "cantidad": "1.00",
+      "precio": "85.00",
+      "importe": "85.00"
+    },
+    {
+      "concepto_contiene": "Desplazamientos de vehículo",
+      "cantidad": "1.00",
+      "precio": "60.00",
+      "importe": "60.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "4469.58",
+      "cuota": "938.61"
+    }
+  ],
+  "base_imponible": "4469.58",
+  "cuota_iva": "938.61",
+  "total_factura": "5408.19",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "obra": "Renovación de montantes y bajantes, portal 2"
+  },
+  "iban": "ES0031315151717191910093",
+  "forma_pago_contiene": "Ingreso en cuenta",
+  "indicios_esperados": [],
+  "notas": "Factura propia de una comunidad de bienes (emisora, CIF E) sin marcas VERI*FACTU: documento preparatorio. Dos páginas: las 29 líneas ocupan toda la página 1 y la tabla termina sin 'Suma y sigue'; la página 2 solo repite emisor, número y fecha en una línea y contiene la base, el IVA y el total. Trampas: CIF del emisor y del cliente con guion (E-..., H-...); en la página 2 figuran los DNI de los dos comuneros (Andrés y Rubén Lasheras Ortín, 50 % cada uno), que no son el NIF del emisor; nombre comercial 'INSTALACIONES LASHERAS ORTÍN, C.B.' en mayúsculas en la cabecera; observaciones con fechas (13-10-2026, 24-10-2026), parte de trabajo nº 4417 y vencimiento 29-11-2026; cantidad decimal 1,35 t; códigos de artículo con guion. Todas las líneas al 21 %. Base 4.469,58 x 21 % = 938,6118 -> 938,61; total 5.408,19."
+}

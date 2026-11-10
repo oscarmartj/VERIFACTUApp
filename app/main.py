@@ -108,6 +108,11 @@ def crear_app() -> FastAPI:
             resp.headers.setdefault("Cache-Control", "no-store")
         return resp
 
+    @app.exception_handler(UnicodeEncodeError)
+    async def error_texto(request: Request, exc: UnicodeEncodeError):
+        # texto recibido que no puede guardarse (p. ej. un sustituto UTF-16 suelto): la transacción ya se ha deshecho
+        return JSONResponse({"detail": "El texto enviado contiene caracteres no válidos."}, status_code=422)
+
     @app.exception_handler(Exception)
     async def error_generico(request: Request, exc: Exception):
         try:

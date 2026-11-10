@@ -1,0 +1,46 @@
+{
+  "archivo": "h3a_02_fundacion_parrafo_importe_unico.pdf",
+  "estilo": "Factura de una fundación (CIF G) a una empresa en formato A5 tipo carta, Liberation Serif: membrete centrado con lema en cursiva y datos en una línea, título 'F A C T U R A' espaciado, datos a la izquierda (Nº de factura / Fecha de emisión en letra / Su pedido nº) y recuadro 'Facturado a:' a la derecha, SIN tabla: apartado 'Concepto' con dos párrafos de texto corrido y un único importe con puntos guía ('Importe de los servicios'), IVA 21 % y 'Total factura'; forma de pago en frase, IBAN en renglón propio y pie con el registro de fundaciones",
+  "empresa_nif": "B00624189",
+  "tipo_documento": "factura",
+  "situacion_esperada": "recibida",
+  "numero": "2026/017",
+  "fecha": "2026-11-04",
+  "emisor": {
+    "nombre": "Fundación Llano de Almagre",
+    "nif": "G00519041",
+    "domicilio_contiene": "30820"
+  },
+  "destinatario": {
+    "nombre": "Conservas Vegetales Sangonera, S.L.",
+    "nif": "B00624189",
+    "domicilio_contiene": "30835"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Diseño e impartición del programa",
+      "cantidad": null,
+      "precio": null,
+      "importe": "3172.50"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "3172.50",
+      "cuota": "666.23"
+    }
+  ],
+  "base_imponible": "3172.50",
+  "cuota_iva": "666.23",
+  "total_factura": "3838.73",
+  "retencion": null,
+  "total_a_pagar": null,
+  "referencias": {
+    "pedido": "4500118274"
+  },
+  "iban": "ES0023234545676789890017",
+  "forma_pago_contiene": "Transferencia bancaria",
+  "indicios_esperados": [],
+  "notas": "Factura RECIBIDA por la empresa usuaria (destinataria, conservera) de una fundación con CIF G. Sin tabla de líneas: el servicio se describe en dos párrafos de texto corrido y hay un único importe ('Importe de los servicios 3.172,50 €'), que es la única línea esperada (sin cantidad ni precio). Trampas: fecha de emisión escrita en letra ('4 de noviembre de 2026'); fechas en el texto (6, 13, 20 y 27 de octubre, 30 de octubre, vencimiento 4 de diciembre de 2026); '38 participantes'; número de pedido del cliente de 10 dígitos (4500118274); número de registro de la fundación (312); 'entidad sin ánimo de lucro' en el pie pese a que la factura lleva IVA 21 %. Base 3.172,50 x 21 % = 666,225 -> 666,23 (half-up); total 3.838,73."
+}

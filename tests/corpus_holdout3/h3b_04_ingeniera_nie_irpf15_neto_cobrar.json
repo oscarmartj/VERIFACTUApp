@@ -1,0 +1,73 @@
+{
+  "archivo": "h3b_04_ingeniera_nie_irpf15_neto_cobrar.pdf",
+  "estilo": "Factura de ingeniera técnica autónoma (persona física con NIE 'Y'), LiberationSerif: banda lateral izquierda verde petróleo a toda altura con nombre en dos renglones, profesión, NIE con guiones, colegiación, domicilio, contacto y datos bancarios; a la derecha título 'FACTURA', 'N.º 2026/017' y lugar y fecha en formato largo ('Alicante, 2 de noviembre de 2026'), bloque 'Cliente', expediente, tabla con filetes Concepto | Cant. | Ud. | Precio | Importe y conceptos multilínea, totales apilados Base imponible / IVA (21 %) / Total factura / 'Retención a cuenta IRPF (15 %)' en negativo / 'Neto a cobrar', A4",
+  "empresa_nif": "Y4444444F",
+  "tipo_documento": "factura",
+  "situacion_esperada": "preparatorio",
+  "numero": "2026/017",
+  "fecha": "2026-11-02",
+  "emisor": {
+    "nombre": "Joana Ferraz Domingues",
+    "nif": "Y4444444F",
+    "domicilio_contiene": "03001"
+  },
+  "destinatario": {
+    "nombre": "Envases Plásticos del Vinalopó, S.L.",
+    "nif": "B00273193",
+    "domicilio_contiene": "03114"
+  },
+  "lineas": [
+    {
+      "concepto_contiene": "Proyecto técnico de legalización",
+      "cantidad": "1.00",
+      "precio": "1480.00",
+      "importe": "1480.00"
+    },
+    {
+      "concepto_contiene": "Dirección técnica de la instalación",
+      "cantidad": "1.00",
+      "precio": "640.00",
+      "importe": "640.00"
+    },
+    {
+      "concepto_contiene": "Horas de ingeniería de detalle",
+      "cantidad": "13.50",
+      "precio": "46.40",
+      "importe": "626.40"
+    },
+    {
+      "concepto_contiene": "Visitas técnicas",
+      "cantidad": "5.00",
+      "precio": "85.00",
+      "importe": "425.00"
+    },
+    {
+      "concepto_contiene": "Estudio lumínico",
+      "cantidad": "1.00",
+      "precio": "390.00",
+      "importe": "390.00"
+    }
+  ],
+  "desglose": [
+    {
+      "tipo_iva": "21.00",
+      "base": "3561.40",
+      "cuota": "747.89"
+    }
+  ],
+  "base_imponible": "3561.40",
+  "cuota_iva": "747.89",
+  "total_factura": "4309.29",
+  "retencion": {
+    "porcentaje": "15.00",
+    "importe": "534.21"
+  },
+  "total_a_pagar": "3775.08",
+  "referencias": {
+    "expediente": "ING-26-031"
+  },
+  "iban": "ES0003117284905561230418",
+  "forma_pago_contiene": "Transferencia bancaria",
+  "indicios_esperados": [],
+  "notas": "Factura propia de una ingeniera técnica autónoma (persona física extranjera con NIE que empieza por Y, impreso con guiones 'Y-4444444-F'; empresa usuaria = emisora) sin marcas VERI*FACTU: documento preparatorio. El nombre de la emisora va partido en dos renglones dentro de una banda lateral oscura (texto blanco) junto con el NIE, la colegiación (n.º 4.187), el domicilio y el IBAN; la fecha está en formato largo ('Alicante, 2 de noviembre de 2026'). Conceptos largos que ocupan 2 renglones (concepto_contiene = comienzo del primero); cantidad decimal 13,5 h. La retención se rotula 'Retención a cuenta IRPF (15 %)' con importe negativo y el líquido 'Neto a cobrar'. Distractores: potencia 180 kW y 'nave 2' en el concepto, plazo de 30 días, referencia a la Ley 35/2006. Base 3.561,40 x 21 % = 747,89; total factura 4.309,29; IRPF 15 % = 534,21; neto a cobrar 3.775,08."
+}

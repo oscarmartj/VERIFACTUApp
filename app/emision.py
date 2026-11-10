@@ -98,7 +98,8 @@ def validar_borrador(con, borrador: dict, entorno: str) -> tuple[list[dict], dic
     datos = json.loads(borrador["datos"])
     hoy = db.ahora().date()
     es_rect = bool(borrador.get("rectifica_factura_id"))
-    serie = series.identificar(con, empresa["id"], entorno, datos.get("num_serie") or "", hoy.year,
+    ns = datos.get("num_serie")  # un valor guardado no textual lo notifica validar() como DATO_NO_VALIDO
+    serie = series.identificar(con, empresa["id"], entorno, ns if isinstance(ns, str) else "", hoy.year,
                                "rectificativa" if es_rect else "ordinaria")
     inc = borradores.validar(con, empresa, documento if not es_rect else None, datos,
                              extraccion=extraccion_de(con, borrador), serie=serie, es_rectificativa=es_rect,
@@ -327,10 +328,10 @@ def emitir(con, *, borrador_id: int, usuario_id: int, entorno: str, clave_idempo
                                       "rectificativa" if b.get("rectifica_factura_id") else "ordinaria")
         if not serie_tx or serie_tx["numero_detectado"] != serie_tx["siguiente_numero"]:
             raise ErrorEmision("La numeración ha cambiado (otra factura se expidió a la vez). Revise el número.")
-        dup = db.fila(con, "SELECT id FROM facturas WHERE empresa_id=? AND emisor_nif=? AND num_serie=?",
-                      (empresa["id"], datos["emisor"]["nif"], datos["num_serie"]))
+        from .importacion import facturas_mismo_numero
+        dup = facturas_mismo_numero(con, empresa["id"], datos["emisor"]["nif"], datos["num_serie"])
         if dup:
-            raise ErrorEmision(f"Ya existe la factura {datos['num_serie']}")
+            raise ErrorEmision(f"Ya existe la factura {dup[0]['num_serie']}")
         ruta_pdf = f"empresa_{empresa['id']}/{entorno}/facturas/{sha256_txt(canon)[:16]}.pdf"
         cur = con.execute("""INSERT INTO facturas (empresa_id, entorno, borrador_id, documento_id, clave_idempotencia, serie_id,
             numero, num_serie, fecha_expedicion, tipo_factura, emisor_nif, destinatario_nif, destinatario_nombre, cuota_total,
@@ -521,6 +522,11 @@ def vista_previa(con, borrador_id: int) -> tuple[bytes, dict]:
     b = db.fila(con, "SELECT * FROM borradores WHERE id=?", (borrador_id,))
     documento = cargar_documento(con, b.get("documento_id"))
     original = almacen.leer(documento["ruta"]) if documento else None
-    datos = json.loads(b["datos"])
+    datos = borradores.saneado(json.loads(b["datos"]))  # un dato guardado con un tipo inesperado no impide la vista previa
+    renglones = borradores.renglones_estimados(datos)
+    if renglones > borradores.MAX_RENGLONES_PDF:
+        raise pdf_final.DocumentoDemasiadoLargo(
+            f"La factura ocuparía unos {renglones} renglones (máximo {borradores.MAX_RENGLONES_PDF}): acorte los conceptos "
+            "o las observaciones o divida la operación en varias facturas.")
     return pdf_final.generar(datos, modo="borrador", entorno=None, url_qr=None, original=original,
                              extraccion=extraccion_de(con, b), fecha_expedicion=None)
