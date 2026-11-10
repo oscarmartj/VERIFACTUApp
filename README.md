@@ -80,3 +80,27 @@ app/static/     interfaz web (HTML/JS/CSS sin dependencias externas)
 scripts/        generación de PDF de prueba, datos demo, contraste de esquemas, matriz
 tests/          pruebas de aceptación y fixtures sintéticos
 ```
+
+## Tamaño del código
+
+**28.008 líneas de código** propio (sin líneas en blanco ni comentarios), en 69 ficheros. Contando también los
+comentarios (2.373) y las líneas en blanco (3.469), son 33.850 líneas.
+
+| Parte | Ficheros | Líneas de código |
+|---|---:|---:|
+| Aplicación (`app/`): servidor, extracción, validación, emisión, PDF y SQL | 34 | 9.726 |
+| Interfaz web (`app/static/`): JavaScript, CSS y HTML | 3 | 4.016 |
+| Scripts (`scripts/`): generadores de facturas sintéticas, evaluación y utilidades | 14 | 9.962 |
+| Pruebas (`tests/`) | 16 | 4.272 |
+| Despliegue (`Dockerfile`, `docker-compose.yml`) | 2 | 32 |
+| **Total** | **69** | **28.008** |
+
+Por lenguaje: Python 23.640, JavaScript 3.390, CSS 603, SQL 320, HTML 23, Dockerfile 17 y YAML 15.
+
+No se cuentan los esquemas oficiales de la AEAT (XSD, WSDL y catálogo de errores, 2.316 líneas), los datos esperados del
+corpus de pruebas (JSON, 3.910), los PDF de prueba ni la documentación. Medido el 10/11/2026 con
+[cloc](https://github.com/AlDanial/cloc) 1.94:
+
+```bash
+cloc --vcs=git --include-lang=Python,JavaScript,CSS,HTML,SQL,Dockerfile,YAML .
+```
