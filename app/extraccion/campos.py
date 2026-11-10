@@ -36,7 +36,8 @@ RE_FECHA = re.compile(r"\b(\d{1,2})\s*[/.-]\s*(\d{1,2})\s*[/.-]\s*(\d{4}|\d{2})\
 MESES = {m: i for i, m in enumerate(["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
                                      "septiembre", "octubre", "noviembre", "diciembre"], start=1)}
 MESES["setiembre"] = 9
-RE_FECHA_LARGA = re.compile(r"\b(\d{1,2})\s+de\s+(" + "|".join(MESES) + r")\s+(?:de|del)\s+(\d{4})\b", re.I)
+# El año de una fecha larga, también con el punto de millar que pone Word al teclearlo («31 de octubre de 2.026»)
+RE_FECHA_LARGA = re.compile(r"\b(\d{1,2})\s+de\s+(" + "|".join(MESES) + r")\s+(?:de|del)\s+(\d{4}|\d\.\d{3})\b", re.I)
 RE_FORMA_JURIDICA = re.compile(
     r"(?:^|[\s,])(S\.?\s?L\.?\s?U\.?|S\.?\s?L\.?\s?L\.?|S\.?\s?L\.?|S\.?\s?A\.?\s?U\.?|S\.?\s?A\.?|S\.?\s?COOP\.?(?:\s?AND\.?)?|"
     r"SOCIEDAD LIMITADA|SOCIEDAD AN[OÓ]NIMA|C\.?\s?B\.?|S\.?\s?C\.?|SLP|S\.?L\.?P\.?|A\.?I\.?E\.?)\s*+[.,]?\s*+$", re.I)
@@ -83,12 +84,33 @@ RE_VIA = re.compile(r"\b(c/|c\.|calle|callej[oó]n|avda\.?|avenida|av\.|plaza|pz
 RE_DOMICILIO = re.compile(RE_VIA.pattern + r"|\b\d{5}\b", re.I)
 RE_CP_CIUDAD = re.compile(r"(?<![\w-])\d{5}\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]")
 RE_CONTACTO = re.compile(r"tel[eé]?f|tfno|tlf|m[oó]vil|e-?mail|correo|@|www\.|http|fax", re.I)
-RE_NIF_ETIQUETA = re.compile(r"\b(c\.?\s?i\.?\s?f\.?|n\.?\s?i\.?\s?f\.?|n\.?\s?i\.?\s?e\.?|d\.?\s?n\.?\s?i\.?|vat|tax\s?id|nif-iva|nif/cif|cif/nif)\b", re.I)
-RE_NIF_CANDIDATO = re.compile(r"(?<![A-Z0-9])(?:ES[\s-]?)?([A-Z][\s.-]?\d{7,8}[\s.-]?[0-9A-Z]|\d{8}[\s.-]?[A-Z]|"
-                              r"\d{1,2}\.\d{3}\.\d{3}[\s.-]?[A-Z]|[XYZ][\s.-]?\d{1,2}\.?\d{3}\.?\d{3}[\s.-]?[A-Z]|[A-HJ-NP-SUVW][\s.-]?\d{2}\.\d{3}\.\d{3})(?![A-Z0-9])")
+RE_NIF_ETIQUETA = re.compile(r"\b(" + nifmod.ROTULO_NIF + r")\b", re.I)  # (también como lo lee el OCR: «N.LF.»)
+
+
+def _re_nif_candidato(s: str, barra: bool) -> re.Pattern:
+    return re.compile(r"(?<![A-Z0-9])(?:ES[\s-]?)?([A-Z]" + s + r"\d{7,8}" + s + r"[0-9A-Z]|\d{8}" + s + r"[A-Z]|"
+                      r"\d{1,2}\.\d{3}\.\d{3}" + s + r"[A-Z]|[XYZ]" + s + r"\d{1,2}\.?\d{3}\.?\d{3}" + s + r"[A-Z]|"
+                      r"[A-HJ-NP-SUVW]" + s + r"\d{2}\.\d{3}\.\d{3}"
+                      + (r"|[A-HJ-NP-SUVW]" + s + r"\d{2}/\d{3}\.?\d{2}" + s + r"[0-9A-J]" if barra else "") + r")(?![A-Z0-9])")
+
+
+# Candidato a NIF: separadores de espacio, punto o guion; y, solo detrás del rótulo del NIF (nifmod.forma_admitida), la raya
+# «–», «—» o el guion separados por espacios («CIF: A – 00543215») y la barra tras el código de provincia («B00/123455»)
+RE_NIF_CANDIDATO = _re_nif_candidato(nifmod.SEP, barra=True)
+RE_NIF_CANDIDATO_SIMPLE = _re_nif_candidato(nifmod.SEP_SIMPLE, barra=False)
 SEP = r"[\s:.\-–—=]*"
 # Abreviatura de «número»: «nº», «n.º» (la forma recomendada) y «n*» (lectura OCR de «nº»)
 NUM_ABR = r"n(?:\.?[º°]|\*)\.?"
+# Otras lecturas de «Nº» tras el rótulo del documento («FACTURA Nº. Z72/26»): las del OCR de un escaneo («N“.», «N”»,
+# «N"», «N'», «N.» con la º perdida, «N. º») y «Nro.». «N.» no si sigue otra inicial con punto («N.I.F.»)
+NUM_ABR_OCR = r"(?:n[“”\"″'’]\.?|n\.?\s[º°]\.?|n\.(?!\s?[^\W\d_]\.)|nro\.?)"
+# «FACTURA Nº. X» al comienzo del renglón con la º leída por el OCR como otro signo cualquiera («NC.», «Ne», «N9»): la N y
+# un solo carácter más, seguidos del número (letras y cifras con «/» o «-»). Rótulo supuesto: el número se confirma
+RE_TITULO_NUM_DUDOSO = r"^\s*factura\s+n\S\.?(?=\s+[A-Z0-9][\w/.-]*\d[\w/.-]*\s*$)"
+# La abreviatura numera otra cosa si la sigue su nombre («FACTURA Nº CLIENTE», «FACTURA N. DE PEDIDO»: dos rótulos de una
+# rejilla leídos en un renglón): no rotula el número de la factura, ni en el mismo renglón ni debajo
+NO_NUMERA_OTRA = (r"(?![\s.:]*(?:de(?:l)?\s+(?:la\s+|el\s+)?)?(?:cliente|socio|abonado|proveedor|pedido|albar[aá]n|contrato|"
+                  r"cuenta|expediente|proyecto|p[oó]liza|presupuesto|obra|lote)\b)")
 
 
 def _clave(t: str) -> str:
@@ -106,14 +128,56 @@ def _nifs_en(txt: str):
     """(nif_normalizado, inicio, fin) de cada candidato a NIF en el texto (válido o no). Si el candidato no es válido y
     termina en separador + un carácter, ese carácter es lo siguiente del texto y no el control: «B12345674 C/ Mayor»,
     «B12345674 y …», «B12345674 1ª planta» son el NIF «B12345674» seguido de otra cosa."""
-    for m in RE_NIF_CANDIDATO.finditer(txt.upper()):
+    t = txt.upper()
+    # («F26/000123», «A – 26000125», «Pedido 20261105 – Z» sin rótulo de NIF delante: un número de documento o una referencia)
+    for m in nifmod.candidatos(RE_NIF_CANDIDATO, RE_NIF_CANDIDATO_SIMPLE, t):
         n, ini, fin = nifmod.normalizar(m.group(1)), m.start(1), m.end(1)
-        if not nifmod.es_valido(n) and re.search(r"[\s.-][0-9A-Z]$", m.group(1)):
-            corto = nifmod.normalizar(m.group(1)[:-2])
+        if not nifmod.es_valido(n) and (c := re.search(r"(?:\s?[\-–—]\s?|[\s.])[0-9A-Z]$", m.group(1))):
+            corto = nifmod.normalizar(m.group(1)[:c.start()])
             # también si solo el corto tiene forma de NIF («A87754215 C/ Sol»: NIF con control erróneo y la calle)
             if nifmod.es_valido(corto) or (not nifmod.tipo(n) and nifmod.tipo(corto) and re.search(r"\s[0-9A-Z]$", m.group(1))):
-                n, fin = corto, fin - 2
+                n, fin = corto, ini + c.start()
         yield n, ini, fin
+
+
+# Confusiones habituales del OCR entre letras y cifras: la letra leída donde el NIF lleva una cifra, y al revés
+_OCR_A_CIFRA = {"B": "8", "O": "0", "o": "0", "D": "0", "Q": "0", "I": "1", "i": "1", "l": "1", "|": "1", "S": "5", "s": "5",
+                "Z": "2", "z": "2", "G": "6", "T": "7", "A": "4"}
+_OCR_A_LETRA = {"8": "B", "0": "ODQ", "1": "I", "|": "I", "5": "S", "2": "Z", "6": "G", "7": "T", "4": "A"}
+_CIFRAS = "0123456789"
+_LETRAS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+# Formas de NIF, carácter a carácter: DNI, NIE, NIF especial (K, L, M) y persona jurídica
+_FORMAS_NIF = ((_CIFRAS,) * 8 + (_LETRAS,), ("XYZ",) + (_CIFRAS,) * 7 + (_LETRAS,), ("KLM",) + (_CIFRAS,) * 7 + (_LETRAS,),
+               ("ABCDEFGHJNPQRSUVW",) + (_CIFRAS,) * 7 + (_CIFRAS + "ABCDEFGHIJ",))
+# Lectura tras el rótulo del NIF: nueve caracteres (letras, cifras o «|»), con separadores sueltos pero sin espacios
+RE_LECTURA_TRAS_ROTULO = re.compile(r"[\s:.\-–—]{0,6}(?:ES[\s-]?)?([0-9A-Za-z|](?:[.\-–—/]?[0-9A-Za-z|]){8})(?![0-9A-Za-z|])")
+MAX_CAMBIOS_OCR_NIF = 2
+
+
+def _nif_corregido_ocr(lectura: str) -> str | None:
+    """NIF de una lectura OCR que no es válida, cambiando las letras que ocupan el lugar de una cifra por la cifra que el OCR
+    confunde con ellas (B→8, O→0, S→5…) y las cifras que ocupan el lugar de una letra por la letra (8→B, 0→O…), como mucho
+    MAX_CAMBIOS_OCR_NIF caracteres. Solo si una única variante tiene el dígito de control válido; si hay varias (o ninguna),
+    no se elige: el NIF queda ilegible."""
+    crudo = re.sub(r"[.\-–—/]", "", lectura)
+    if len(crudo) != 9 or nifmod.es_valido(crudo.upper()):
+        return None
+    validos = set()
+    for forma in _FORMAS_NIF:
+        opciones, cambios = [], 0
+        for c, admitidos in zip(crudo, forma):
+            if c.upper() in admitidos and c != "|":
+                opciones.append((c.upper(),))
+                continue
+            alt = tuple(x for x in (_OCR_A_CIFRA.get(c, "") + _OCR_A_LETRA.get(c, "")) if x in admitidos)
+            if not alt:
+                break
+            opciones.append(alt)
+            cambios += 1
+        else:
+            if 0 < cambios <= MAX_CAMBIOS_OCR_NIF:
+                validos.update(n for n in map("".join, itertools.product(*opciones)) if nifmod.es_valido(n))
+    return validos.pop() if len(validos) == 1 else None
 
 
 def _intro_de_frase(intro: str) -> bool:
@@ -197,6 +261,33 @@ MAX_NIFS_RENGLON = 8   # NIF distintos examinados en un renglón
 MAX_APARICIONES_POR_NIF = 24   # apariciones de un mismo NIF examinadas (una por página en un documento largo)
 MAX_APARICIONES_NIF = 120   # apariciones de NIF examinadas en todo el documento
 MAX_BLOQUES_SIN_NIF = 40   # razones sociales de la cabecera examinadas como bloque sin NIF
+MAX_RENGLONES_BASE = 8     # renglones sin rótulo encima del cuadro de totales que se suman como base imponible
+UMBRAL_SEGURO = 0.85       # confianza de lectura a partir de la cual una cifra no se pide confirmar (borradores.UMBRAL_CONFIANZA)
+
+# Puntos guía entre un rótulo y su cifra («IVA 21% ………… 315,00 €»): solo puntos, puntos suspensivos, guiones bajos o rayas
+RE_RELLENO = re.compile(r"[.…·•‥_]{2,}|…|[-–—]{3,}")
+RE_MONEDA = re.compile(r"€|eur|euros?|\(?€\)?", re.I)
+RE_COMA_DECIMAL = re.compile(r"[-−]?(?:\d{1,3}(?:\.\d{3})+|\d+),\d{2}")
+RE_PUNTO_DECIMAL = re.compile(r"[-−]?\d+\.\d{2}")
+# Renglón de un impuesto aunque su rótulo no sea uno conocido («Impuesto 21%», «Tax 21%», «lVA 21%» leído por OCR, «I.V.A. al
+# 21 por 100»): un porcentaje o una palabra de impuesto. Nunca es un renglón de la base, y en el cuadro descarta la factura
+# sin IVA
+_LETRA = "A-Za-zÁÉÍÓÚÜÑáéíóúüñ"
+RE_PALABRA_IMPUESTO = re.compile(rf"(?<![{_LETRA}])(?:impuestos?|tax(?:es)?|vat|tva|igic|ipsi|i\.?\s?v\.?\s?a\.?|[l1|!]\.?\s?v\.?\s?a\.?)"
+                                 rf"(?![{_LETRA}])", re.I)
+RE_PORCENTAJE_ROTULO = re.compile(r"%|°/o|\bo/o\b|\bpor\s*(?:100|ciento)\b", re.I)
+# exención o no sujeción declarada: compatible con una factura sin IVA (no la descarta)
+RE_SIN_IVA_DECLARADO = re.compile(r"exent[oa]s?|exenci[oó]n|no\s+sujet[oa]s?|inversi[oó]n\s+del\s+sujeto\s+pasivo", re.I)
+# el total incluye el IVA («IVA incluido», «impuestos incluidos», «incluye IVA»): el documento sí repercute IVA
+RE_IVA_INCLUIDO = re.compile(r"(?:\biva|i\.\s?v\.\s?a\.?|\bimpuestos?)\s*(?:incl\.?|incluid[oa]s?|inclu[íi]d[oa]s?)(?![a-z])|"
+                             r"\binclu(?:ye|ido|idos)\s+(?:el\s+)?(?:iva|i\.\s?v\.\s?a|impuestos?)\b|\bcon\s+iva\b|\biva\s+inc\b", re.I)
+# Fila de puntos guía leída por OCR como letras pequeñas («...oo.ooposor.oooopo», «econo...»): signos sin trazos altos
+CARACTERES_BAJOS = set(".,:;·•…‥'`’”\"°º-_~oO0acemnrsuvwxzpqg")
+
+
+def _rotulo_de_impuesto(t: str) -> bool:
+    """Texto con un porcentaje o una palabra de impuesto (ver RE_PALABRA_IMPUESTO)."""
+    return bool(RE_PORCENTAJE_ROTULO.search(t) or RE_PALABRA_IMPUESTO.search(t))
 
 
 @dataclass
@@ -327,8 +418,8 @@ def _fecha_iso(texto: str) -> str | None:
         if 1 <= d <= 31 and 1 <= mth <= 12 and 1990 <= y <= 2100:
             return f"{y:04d}-{mth:02d}-{d:02d}"
     m = RE_FECHA_LARGA.search(texto)
-    if m:
-        return f"{int(m.group(3)):04d}-{MESES[m.group(2).lower()]:02d}-{int(m.group(1)):02d}"
+    if m and ("." not in m.group(3) or 1990 <= int(m.group(3).replace(".", "")) <= 2100):
+        return f"{int(m.group(3).replace('.', '')):04d}-{MESES[m.group(2).lower()]:02d}-{int(m.group(1)):02d}"
     m = RE_FECHA_ABR.search(texto)
     if m and 1 <= int(m.group(1)) <= 31:
         return f"{int(m.group(3)):04d}-{MESES_ABR[m.group(2).lower()[:3]]:02d}-{int(m.group(1)):02d}"
@@ -767,12 +858,16 @@ class Extractor:
     def _v_fecha(t: str):
         return _fecha_iso(t[:40])
 
+    # Abreviatura de letras con punto al final del texto («a 60 días f.f.», «EMPRESA S.L.»): su último punto no es puntuación
+    RE_ABREVIATURA_FINAL = re.compile(r"(?:^|\s)(?:[^\W\d_]{1,3}\.){2,}$")
+
     @staticmethod
     def _v_texto(t: str):
+        abrev = Extractor.RE_ABREVIATURA_FINAL.search(t.strip(" :-–"))
         t = t.strip(" :.-–")
         if not t or len(t) > 200:
             return None
-        return t
+        return t + "." if abrev else t
 
     @staticmethod
     def _v_entero(t: str):
@@ -791,6 +886,17 @@ class Extractor:
         mediana = alturas[len(alturas) // 2]
         pag1 = [l for l in self.lineas if l.pagina == 1]
 
+        def campo(tipo, l, m, **kw):
+            # procedencia y confianza de la palabra clave, no las del resto del renglón (el número que la sigue o una
+            # abreviatura «Nº» mal leída por el OCR no hacen dudoso el tipo)
+            return _campo(tipo, texto=l.texto, palabras=self._palabras_rango(l, m.start(), m.end()) or l.palabras,
+                          pagina=l.pagina, **kw)
+
+        def titular(l, m):  # el renglón empieza por la palabra clave y solo le sigue, si acaso, el número («FACTURA Nº. X»)
+            return not l.texto[:m.start()].strip() and re.fullmatch(
+                r"\s*(?:(?:n(?:\.?[º°]|[o*])\.?|n[úu]m(?:ero)?\.?|" + NUM_ABR_OCR + r")\s*)?[:.]?\s*(?:[A-Z0-9][\w/.-]*)?\s*",
+                l.texto[m.end():], re.I) is not None
+
         def buscar(lineas, pats, cond, por_tamano=False):
             hallados = []
             for prio, (tipo, pat) in enumerate(pats):
@@ -798,13 +904,19 @@ class Extractor:
                     m = re.search(pat, l.texto, re.I)
                     if m and not RE_REGISTRO_MERCANTIL.search(l.texto) and cond(l, m):
                         if not por_tamano:
-                            return _campo(tipo, texto=l.texto, linea=l)
-                        hallados.append((-max(p.bottom - p.top for p in l.palabras), l.top, prio, tipo, l))
+                            return campo(tipo, l, m)
+                        hallados.append((-max(p.bottom - p.top for p in l.palabras), l.top, prio, tipo, l, m))
             if hallados:
                 # el título destacado manda sobre los rótulos de una rejilla («ALBARÁN», «PEDIDO»…)
                 alto = min(h[0] for h in hallados)
-                _, _, _, tipo, l = min((h for h in hallados if h[0] <= alto + 0.5), key=lambda h: (h[2], h[1]))
-                return _campo(tipo, texto=l.texto, linea=l)
+                tipo = min((h for h in hallados if h[0] <= alto + 0.5), key=lambda h: (h[2], h[1]))[3]
+                # De ese tipo y con letra de ese tamaño, el renglón que es un título antes que una frase («Factura por la
+                # gestión…») o un rótulo («TOTAL FACTURA»). En un escaneo la caja de las palabras varía con los rasgos
+                # que suben o bajan («gestión» mide más que «FACTURA»): el margen de tamaño es mayor
+                afines = [h for h in hallados if h[3] == tipo and
+                          h[0] <= alto + (0.25 * -alto if any(p.metodo == "ocr" for p in h[4].palabras) else 0.5)]
+                _, _, _, tipo, l, m = min(afines, key=lambda h: (not titular(h[4], h[5]), h[2], h[1]))
+                return campo(tipo, l, m)
             return None
 
         def grande(l, m):  # título destacado: la palabra clave en un cuerpo de letra mayor que el texto normal
@@ -821,28 +933,60 @@ class Extractor:
         tabla_top = next((f.top for f in self.filas if f.pagina == 1 and len({self._clase(p.texto) for p in f.palabras} - {None}) >= 2),
                          0.4 * self.alto[1])
         cabecera = [l for l in pag1 if l.top < min(tabla_top, 0.4 * self.alto[1])]
-        no_ref = lambda l, m: not re.match(r"\s*(n(?:\.?[º°]|o)\.?|n[úu]m(ero)?\.?|:|[A-Z]{0,4}[-/]?\d)", l.texto[m.end():], re.I)
-        r = buscar(cabecera, orden, no_ref)
+        no_ref = lambda l, m: not re.match(r"\s*(n(?:\.?[º°]|o)\.?|n[úu]m(ero)?\.?|" + NUM_ABR_OCR + r"|:|[A-Z]{0,4}[-/]?\d)",
+                                           l.texto[m.end():], re.I)
+
+        def encabeza(l, m):
+            # La palabra clave abre su renglón o su celda (detrás, si acaso, de «Factura», «Nota de», «Nº» o «Tipo de documento:»):
+            # es el nombre del documento, no una mención dentro de un dato o una frase («Forma de pago: abono en cuenta»,
+            # «Según presupuesto aceptado por el cliente»)
+            pals = self._palabras_rango(l, m.start(), m.end())
+            seg = next((g for g in self._segmentos(l.palabras) if pals and any(p is pals[0] for p in g)), None)
+            ini = l.posiciones[next(i for i, p in enumerate(l.palabras) if p is seg[0])][0] if seg else 0
+            fin = ini + len(" ".join(p.texto for p in seg)) if seg else len(l.texto)
+            # ni la sigue una frase en minúscula («Presupuesto aceptado el …», «abono en cuenta») o la fecha de otro papel
+            # («Albarán de fecha 01/10/2026», «Presupuesto del 01/10/2026»)
+            despues = l.texto[m.end():fin]
+            # en minúsculas al comienzo del renglón es una frase que continúa la del renglón anterior («…conforme a
+            # nuestro ⏎ presupuesto P-118/26 de …»), no el título del documento
+            if m.group().islower() and not l.texto[:m.start()].strip():
+                return False
+            return re.fullmatch(r"(?:\s*(?:factura|fra\.?|nota|documento|tipo(?:\s+de\s+documento)?|n(?:\.?\s?[º°o])?\.?|"
+                                r"n[úu]m(?:ero)?\.?|nro\.?)(?:\s+de)?\s*:?)*\s*", l.texto[max(ini, 0):m.start()], re.I) is not None and \
+                not re.match(r"\s+(?!(?:de|del|n[úu]m|n[úu]mero)\b)[a-záéíóúñ]{2,}\b", despues) and \
+                not re.match(r"\s+(?:de|del|con)\s+(?:fecha\b|\d)", despues, re.I)
+
+        r = buscar(cabecera, orden, lambda l, m: no_ref(l, m) and encabeza(l, m))
         if not r:
             for l in pag1:
-                if re.search(r"\bfactura\s*(?:n(?:\.?[º°]|o)\.?|n[úu]m(?:ero)?\.?)\s*:?\s*[A-Z0-9]", l.texto, re.I) and \
-                        not re.search(r"\b(?:proforma|rectificad|anterior|original)\b", l.texto, re.I):
-                    return _campo("factura", texto=l.texto, linea=l, confianza=0.85)
-            r = buscar(cabecera, orden, lambda l, m: True)
+                m = re.search(r"\bfactura(?=\s*(?:n(?:\.?[º°]|o)\.?|n[úu]m(?:ero)?\.?|" + NUM_ABR + r"|(?<=\s)" + NUM_ABR_OCR +
+                              r")\s*:?\s*[A-Z0-9])", l.texto, re.I)
+                if m is None and re.match(RE_TITULO_NUM_DUDOSO, l.texto, re.I):
+                    m = re.search(r"factura", l.texto, re.I)  # «FACTURA NC. Z72/26»: el título con la º mal leída
+                if m and not re.search(r"\b(?:proforma|rectificad|anterior|original)\b", l.texto, re.I):
+                    return campo("factura", l, m, confianza=0.85)
+            r = buscar(cabecera, orden, encabeza)
+            if not r:
+                # la palabra clave solo aparece mencionada en la cabecera: el tipo se deduce, a confirmar
+                r = buscar(cabecera, orden, lambda l, m: True)
+                if r:
+                    r["confianza"] = min(r["confianza"], 0.6)
+                    r["avisos"].append("Tipo de documento deducido de una mención en la cabecera: confirme")
         if r:
             return r
         for tipo, pat in orden[:5]:
             for l in self.lineas:
-                if re.search(pat, l.texto, re.I):
-                    return _campo(tipo, texto=l.texto, linea=l, aviso="Indicado fuera de la cabecera")
+                if m := re.search(pat, l.texto, re.I):
+                    return campo(tipo, l, m, aviso="Indicado fuera de la cabecera")
         return _vacio("No se identifica el tipo de documento")
 
     def numero(self):
         excl = (r"certificaci|pedido|partida|tomo|folio|hoja|registro|tel[eé]?f|tfno|iban|cuenta|c\.?\s?i\.?\s?f|n\.?\s?i\.?\s?f|"
                 r"cliente\s+n|contrato|expediente|proyecto|albar[aá]n")
         patrones = [
-            (0, r"(?:factura|fra\.?|invoice)\s*(?:proforma\s*|rectificativa\s*)?(?:n(?:\.?[º°]|[o*])\.?|n[úu]m(?:ero)?\.?|no\.?|#)"),
-            (0, r"n(?:\.?[º°]|[o*])\.?\s*(?:de\s+)?(?:factura|fra\.?)"),
+            (0, r"(?:factura|fra\.?|invoice)\s*(?:proforma\s*|rectificativa\s*)?(?:n(?:\.?[º°]|[o*])\.?|n[úu]m(?:ero)?\.?|no\.?|#|"
+                r"(?<=\s)" + NUM_ABR_OCR + r")" + NO_NUMERA_OTRA),
+            (0, r"(?:n(?:\.?[º°]|[o*])\.?|(?<![\w.])" + NUM_ABR_OCR + r")\s*(?:de\s+)?(?:factura|fra\.?)"),
             (0, r"n[úu]m(?:ero)?\.?\s+(?:de\s+)?factura"),
             (1, r"(?:proforma|presupuesto|borrador|documento)\s*(?:n(?:\.?[º°]|[o*])\.?|n[úu]m(?:ero)?\.?)"),
             (1, r"(?:n[úu]mero|n[úu]m\.?|n(?:\.?[º°]|[o*])\.?)\s*(?:de\s+)?(?:la\s+)?(?:proforma|presupuesto|documento|borrador)"),
@@ -850,6 +994,7 @@ class Extractor:
             (2, r"^n[úu]mero\b|^n[úu]m\.?(?=\s)|^n\.?[º°]\.?(?=\s|:)|^n[o0?*]\.?(?=\s*:)"),
             # «Nº FACTURA» leído por el OCR como «N2 FACTURA»: rótulo supuesto, como los anteriores (se confirma)
             (2, r"(?<!\w)n2\s+factura\b"),
+            (2, RE_TITULO_NUM_DUDOSO),
             (3, r"(?:^|\s)factura\s+(?=[A-Z0-9-]*\d)"),
         ]
         tipo = self.tipo_documento().get("valor")
@@ -888,6 +1033,12 @@ class Extractor:
         campo = self._campo_de(mejor)
         if prio > 1:
             campo["confianza"] = min(campo["confianza"], 0.8)
+        # «FACTURA Nº 2026 / 045»: tras el valor sigue una barra con espacios y más cifras; el número puede ser el conjunto
+        cola = " ".join(p.texto for p in mejor[1]) if mejor[1] else ""
+        k = cola.find(mejor[0])
+        if k >= 0 and re.match(r"\s*/\s+\d|\s+/\s*\d", cola[k + len(mejor[0]):]):
+            campo["avisos"].append("El número puede seguir tras la barra: confirme")
+            campo["confianza"] = min(campo["confianza"], 0.7)
 
         def encima(c, ref) -> bool:
             # c impreso antes que ref en el orden de lectura (página anterior o renglón claramente más alto)
@@ -1020,20 +1171,227 @@ class Extractor:
         sup = [b for b in encima if b is not rot and 0 <= rot.top - b.bottom <= 1.2 * h and abs(b.x0 - rot.x0) <= max(3.0, 0.5 * h)]
         return rot, max(sup, key=lambda b: b.bottom, default=None)
 
+    # Rótulo de la fecha de otro documento o acto («Fecha contrato:», «Fecha del presupuesto»): no es la del documento
+    OTROS_ACTOS_FECHA = r"contrato|presupuesto|albar[aá]n|pedido|oferta|mandato|encargo|p[oó]liza|adjudicaci[oó]n|aceptaci[oó]n"
+    RE_FECHA_DE_OTRO = re.compile(r"\bfecha\s+(?:de(?:l)?\s+)?(?:la\s+|el\s+)?(?:" + OTROS_ACTOS_FECHA + r")\b", re.I)
+
     def fecha(self):
         excl = r"vencimiento|operaci[oó]n|entrega|pedido|valor|nacimiento|cargo|firma|validez|caducidad|inicio|fin\b|desde|hasta|alta"
-        pats = [r"fecha\s+(?:de\s+)?(?:la\s+)?(?:factura|emisi[oó]n|expedici[oó]n)", r"\bfecha\b", r"\bdate\b", r"\bde\s+fecha\b",
-                r"^(?:emitida|expedida|emisi[oó]n|data(?:\s+(?:de\s+)?(?:factura|emissi[oó]))?|data)\b"]
-        for pat in pats:
+        otro = r"(?!\s*(?:de(?:l)?\s+)?(?:la\s+|el\s+)?(?:" + self.OTROS_ACTOS_FECHA + r")\b)"
+        pats = [r"fecha\s+(?:de\s+)?(?:la\s+)?(?:factura|emisi[oó]n|expedici[oó]n)", r"\bfecha\b" + otro, r"\bdate\b",
+                r"\bde\s+fecha\b" + otro, r"^(?:emitida|expedida|emisi[oó]n|data(?:\s+(?:de\s+)?(?:factura|emissi[oó]))?|data)\b"]
+        for k, pat in enumerate(pats):
             cands = self.candidatos(pat, self._v_fecha, excluir=excl)
+            if k in (1, 3):
+                # «según el contrato de fecha 3 de marzo de 2024»: el rótulo está en una frase y fecha otra cosa
+                cands = [c for c in cands if not self._rotulo_fecha_en_frase(c)]
             if cands:
                 return self._campo_de(sorted(cands, key=lambda c: (c[2], c[1][0].top if c[1] else 0))[0])
-        for l in self.lineas:
-            if l.top < 0.4 * self.alto[l.pagina] and not re.search(excl, l.texto, re.I):
-                iso = _fecha_iso(l.texto)
-                if iso:
-                    return _campo(iso, texto=l.texto, linea=l, confianza=0.6, aviso="Fecha sin etiqueta: confirme")
+        # Sin rótulo: la primera fecha de la parte superior, a confirmar; nunca la citada en una frase («s/contrato del 1 de
+        # julio de 2025»: la de otro documento). Una fecha de carta («Villaficticia, 14 de octubre de 2026», «En
+        # Villaficticia, a 14 de octubre de 2026») es la del documento si ninguna otra fecha sin rótulo (fuera de la tabla
+        # de conceptos) la contradice. En las cartas va bajo el destinatario o al pie, antes de la firma; pero al pie hay
+        # también fechas de otros actos («Recibido y conforme:» ⏎ «Villaficticia, 5 de noviembre de 2026», el mandato SEPA,
+        # la letra pequeña de la protección de datos): la fecha de carta solo vale sin más si no la presenta un rótulo con dos
+        # puntos, si por debajo del 40 % de la página no va en letra menor que la del texto, y si el documento no tiene otra
+        # fecha de carta en blanco o ilegible («a ___ de ________ de 2026»): la fecha del documento sería entonces esa
+        self.tabla()
+        en_tabla = {id(b) for f in self.filas if id(f) in self._ids_filas_tabla for b in f.bloques}
+        con_fecha = [(l, iso) for l in self.lineas if not re.search(excl, l.texto, re.I) and not self.RE_FECHA_DE_OTRO.search(l.texto)
+                     and (iso := _fecha_iso(l.texto))]
+        arriba = [(l, iso) for l, iso in con_fecha if l.top < 0.4 * self.alto[l.pagina] and not self._fecha_citada(l)]
+        cartas = [(l, iso) for l, iso in con_fecha if id(l) not in en_tabla and self._fecha_de_carta(l.texto)
+                  and not self._continua_frase(l)]
+        firmes = [c for c in cartas if self._fecha_de_carta_firme(c[0])]
+        carta = (firmes or cartas or [None])[0]
+        sin_leer = next((l for l in self.lineas if id(l) not in en_tabla and self._fecha_de_carta_sin_leer(l.texto)), None)
+        if firmes and sin_leer is None and all(iso == carta[1] for l, iso in con_fecha if id(l) not in en_tabla) \
+                and not self._rotulo_de_fecha_sin_leer(en_tabla, excl):
+            return _campo(carta[1], texto=carta[0].texto, linea=carta[0])
+        if arriba or carta:
+            l, iso = arriba[0] if arriba else carta
+            c = _campo(iso, texto=l.texto, linea=l, confianza=0.6, aviso="Fecha sin etiqueta: confirme")
+            if sin_leer is not None:
+                c["avisos"].append(f"La fecha del documento está en blanco o no se lee («{sin_leer.texto[:60]}»): confirme")
+            return c
+        if sin_leer is not None:
+            return _vacio(f"La fecha del documento está en blanco o no se lee («{sin_leer.texto[:60]}»)")
         return _vacio("No se encuentra la fecha")
+
+    # Palabra que mete la fecha en una frase («s/contrato del 3 de marzo de 2024», «servicio prestado el 3/10/2026», «el
+    # contrato de fecha 3/3/2024»): es la de otra cosa, no la del documento. «a» no: «Villaficticia a 14 de octubre de 2026»
+    # es una fecha de carta
+    PREVIAS_FECHA_CITADA = {"de", "del", "el", "la", "los", "al", "en", "con", "por", "para", "y", "e", "o", "u", "s/", "n/",
+                            "fecha"}
+    # Abreviatura de «número» en minúscula («nº», «no», «núm», «nro»): rotula la cifra que la sigue, no es una palabra de frase
+    RE_ABR_NUMERO = re.compile(r"n(?:\.?\s?[º°o*]|[úu]m(?:ero)?|ro)?\.?|ref|p[aá]g", re.I)
+
+    def _palabra_de_frase(self, palabra: str, siguiente: str = "") -> bool:
+        """Palabra en minúscula de una frase («contrato», «prestado», «s/contrato»), no una palabra de enlace («de», «el»),
+        una abreviatura del número que la sigue («nº 45», «núm. 45», «n.º 45») ni una cifra."""
+        t = palabra.strip(",;:()«»\"'¿?¡!")
+        if re.match(r"[sn]/[^\W\d_]", t):
+            return True  # «s/contrato», «n/pedido»: cita de otro documento
+        if not t[:1].islower() or len(t) < 2 or re.search(r"[\d.º°ª/]", t) or t.lower() in self.PREVIAS_FECHA_CITADA:
+            return False
+        return not (self.RE_ABR_NUMERO.fullmatch(t) and re.search(r"\d", siguiente))
+
+    def _fecha_citada(self, l: Linea) -> bool:
+        """La fecha del renglón (la que lee _fecha_iso) está citada dentro de una frase: la precede una palabra de enlace
+        («del», «el», «s/», «de fecha») y, antes, otra palabra en minúscula de la frase («s/contrato del …», «prestado el …»;
+        no una abreviatura como «nº 45») o la frase del renglón de encima («… según el contrato» ⏎ «del 3 de marzo de
+        2024»). No un encabezado corto («Factura del 14/10/2026», «Factura nº 45 del 14/10/2026»)."""
+        texto = l.texto
+        m = next((m for r in (RE_FECHA_ISO, RE_FECHA, RE_FECHA_LARGA, RE_FECHA_ABR) if (m := r.search(texto))), None)
+        antes = texto[:m.start()].split() if m else []
+        if not antes or antes[-1].lower() not in self.PREVIAS_FECHA_CITADA or self.RE_FRASE_DE_EMISION.search(texto[:m.start()]):
+            return False
+        return any(self._palabra_de_frase(p, s) for p, s in zip(antes[:-1], antes[1:])) or \
+            (len(antes) == 1 and self._continua_frase(l))
+
+    # La frase habla de la emisión del propio documento («Factura emitida el 14/10/2026»): no es la fecha de otra cosa
+    RE_FRASE_DE_EMISION = re.compile(r"\b(?:emitid|expedid|fechad)[oa]s?\b|\b(?:emisi[oó]n|expedici[oó]n)\b", re.I)
+    # Enlace entre un nombre y el rótulo de su fecha («el contrato de fecha …», «albarán con fecha …»)
+    ENLACES_ROTULO_FECHA = {"de", "con", "en", "y", "e", "por", "para", "a"}
+    # El propio documento («Le remitimos factura con fecha …»), salvo que la frase cite otro («Rectifica la factura de fecha …»)
+    RE_PROPIO_DOCUMENTO = re.compile(r"factura|fra|documento|recibo|minuta|presente", re.I)
+    RE_CITA_OTRO = re.compile(r"^[sn]/|^seg[uú]n$|rectific|anul|sustitu|abon|anterior", re.I)
+
+    def _rotulo_fecha_en_frase(self, cand: tuple) -> bool:
+        """El rótulo «fecha» del candidato está dentro de una frase y fecha otra cosa: lo precede un nombre y un enlace
+        («según el contrato de fecha …», «… albarán con fecha …»), o es la continuación en minúscula de la frase del renglón de
+        encima («… según el contrato» ⏎ «de fecha 3 de marzo de 2024»). No si el nombre es el propio documento («Le
+        remitimos factura con fecha …»), si el rótulo lleva dos puntos («Lugar y fecha:») ni si la frase habla de la emisión."""
+        v, pals, pag, texto, estr = cand
+        m = next((m for m in re.finditer(r"\bfecha\b", texto, re.I) if self._v_fecha(re.sub("^" + SEP, "", texto[m.end():]))),
+                 None)
+        if m is None or re.match(r"[^\d:]{0,30}:", texto[m.end():]) or self.RE_FRASE_DE_EMISION.search(texto[:m.start()]):
+            return False
+        antes = texto[:m.start()].split()
+        rot, _ = self._renglon_previo(cand)
+        if not antes or (len(antes) == 1 and antes[0].lower() in self.ENLACES_ROTULO_FECHA):
+            # a principio de renglón en minúscula, siguiendo la frase del de encima
+            return texto[(m.start() if not antes else 0)].islower() and rot is not None and self._continua_frase(rot)
+        if antes[-1].lower() not in self.ENLACES_ROTULO_FECHA:
+            return False
+        # el nombre al que va la fecha: la última palabra antes del enlace, sin contar el número y su abreviatura («la
+        # Factura nº 2026-045 de fecha …»: «Factura»)
+        nombres = [p.strip(",;:()«»\"'").split("/")[-1] for p in antes[:-1]]
+        nombre = next((n for n in reversed(nombres) if re.fullmatch(r"[^\W\d_]{2,}", n) and not re.search(r"[º°ª]", n)
+                       and not self.RE_ABR_NUMERO.fullmatch(n) and n.lower() not in self.PREVIAS_FECHA_CITADA), None)
+        if nombre is None:
+            return False
+        if re.fullmatch(self.OTROS_ACTOS_FECHA, nombre, re.I):
+            return True  # «Albarán de fecha …», «Contrato con fecha …»
+        if self.RE_PROPIO_DOCUMENTO.fullmatch(nombre):
+            return any(self.RE_CITA_OTRO.search(p.strip(",;:()«»\"'")) for p in antes[:-1])
+        return any(self._palabra_de_frase(p, s) for p, s in zip(antes[:-1], antes[1:]))
+
+    def _continua_frase(self, l: Linea) -> bool:
+        """El renglón sigue la frase del de encima (mismo margen izquierdo, interlineado normal, y el de encima acaba sin
+        punto en una palabra en minúscula): es parte de un párrafo («… del local sito en» ⏎ «Villaficticia, 14 de octubre
+        de 2026.»), no un renglón suelto de fecha de carta. Un correo o una web del membrete («info@…», «www.…») o un renglón
+        corto de una dirección («Aldea Ficticia, bajo») no son una frase."""
+        h = l.bottom - l.top
+        encima = [self.lineas[k] for k in self._entre_tops(l.pagina, l.top - 6 * h, l.top)]
+        sup = [b for b in encima if b is not l and 0 <= l.top - b.bottom <= 1.2 * h and abs(b.x0 - l.x0) <= max(3.0, 0.5 * h)]
+        prev = max(sup, key=lambda b: b.bottom, default=None)
+        if prev is None or re.search(r"[.:;!?]\s*$", prev.texto) or len(prev.texto.split()) < 4:
+            return False  # con menos de cuatro palabras no es el renglón de un párrafo («Aldea Ficticia, bajo»)
+        ult = re.sub(r"^[sn]/", "", prev.texto.split()[-1].strip(","))  # «… según s/contrato» ⏎ «del 3 de marzo …»
+        return ult[:1].islower() and re.fullmatch(r"[^\W\d_]+", ult) is not None
+
+    # Rótulo de un dato de contacto del membrete con el valor vacío («Fax:»): no presenta la fecha de debajo
+    RE_ROTULO_CONTACTO = re.compile(r"^\s*(?:tel[eé]?f(?:ono)?|tfno|fax|m[oó]vil|e-?mail|correo|web)\b", re.I)
+
+    def _fecha_de_carta_firme(self, l: Linea) -> bool:
+        """Una fecha de carta que vale sin más como la del documento: no la presenta un rótulo con dos puntos en el renglón de
+        encima («Recibido y conforme:», «Mandato SEPA firmado por el deudor:», «… en la finca:»: es la fecha de ese acto o un
+        dato de esa frase) y, por debajo del 40 % de la página, no va en letra menor que la del texto (la letra pequeña del
+        pie: protección de datos, condiciones)."""
+        h = l.bottom - l.top
+        sup = [b for b in (self.lineas[k] for k in self._entre_tops(l.pagina, l.top - 3 * h, l.top))
+               if b is not l and b.bottom <= l.top + 0.3 * h and min(b.x1, l.x1) - max(b.x0, l.x0) > 0]
+        prev = max(sup, key=lambda b: b.bottom, default=None)
+        if prev is not None and prev.texto.rstrip().endswith(":") and not self.RE_ROTULO_CONTACTO.match(prev.texto):
+            return False
+        return l.top < 0.4 * self.alto[l.pagina] or h >= 0.85 * self._alto_renglon(l.pagina)
+
+    def _alto_renglon(self, pagina: int) -> float:
+        """Alto mediano de los renglones de la página (cada renglón cuenta una vez: la letra pequeña de un pie largo no
+        rebaja la del texto)."""
+        if not hasattr(self, "_altos_renglon"):
+            self._altos_renglon = {}
+        if pagina not in self._altos_renglon:
+            altos = sorted(l.bottom - l.top for l in self.lineas if l.pagina == pagina) or [10.0]
+            self._altos_renglon[pagina] = altos[len(altos) // 2]
+        return self._altos_renglon[pagina]
+
+    RE_ROTULO_FECHA = re.compile(r"\b(?:fecha|date|data)\b", re.I)
+
+    def _rotulo_de_fecha_sin_leer(self, en_tabla: set, excl: str) -> bool:
+        """Algún renglón fuera de la tabla de conceptos rotula una fecha del documento («Fecha:», «Fecha factura», «FECHA
+        15-oct-26»; el rótulo al comienzo del renglón o seguido de dos puntos o de una cifra) que la búsqueda con rótulo no ha
+        podido usar: su valor no se lee, o el renglón dice además otra cosa («Fecha: 15/10/2026 - Entrega en obra»). La
+        fecha de carta no es entonces la única del documento. No cuentan los rótulos de otras fechas («Fecha de
+        vencimiento», «Fecha valor», «Fecha y firma», «Fecha contrato»: las palabras de `excl` justo detrás)."""
+        otra = re.compile(r"^\s*(?:de\s+(?:la\s+|el\s+)?|del\s+|y\s+|/\s*)?(?:" + excl + "|" + self.OTROS_ACTOS_FECHA + r")", re.I)
+        for l in self.lineas:
+            if id(l) in en_tabla:
+                continue
+            for m in itertools.islice(self.RE_ROTULO_FECHA.finditer(l.texto), MAX_ETIQUETAS_RENGLON):
+                resto = l.texto[m.end():]
+                if otra.match(resto):
+                    continue
+                if not l.texto[:m.start()].strip() or re.match(r"^[^:\d]{0,30}?[:\d]", resto):
+                    return True
+        return False
+
+    # Fecha de carta: el lugar (de una a cuatro palabras con mayúscula inicial y sus partículas: «San Sebastián de los
+    # Reyes», «L'Hospitalet de Llobregat»; con o sin «En» delante) y, tras la coma, solo la fecha, larga o numérica («a
+    # jueves, 3 de octubre de 2026», «a 1 de noviembre de 2026»)
+    PARTICULAS_LUGAR = {"de", "del", "la", "las", "los", "el", "y", "i", "e", "d'", "l'", "da", "do", "dos", "das", "en"}
+    RE_DIA_SEMANA = re.compile(r"^(?:a\s+)?(?:(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\s*,?\s+)?(?:a\s+)?", re.I)
+    # Sellos y anotaciones con fecha que no son un lugar («Recibido, 3/10/2026», «Pagado, …», «Conforme, …», «Original, …»)
+    RE_NO_LUGAR = re.compile(r"\b(?:recibid|pagad|cobrad|entregad|emitid|expedid|firmad|aprobad|revisad|registrad|contabilizad|"
+                             r"vencid|enviad|impres|generad|actualizad|modificad|abonad|anulad|sellad|validad|autorizad|"
+                             r"visad|cread)[oa]s?\b|\b(?:conforme|hoy|desde|hasta|v[aá]lido|entrada|salida|original|copia|duplicado|triplicado|"
+                             r"ejemplar|recib[ií]|cobr[eé]|pagu[eé]|fdo|firma)\b", re.I)
+    # Fecha de carta por rellenar o que no se lee: huecos («a ___ de __________ de 2026», «__/__/2026») o un dato raro en el
+    # día, el mes o el año («a 31 de octubre de 2O26»)
+    HUECO_FECHA = r"(?:_{2,}|\.{3,}|…+)"
+    RE_FECHA_SIN_LEER = re.compile(
+        r"(?:\d{1,2}|" + HUECO_FECHA + r")\s*de\s+(?:[^\W\d_]+|" + HUECO_FECHA + r")\s+(?:de|del)\s+(?:\d{2}\s*" + HUECO_FECHA +
+        r"?|" + HUECO_FECHA + r"|(?=\S*\d\S*\d)\w[\w.]{1,5})|(?:\d{1,2}|" + HUECO_FECHA + r")\s*[/.-]\s*(?:\d{1,2}|" + HUECO_FECHA +
+        r")\s*[/.-]\s*(?:\d{2,4}|\d{2}\s*" + HUECO_FECHA + "|" + HUECO_FECHA + ")", re.I)
+
+    def _lugar_de_carta(self, lugar: str) -> bool:
+        pals = lugar.split()
+        if len(pals) > 1 and pals[0].lower() == "en":
+            pals = pals[1:]  # «En Villaficticia, a 14 de octubre de 2026»
+        if not pals or len(pals) > 8 or re.search(r"\d", lugar) or self.RE_ROTULO_DOCUMENTO.search(lugar) \
+                or self.RE_NO_LUGAR.search(lugar):
+            return False
+        mayus = [p for p in pals if p[:1].isupper() and re.fullmatch(r"[^\W\d_]+(?:['’.-][^\W\d_]*)*", p)]
+        return 1 <= len(mayus) <= 4 and len(mayus) + sum(p.lower() in self.PARTICULAS_LUGAR for p in pals) == len(pals) \
+            and pals[0][:1].isupper()
+
+    def _fecha_de_carta(self, texto: str) -> bool:
+        lugar, coma, resto = texto.partition(",")
+        if not coma or not self._lugar_de_carta(lugar):
+            return False
+        resto = self.RE_DIA_SEMANA.sub("", resto.strip().rstrip(".").strip())
+        return any(r.fullmatch(resto) for r in (RE_FECHA_LARGA, RE_FECHA, RE_FECHA_ABR, RE_FECHA_ISO)) \
+            and _fecha_iso(resto) is not None
+
+    def _fecha_de_carta_sin_leer(self, texto: str) -> bool:
+        """Renglón con forma de fecha de carta cuya fecha está en blanco o no se lee («Villaficticia, a ___ de ________ de
+        2026», «Villaficticia, a 31 de octubre de 2O26»)."""
+        lugar, coma, resto = texto.partition(",")
+        if not coma or not self._lugar_de_carta(lugar):
+            return False
+        resto = self.RE_DIA_SEMANA.sub("", resto.strip().rstrip(".").strip())
+        return self.RE_FECHA_SIN_LEER.fullmatch(resto) is not None and _fecha_iso(resto) is None
 
     def fecha_operacion(self):
         c = self.candidatos(r"fecha\s+(?:de\s+)?(?:la\s+)?(?:operaci[oó]n|prestaci[oó]n|entrega|realizaci[oó]n)", self._v_fecha)
@@ -1043,9 +1401,9 @@ class Extractor:
     def _apariciones_nif(self):
         """(nif, linea, palabras) incluidos NIF con caracteres espaciados; y NIF con forma válida pero control erróneo."""
         validos, sospechosos = [], []
-        self._nifs_corregidos = set()
+        self._nifs_corregidos = {}   # NIF corregido de una lectura OCR → lo leído (None: la letra O por el cero)
         for l in self.lineas:
-            vistos = set()
+            vistos, leidos = set(), set()
             textos = [l.texto, re.sub(r"\s+", "", l.texto)]
             n_textos = len(textos)
             if l.metodo == "ocr" and RE_NIF_ETIQUETA.search(l.texto):
@@ -1054,6 +1412,16 @@ class Extractor:
                 corr = re.sub(r"(?<=[A-Z0-9])O(?=[0-9O])|(?<=[0-9])O", "0", l.texto.upper())
                 if corr != l.texto.upper():
                     textos.append(corr)
+                # Y otras letras y cifras parecidas («A00B…» por «A008…»): tras el rótulo, una lectura de nueve caracteres no
+                # válida con una única variante válida es ese NIF, a confirmar (nunca en texto nativo)
+                for m in itertools.islice(RE_NIF_ETIQUETA.finditer(l.texto), MAX_NIFS_RENGLON):
+                    tok = RE_LECTURA_TRAS_ROTULO.match(l.texto, m.end())
+                    n = _nif_corregido_ocr(tok.group(1)) if tok else None
+                    if n and n not in vistos:
+                        vistos.add(n)
+                        leidos.add(nifmod.normalizar(tok.group(1)))
+                        self._nifs_corregidos.setdefault(n, tok.group(1))
+                        validos.append((n, l, self._palabras_rango(l, tok.start(1), tok.end(1)) or l.palabras))
             for k_txt, txt in enumerate(textos):
                 for n, _, _ in _nifs_en(txt):
                     if n in vistos:
@@ -1063,11 +1431,11 @@ class Extractor:
                     if nifmod.es_valido(n):
                         vistos.add(n)
                         if k_txt >= n_textos:
-                            self._nifs_corregidos.add(n)
-                        pals = [p for p in l.palabras if re.sub(r"[\s.\-]", "", p.texto.upper()) and
-                                re.sub(r"[\s.\-]", "", p.texto.upper()) in n or n[-4:] in p.texto.upper()]
+                            self._nifs_corregidos.setdefault(n, None)
+                        pals = [p for p in l.palabras if re.sub(r"[\s.\-–—/]", "", p.texto.upper()) and
+                                re.sub(r"[\s.\-–—/]", "", p.texto.upper()) in n or n[-4:] in p.texto.upper()]
                         validos.append((n, l, pals or l.palabras))
-                    elif nifmod.tipo(n) and RE_NIF_ETIQUETA.search(l.texto):
+                    elif nifmod.tipo(n) and RE_NIF_ETIQUETA.search(l.texto) and n not in leidos:
                         vistos.add(n)
                         sospechosos.append((n, l))
             if not vistos:
@@ -1079,7 +1447,7 @@ class Extractor:
     # Forma de NIF incompleta o con el control fuera de rango (lectura OCR de una cifra como letra, cifra perdida):
     # «A8775421S», «A8775421», «1234567L»
     RE_NIF_INCOMPLETO = re.compile(r"(?:[A-HJ-NP-SUVW]\d{7}[0-9A-Z]?|[XYZKLM]\d{7}[0-9A-Z]?|\d{7,8}[A-Z])")
-    RE_TRAS_ROTULO_NIF = re.compile(r"[\s:.\-–]{0,6}(?:ES[\s-]?)?([A-Z0-9][A-Z0-9.\-]{5,12})(?![A-Z0-9])")
+    RE_TRAS_ROTULO_NIF = re.compile(r"[\s:.\-–—]{0,6}(?:ES[\s-]?)?([A-Z0-9][A-Z0-9.\-–—/]{5,12})(?![A-Z0-9])")
 
     def _nif_incompleto(self, l: Linea) -> str | None:
         """NIF ilegible de un renglón sin NIF reconocido: tras el rótulo del NIF, una forma de NIF incompleta o con el control
@@ -1176,6 +1544,12 @@ class Extractor:
             ov = min(x.x1, x1) - max(x.x0, x0)
             return ov > 0 and (ov >= 0.3 * (x.x1 - x.x0) or abs(x.x0 - l.x0) <= 6 or abs(x.x1 - l.x1) <= 6
                                or abs((x.x0 + x.x1) / 2 - (l.x0 + l.x1) / 2) <= 15)
+        # NIF solo en su renglón, alineado al borde de un recuadro, uno o dos renglones por debajo del nombre y la dirección,
+        # que no comparten su alineación y solo lo solapan en parte: la columna del NIF se ensancha hasta ellos
+        recuadro = self._bloque_sobre_nif_suelto(nif_, l, barreras, solapa)
+        if recuadro is not None:
+            x0, x1 = min(x0, recuadro[0] - 25), max(x1, recuadro[1] + 25)
+            info["x0"], info["x1"] = x0, x1
         # La columna del bloque se ensancha con los renglones alineados con el del NIF (dirección, población): un nombre
         # en cuerpo grande, más ancho que el renglón del NIF, sigue siendo de esta columna
         superiores, techo = [], l.top   # techo: comienzo del tramo contiguo de renglones de la columna
@@ -1355,18 +1729,24 @@ class Extractor:
                                              and len(re.findall(r"\d", x)) < 6 and re.search(r"[^\W\d_]{3}", x)
                                              and not (RE_CLIENTE.match(x) or RE_EMISOR.match(x) or RE_ATENCION.match(x))), None)
         if not info["dom"]:
-            info["dom"], info["dom_pals"] = self._domicilio_en_linea(nif_, l)
+            info["dom"], info["dom_pals"], info["duda_dom_pie"] = self._domicilio_en_linea(nif_, l)
         if not info["dom"] and antes and (RE_VIA.search(antes) or RE_CP_CIUDAD.search(antes)) and not self._parece_nombre(antes):
             segs = [x.strip(" ,;.-–·|") for x in self.SEP_PIE.split(antes)]
             segs = [x for x in segs if x and not RE_FORMA_JURIDICA.search(x) and not RE_CONTACTO.search(x)]
             if segs:
                 info["dom"], info["dom_pals"] = ", ".join(segs), l.palabras
         if not info["dom"]:
-            sig = sorted([x for x in self.lineas if x.pagina == l.pagina and 0 < x.top - l.top <= 45 and solapa(x)
+            sig = sorted([x for x in self.lineas if x.pagina == l.pagina and 0 < x.top - l.top <= 90 and solapa(x)
                           and not RE_REGISTRO_MERCANTIL.search(x.texto)], key=lambda x: x.top)
             partes, pals_d, prev = [], [], l
+            calle_sin_via = lejos = confirmada = False
             for x in sig:
                 if x.top - prev.bottom > 16 or self._es_etiqueta(x.texto):
+                    break
+                lejano = x.top - l.top > 45
+                # más abajo de lo habitual, solo para completar un domicilio aún sin código postal ni población («Urb. …» ⏎
+                # «LOCALIDAD (Provincia)» de un particular): tras ellos sigue otra cosa («Ref. 10234», «Póliza 12345»)
+                if lejano and (not partes or any(re.search(r"\b\d{5}\b", t_) or self._es_poblacion(t_) for t_ in partes)):
                     break
                 # «Camino del Puerto 12 · 05635 Hoyos … · Tel. …»: lo que sigue al teléfono o al correo no es domicilio
                 trozos = []
@@ -1377,14 +1757,38 @@ class Extractor:
                 txt_d = ", ".join(t for t in trozos if t)
                 if not txt_d:
                     break
+                if lejano and not self._renglon_de_domicilio(txt_d):
+                    break  # (allí solo un renglón que empieza por la vía o por el código postal y la población, o la población)
                 if RE_DOMICILIO.search(txt_d) or (partes and re.search(r"\(|\b[A-ZÁÉÍÓÚ][a-záéíóú]+$", txt_d)):
+                    confirmada = confirmada or self._renglon_de_domicilio(txt_d)
+                    lejos = lejos or lejano
+                    partes.append(txt_d)
+                    pals_d += x.palabras
+                    prev = x
+                elif not partes and self.RE_CALLE_NUMERO.fullmatch(txt_d) and not (RE_ATENCION.match(txt_d)
+                                                                                    or RE_ROTULO.match(txt_d)):
+                    # calle sin tipo de vía justo bajo el NIF («Residencial Ficticio, 7B»): vale si la sigue otro renglón
+                    # de domicilio (que empieza por la vía o por el código postal y la población, o «LOCALIDAD (Provincia)»)
+                    calle_sin_via = True
                     partes.append(txt_d)
                     pals_d += x.palabras
                     prev = x
                 else:
                     break
+            if calle_sin_via and not confirmada:
+                partes = []
             if partes:
                 info["dom"], info["dom_pals"] = ", ".join(partes), pals_d
+                # (reglas de forma, no de contenido: el domicilio así tomado siempre se pide confirmarlo)
+                if (calle_sin_via or lejos) and not re.search(r"\b\d{5}\b", info["dom"]):
+                    info["duda_dom_debajo"] = ("Domicilio sin código postal, tomado de los renglones de debajo del NIF: "
+                                               "confírmelo y complételo")
+                elif calle_sin_via:
+                    info["duda_dom_debajo"] = (f"El primer renglón del domicilio, «{partes[0]}», no lleva tipo de vía: confirme "
+                                               "que es la calle")
+                elif lejos:
+                    info["duda_dom_debajo"] = ("Domicilio completado con un renglón más abajo de lo habitual bajo el NIF: "
+                                               "confírmelo")
         if info["dom"] and RE_ROTULO_DOM.sub("", info["dom"]).strip():
             info["dom"] = RE_ROTULO_DOM.sub("", info["dom"]).strip()  # «Domicilio: Av. Libertad 5, …»
         # Dos códigos postales distintos en el domicilio, o en él y en la dirección que sigue al NIF: el bloque reúne el de
@@ -1397,6 +1801,59 @@ class Extractor:
             info["duda_bloque"] = (f"El bloque del NIF reúne dos direcciones (códigos postales {', '.join(sorted(cps))}): puede "
                                    "incluir los datos de otra parte. Confirme la razón social y el domicilio")
         return info
+
+    @staticmethod
+    def _solo_nif(nif_: str, l: Linea) -> bool:
+        """El renglón no lleva más que el NIF y su rótulo («C.I.F.: A-…», «NIF B…»)."""
+        t = l.texto.upper()
+        for n, i, f in _nifs_en(t):
+            if n == nif_:
+                t = re.sub(r"(?<![A-Z0-9])ES[\s-]?$", "", t[:i]) + " " + t[f:]  # (con el prefijo «ES» del NIF-IVA)
+                break
+        else:
+            return False
+        return not re.search(r"[^\W_]", RE_NIF_ETIQUETA.sub(" ", t))
+
+    def _bloque_sobre_nif_suelto(self, nif_: str, l: Linea, barreras, solapa) -> tuple[float, float] | None:
+        """(x0, x1) del bloque de renglones al que pertenece un NIF suelto que va uno o dos renglones por debajo, alineado
+        al borde del recuadro y no al margen del bloque (p. ej. «C.I.F.: …» alineado a la derecha bajo el nombre y la
+        dirección, alineados a la izquierda): el renglón del NIF solo lleva el NIF, no tiene encima renglones de su propia
+        columna, el bloque es un tramo contiguo de renglones con el mismo margen y sin NIF, nada se interpone entre ambos
+        y el bloque y el NIF se solapan solo en parte (el NIF sobresale por un lado)."""
+        if not self._solo_nif(nif_, l):
+            return None
+        alto = l.bottom - l.top
+        sup = [self.lineas[k] for k in self._entre_tops(l.pagina, l.top - 8 * max(alto, 1.0) - 60, l.top)]
+        sup = [x for x in sup if x.bottom <= l.top + 1 and x is not l]
+        if any(solapa(x) and l.top - x.bottom <= 2.5 * max(alto, x.bottom - x.top) for x in sup):
+            return None  # el NIF ya tiene encima renglones de su columna
+        por_top = sorted(sup, key=lambda x: -x.top)
+        # (los renglones más cercanos por encima: el último del bloque es uno de ellos; acotado en un documento hostil)
+        for b in sorted(sup, key=lambda x: -x.bottom)[:8]:
+            if l.top - b.bottom > 3 * max(alto, b.bottom - b.top):  # (unos dos renglones en blanco)
+                break
+            if id(b) in barreras:
+                continue
+            bloque, prev = [b], b
+            for x in por_top:
+                if x.top >= prev.top - 1 or abs(x.x0 - b.x0) > 6:
+                    continue
+                if prev.top - x.bottom > max(14.0, 1.6 * (x.bottom - x.top)) or len(bloque) >= 6:
+                    break
+                bloque.append(x)
+                prev = x
+            bx0, bx1 = min(x.x0 for x in bloque), max(x.x1 for x in bloque)
+            parcial = min(bx1, l.x1) - max(bx0, l.x0) > 0 and (l.x1 > bx1 + alto or l.x0 < bx0 - alto)
+            if not parcial or any(id(x) in barreras or next(_nifs_en(x.texto), None) or RE_NIF_ETIQUETA.search(x.texto)
+                                  for x in bloque):
+                continue
+            # nada entre el bloque y el NIF en la franja de ambos
+            ids = {id(x) for x in bloque}
+            if any(id(x) not in ids and x.top > b.top and min(x.x1, max(bx1, l.x1)) - max(x.x0, min(bx0, l.x0)) > 0
+                   for x in sup):
+                continue
+            return bx0, bx1
+        return None
 
     @staticmethod
     def _sin_monograma(pals: list[Palabra]) -> list[Palabra]:
@@ -1419,6 +1876,103 @@ class Extractor:
     # «\s+[·|•–-]\s+|\s*[·|•]\s*» sin probar cada posición dentro de una racha de espacios ((?<!\s)\s+): mismo resultado
     # y coste lineal aunque el texto traiga rachas larguísimas de espacios
     SEP_PIE = re.compile(r"(?<!\s)\s+[·|•–-]\s+|(?<!\s)\s+[·|•]\s*|[·|•]\s*")
+    RE_CONTACTO_PIE = re.compile(RE_CONTACTO.pattern + r"|\btel\b", re.I)  # también «Tel. 910…», «Tel: …»
+    # Población seguida de la provincia entre paréntesis («VILLAFICTICIA (Provincia)»)
+    RE_LOCALIDAD_PROVINCIA = re.compile(r"[^\W\d_][^\d()]{1,40}\([^\W\d_][^\d()]{1,30}\)")
+    RE_PROVINCIA = re.compile(r"\([^\W\d_][^\d()]{1,30}\)")
+    # Código postal y población al comienzo del renglón («30000 VILLAPRUEBA», «30000 - Villaprueba», «C.P. 30000 …»; el
+    # renglón partido por SEP_PIE llega como «30000, Villaprueba»)
+    RE_CP_POBLACION = re.compile(r"(?:c\.?\s?p\.?\s*:?\s*)?\d{5}(?:\s*[-–—,]\s*|\s+)[^\W\d_]", re.I)
+    # Otra dirección de la misma parte, no su domicilio («Lugar de entrega C/ …», «Dirección de envío …», «Obra …»)
+    RE_OTRA_DIRECCION = re.compile(r"(?:(?:lugar|punto|direcci[oó]n|domicilio|dir\.)\s+de\s+)?(?:entrega|env[ií]o|suministro|"
+                                   r"obra|recogida|carga|descarga|instalaci[oó]n)\b", re.I)
+
+    def _es_poblacion(self, t: str) -> bool:
+        """«LOCALIDAD (Provincia)» o «(Provincia)»: el renglón que cierra el domicilio de un particular sin código postal."""
+        t = t.strip()
+        return bool(self.RE_LOCALIDAD_PROVINCIA.fullmatch(t) or self.RE_PROVINCIA.fullmatch(t))
+
+    def _renglon_de_domicilio(self, t: str) -> bool:
+        """Renglón que por sí solo es parte de un domicilio: empieza por un tipo de vía («Urb. …», «C/ …») o por el código
+        postal y la población, o es la población con la provincia; no un rótulo («Entrega: …») ni otra dirección («Lugar de
+        entrega C/ …»), ni una referencia con cinco cifras («Ref. 10234», «Póliza 12345»)."""
+        t = t.strip()
+        if self.RE_CP_POBLACION.match(t):
+            return True
+        if RE_ROTULO.match(t) or self.RE_OTRA_DIRECCION.match(t):
+            return False
+        return bool(RE_VIA.match(t) or self._es_poblacion(t))
+    # Calle sin tipo de vía y su número («Imaginaria, 58», «Pintor Ejemplo, nº 9»): solo vale seguida del código postal
+    # (o, justo bajo el NIF, de otro renglón de domicilio)
+    RE_CALLE_NUMERO = re.compile(r"[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñºª.'\s-]{2,40}?,\s*(?:n(?:\.?[º°])?\.?\s*)?\d{1,4}(?:\s?[A-Za-z]|\s?bis)?")
+    # Tras la palabra clave de contacto: el resto de la palabra, su abreviatura y su compañera («Teléfono/Fax», «Tel. y
+    # fax», «Correo electrónico»), sin ambigüedad en los espacios (coste lineal)
+    RE_TRAS_CLAVE_CONTACTO = re.compile(r"[\w-]*\.?(?:\s*(?:/|\by\b|\belectr[oó]nico\b)[\w-]*\.?){0,3}\s*", re.I)
+    RE_CORREO_WEB = re.compile(r"[^\s@]*@|www\.|https?:", re.I)
+    # Rótulo de contacto al final de lo que precede a un dato de contacto («… 28001 Madrid Tel.», «… Madrid E-mail:»)
+    RE_ROTULO_CONTACTO_FINAL = re.compile(r"(?:^|\s)(?:\S*:|tel[eé]?f\w*\.?|tel\.?|tfno\.?|tlf\.?|m[oó]vil|e-?mail|fax|"
+                                          r"correo\s+electr[oó]nico|[/y])\s*$", re.I)
+
+    def _corte_contacto(self, seg: str):
+        """Primer rótulo o dato de contacto del trozo de pie `seg` (un match de RE_CONTACTO_PIE) y si es seguro.
+
+        Seguro: un correo o una web, o la palabra clave que abre palabra seguida de «:», de un teléfono (nueve cifras o
+        más que no acaban en código postal y población), de un correo o de una web («Tel. 910…», «E-mail: …», «Correo
+        electrónico info@…»). Dudoso: la palabra clave que abre palabra sin nada de eso detrás, que puede ser parte del
+        nombre de la calle («Calle Ficticia del Correo, 4», «Plaza Imaginaria de Correos 2», «Ronda de Telefonía
+        Ficticia»). Dentro de una palabra («Automóvil») no cuenta. Devuelve (match seguro o None, hay uno dudoso)."""
+        dudoso = False
+        for x in self.RE_CONTACTO_PIE.finditer(seg):
+            g = x.group(0)
+            if "@" in g or g.lower() in ("www.", "http"):
+                return x, dudoso
+            if x.start() > 0 and seg[x.start() - 1].isalnum():
+                continue  # dentro de una palabra
+            resto = seg[x.end():x.end() + 80]
+            sigue = resto[self.RE_TRAS_CLAVE_CONTACTO.match(resto).end():]
+            if sigue.startswith(":") or self.RE_CORREO_WEB.match(sigue):
+                return x, dudoso
+            tel = re.match(r"\(?\+?[\d\s.()/-]+", sigue)
+            if tel and sum(ch.isdigit() for ch in tel.group(0)) >= 9 and not RE_CP_CIUDAD.search(sigue[:tel.end() + 1]):
+                return x, dudoso
+            dudoso = True
+        return None, dudoso
+
+    # Palabras de enlace de los nombres de población («Villa Ficticia de Abajo», «Sant Imaginari del Mar», «Puebla y Villa»)
+    _ENLACES_POBLACION = {"de", "del", "la", "las", "los", "el", "y", "i", "e", "les", "sa", "ses", "es", "d'", "l'", "da", "do"}
+
+    def _sin_frase_tras_poblacion(self, t: str) -> tuple[str, bool]:
+        """Quita la frase pegada sin separador tras «CP Población» («… 28001 Madrid Síguenos en», «… Madrid Atención al
+        cliente»): tras el código postal, la población son palabras en mayúscula, enlaces («de», «la») y la provincia entre
+        paréntesis; la primera palabra en minúscula que no es un enlace abre la frase, con la palabra en mayúscula pegada
+        delante («Síguenos en»). Devuelve (texto, se ha cortado): el corte es una deducción y se pide confirmarlo."""
+        cps = list(re.finditer(r"(?<![\w-])\d{5}\s+", t))
+        if not cps:
+            return t, False
+        ini = cps[-1].end()
+        toks = list(re.finditer(r"\S+", t[ini:]))
+        for k, w in enumerate(toks):
+            p = w.group(0).strip("(),.;-–")
+            if not p or p[0].isupper() or p.lower() in self._ENLACES_POBLACION or not p[0].isalpha() \
+                    or re.match(r"[dl]['’]", p, re.I):  # (artículo elidido: «Platja d'Imaginari»)
+                continue
+            if k == 0:
+                return t, False  # (la población no puede empezar por la frase)
+            corte = k - 1 if k >= 2 and toks[k - 1].group(0)[:1].isupper() else k
+            cab = t[:ini + toks[corte].start()].rstrip(" ,;.-–·|")
+            while True:  # (sin enlaces sueltos al final: «Puebla Inventada y»)
+                u = cab.rsplit(None, 1)
+                if len(u) == 2 and u[1].lower() in self._ENLACES_POBLACION:
+                    cab = u[0].rstrip(" ,;.-–·|")
+                    continue
+                break
+            return cab, True
+        return t, False
+
+    @staticmethod
+    def _con_numero(t: str) -> bool:
+        """Domicilio con su número o su código postal: una calle sin número («Calle Ficticia del») no es un domicilio."""
+        return bool(re.search(r"\b\d{5}\b", t) or (RE_DOMICILIO.search(t) and re.search(r"\d|\bs/n\b", t, re.I)))
 
     def _domicilio_en_linea(self, nif_: str, l: Linea):
         """Domicilio impreso a continuación del NIF en la misma línea y, si sigue, en la línea siguiente (pies de página)."""
@@ -1429,25 +1983,56 @@ class Extractor:
                 fin = f
                 break
         if fin is None:
-            return None, []
-        partes = []
+            return None, [], None
+        partes, duda = [], None
         resto = [t[fin:]]
         sig = [x for x in self.lineas if x.pagina == l.pagina and 0 < x.top - l.top <= 18 and min(x.x1, l.x1) - max(x.x0, l.x0) > 0]
         if sig and re.match(r"^\s*\d{5}\b", sig[0].texto):
             resto.append(sig[0].texto)
-        for r in resto:
-            for seg in self.SEP_PIE.split(r):
-                seg = seg.strip(" ,;.-–·|")
-                if not seg:
-                    continue
-                if RE_CONTACTO.search(seg) or RE_REGISTRO_MERCANTIL.search(seg) or re.search(r"\b(www\.|https?:|@)", seg, re.I):
+        trozos = [[s for s in (s.strip(" ,;.-–·|") for s in self.SEP_PIE.split(r)) if s] for r in resto]
+        for i, segs in enumerate(trozos):
+            for k, seg in enumerate(segs):
+                # (el trozo siguiente, también el primero de la línea siguiente, que empieza por el código postal)
+                siguiente = segs[k + 1] if k + 1 < len(segs) else \
+                    next(iter(trozos[i + 1]), None) if i + 1 < len(trozos) else None
+                # el contacto que sigue a la dirección sin separador («…, 58 28001 Ciudad info@…»): vale lo de delante,
+                # solo si es un domicilio por sí mismo (con número o código postal), sin el rótulo del contacto y nunca
+                # como continuación corta («Síguenos en», «Contacto:», «Pedidos:» no son parte del domicilio)
+                m, dudoso = self._corte_contacto(seg)
+                corte = seg
+                if m:
+                    corte = seg[:seg.rfind(" ", 0, m.start()) + 1].strip(" ,;.-–·|")
+                    for _ in range(4):
+                        r_ = self.RE_ROTULO_CONTACTO_FINAL.search(corte)
+                        if not r_:
+                            break
+                        corte = corte[:r_.start()].strip(" ,;.-–·|")
+                    # (sin separador, entre la población y el contacto puede ir una frase: «Síguenos en www…»)
+                    corte, recortado = self._sin_frase_tras_poblacion(corte)
+                    if recortado:
+                        duda = ("El domicilio del pie va seguido, sin separador, de otro texto delante del contacto: se ha "
+                                "cortado tras la población. Compruebe que está completo")
+                if RE_REGISTRO_MERCANTIL.search(corte):
                     break
-                if RE_DOMICILIO.search(seg) or re.search(r"\b\d{5}\b", seg) or (partes and len(seg) <= 40):
-                    partes.append(seg)
+                if m or dudoso:
+                    # (con una palabra de contacto dudosa, p. ej. «Calle Ficticia del Correo, 4», el trozo vale si es un
+                    # domicilio con número, o calle y número seguidos del código postal; si no, se para como con un contacto)
+                    vale = bool(corte) and (self._con_numero(corte) or (
+                        not m and self.RE_CALLE_NUMERO.fullmatch(corte) and siguiente and RE_CP_CIUDAD.match(siguiente)))
+                    if vale:
+                        partes.append(corte)
+                    if m or not vale:
+                        break
+                    continue
+                if corte and (RE_DOMICILIO.search(corte) or re.search(r"\b\d{5}\b", corte) or (partes and len(corte) <= 40)
+                              # calle sin tipo de vía y número, con el código postal y la población en el trozo siguiente
+                              # («Imaginaria, 58 · 28001 Ciudad»)
+                              or (self.RE_CALLE_NUMERO.fullmatch(corte) and siguiente and RE_CP_CIUDAD.match(siguiente))):
+                    partes.append(corte)
         if not partes:
-            return None, []
+            return None, [], None
         pals = [p for p in l.palabras if any(p.texto in x for x in partes)]
-        return ", ".join(partes), pals or l.palabras
+        return ", ".join(partes), pals or l.palabras, duda
 
     def _contrastar_nombre_ocr(self, b: dict) -> None:
         """En un escaneo, la razón social puede leerse mejor en otro sitio (p. ej. el pie con los datos registrales)."""
@@ -1526,9 +2111,75 @@ class Extractor:
             rot = _rotulo_de_papel(x.texto, solo=True) if x is not None else None
         return rot if rot and not self.RE_ROTULO_DOCUMENTO.search(rot) else None
 
+    def _bloque_de_otra_parte(self, x: Linea, emisor: dict, destinatario: dict | None) -> str | None:
+        """Motivo por el que el renglón `x` (una dirección de la cabecera) parece del bloque de otra parte y no del emisor:
+        el bloque (renglones contiguos de su columna, por encima y por debajo) lleva un NIF distinto del del emisor, va
+        rotulado como cliente, o lo encabeza una razón social que no es la del emisor (la del destinatario o, con forma
+        jurídica o de entidad, otra; o un nombre cualquiera si el destinatario no tiene su propio bloque completo). La
+        razón social del emisor solo cuenta como suya si es segura: la leída de la cabecera cuando el destinatario no tiene
+        nombre puede ser la del propio recuadro del destinatario. Y si el NIF del destinatario figura sin razón social ni
+        domicilio, cualquier bloque que no encabece la razón social segura del emisor (ni vaya rotulado como del emisor)
+        puede ser el suyo, aunque no lleve nombre («AUTOCARES 33», solo la calle y la población)."""
+        bloque, y = [x], x
+        for _ in range(5):  # hacia arriba, hasta el título del bloque
+            y = self._renglon_encima(y.top, y.pagina, x.x0, x.x1)
+            if y is None or any(y is z for z in bloque):
+                break
+            bloque.insert(0, y)
+        prev = x
+        for _ in range(4):  # hacia abajo (el NIF al pie del bloque)
+            gap = max(14.0, 1.6 * (prev.bottom - prev.top))
+            sig = [self.lineas[k] for k in self._entre_tops(x.pagina, prev.top + 1, prev.bottom + gap)]
+            sig = [z for z in sig if z.top > prev.top and self._alineada(z, x.x0, x.x1)]
+            if not sig:
+                break
+            prev = min(sig, key=lambda z: z.top)
+            bloque.append(prev)
+        for z in bloque:
+            otro = next((n for n, _, _ in _nifs_en(z.texto) if nifmod.es_valido(n) and n != emisor["nif"]), None)
+            if otro:
+                return f"con el NIF {otro}"
+        cabeza = bloque[0]
+        sobre = self._renglon_encima(cabeza.top, cabeza.pagina, cabeza.x0, cabeza.x1)
+        encabezado = [cabeza] + ([sobre] if sobre is not None else [])
+        if any(RE_CLIENTE.match(z.texto.strip()) for z in encabezado):
+            return "rotulado como cliente"
+        # razón social del emisor segura: la de junto a su NIF o la de la cabecera no puesta en duda
+        nombre_emisor = emisor["nombre"] if not emisor.get("duda_nombre_cabecera") else None
+        # el destinatario tiene su propio bloque completo (razón social y domicilio junto a su NIF, no deducidos)
+        dest_completo = bool(destinatario and destinatario["nombre"] and destinatario["dom"]
+                             and not destinatario.get("duda_nombre"))
+        propio = any(RE_EMISOR.match(z.texto.strip()) for z in encabezado)
+        for z in itertools.takewhile(lambda z: z is not x, bloque):  # los renglones de encima de la dirección
+            t = self._sin_rotulo(z.texto)
+            if not self._parece_nombre(t) or self.RE_ROTULO_DOCUMENTO.search(t):
+                continue
+            if nombre_emisor and _mismo_nombre(t, nombre_emisor):
+                propio = True
+                continue
+            if emisor["nombre"] and _mismo_nombre(t, emisor["nombre"]):  # (la de la cabecera puesta en duda)
+                return f"«{t}», que puede ser la razón social del destinatario"
+            # (un nombre cualquiera si se conoce la razón social del emisor y el destinatario no tiene su propio bloque
+            # completo; si no, solo con forma jurídica o de entidad: un nombre comercial o un lema en el membrete no es otra
+            # parte)
+            if (destinatario and _mismo_nombre(t, destinatario["nombre"])) or RE_FORMA_JURIDICA.search(t) \
+                    or RE_ENTIDAD.search(t) or (emisor["nombre"] and not dest_completo):
+                return f"«{t}»"
+        if destinatario and not destinatario["nombre"] and not destinatario["dom"] and not propio:
+            return "el NIF del destinatario figura sin razón social ni domicilio y este bloque puede ser el suyo"
+        return None
+
     def _bloque_sin_nif(self, tope: float, partes_: list[dict]) -> str | None:
         """Razón social de un bloque de la cabecera (página 1, encima de `tope`) con su dirección y sin NIF, sin rótulo y que
         no es de ninguna de las partes ni el membrete que abre la página: puede ser el del cliente, con el NIF omitido."""
+        return next((c["nombre"] for c in self._bloques_sin_nif(tope, partes_)), None)
+
+    def _bloques_sin_nif(self, tope: float, partes_: list[dict], emisor: dict | None = None):
+        """Bloques de la cabecera (página 1, encima de `tope`) con razón social y dirección y sin NIF, sin rótulo, que no son
+        de ninguna de las partes: {nombre, linea, dirs}. Sin `emisor`, tampoco el que abre la página o su columna (suele ser
+        el membrete del emisor). Con `emisor` (con su razón social leída en otro sitio, p. ej. el pie), el que abre la página
+        también vale si va en la mitad derecha y su razón social no es la del emisor: el membrete es una imagen y el primer
+        texto es el recuadro del cliente."""
         cab = sorted([x for x in self.lineas if x.pagina == 1 and x.top < tope], key=lambda x: x.top)
         nombres = [b["nombre"] for b in partes_ if b["nombre"]]
         zonas = []  # extensión vertical y ventana de los bloques de las partes en la página 1
@@ -1540,15 +2191,19 @@ class Extractor:
         examinados = 0
         for x in cab:
             t = self._sin_rotulo(x.texto)
-            if x.top <= cab[0].top + 15 or not (RE_FORMA_JURIDICA.search(t) or RE_ENTIDAD.match(t)) or RE_CLIENTE.match(x.texto.strip()) \
+            if not (RE_FORMA_JURIDICA.search(t) or RE_ENTIDAD.match(t)) or RE_CLIENTE.match(x.texto.strip()) \
                     or not self._parece_nombre(t) or any(_mismo_nombre(t, n) for n in nombres) or next(_nifs_en(x.texto), None):
+                continue
+            # abre la página o su columna: el membrete (salvo, con `emisor`, en la mitad derecha y con otra razón social)
+            ajeno = emisor is not None and bool(emisor.get("nombre")) and (x.x0 + x.x1) / 2 > 0.5 * self.ancho.get(1, 0)
+            if x.top <= cab[0].top + 15 and not ajeno:
                 continue
             examinados += 1
             if examinados > MAX_BLOQUES_SIN_NIF:
                 break
             if any(a <= x.top <= z and min(x.x1, x1) - max(x.x0, x0) > 0 for a, z, x0, x1 in zonas):
                 continue
-            if not any(y.bottom <= x.top and min(y.x1, x.x1) - max(y.x0, x.x0) > 0 for y in cab):
+            if not ajeno and not any(y.bottom <= x.top and min(y.x1, x.x1) - max(y.x0, x.x0) > 0 for y in cab):
                 continue  # abre su columna: el membrete
             encima = self._renglon_encima(x.top, 1, x.x0, x.x1)
             if encima is not None and (RE_ROTULO.match(encima.texto) or next(_nifs_en(encima.texto), None)):
@@ -1565,8 +2220,8 @@ class Extractor:
             if any(next(_nifs_en(y.texto), None) or RE_NIF_ETIQUETA.search(y.texto) for y in bloque):
                 continue
             if any(self._parece_direccion(y.texto) and not RE_CONTACTO.search(y.texto) for y in bloque):
-                return t
-        return None
+                yield {"nombre": t, "linea": x, "dirs": [y for y in bloque if self._parece_direccion(y.texto)
+                                                         and not RE_CONTACTO.search(y.texto) and not RE_ATENCION.match(y.texto.strip())]}
 
     def partes(self):
         validos, sospechosos = self._apariciones_nif()
@@ -1635,7 +2290,8 @@ class Extractor:
                     ant.update(nombre=b["nombre"], nombre_pals=b["nombre_pals"], nombre_linea=b["nombre_linea"],
                                duda_monograma=b.get("duda_monograma"))
                 if not ant["dom"] and b["dom"]:
-                    ant.update(dom=b["dom"], dom_pals=b["dom_pals"])
+                    ant.update(dom=b["dom"], dom_pals=b["dom_pals"], duda_dom_pie=b.get("duda_dom_pie"),
+                               duda_dom_debajo=b.get("duda_dom_debajo"))
                 ant["rotulo_contiguo"] = ant["rotulo_contiguo"] or b["rotulo_contiguo"]
         unicos = list(por_nif.values())
         emisor = destinatario = None
@@ -1683,17 +2339,20 @@ class Extractor:
                 if not (RE_FORMA_JURIDICA.search(lejano) and nifmod.es_persona_juridica(destinatario["nif"])
                         and not (RE_FORMA_JURIDICA.search(cerca_) or RE_NEGOCIO.search(cerca_) or RE_ENTIDAD.search(cerca_))):
                     destinatario.update({k: nuevo.get(k) for k in ("nombre", "nombre_pals", "nombre_linea", "nombre_lejano",
-                                                                   "dom", "dom_pals", "x0", "x1", "duda_monograma", "duda_bloque")})
+                                                                   "dom", "dom_pals", "x0", "x1", "duda_monograma", "duda_bloque",
+                                                                   "duda_dom_pie", "duda_dom_debajo")})
                 destinatario["duda_nombre"] = (f"Sobre el NIF del destinatario figuran «{cerca_}» y, encima, separado por un "
                                                f"hueco, «{lejano}»: confirme cuál es su razón social")
             elif cerca_:
                 destinatario.update({k: nuevo.get(k) for k in ("nombre", "nombre_pals", "nombre_linea", "nombre_lejano", "dom",
-                                                               "dom_pals", "x0", "x1", "duda_monograma", "duda_bloque")})
+                                                               "dom_pals", "x0", "x1", "duda_monograma", "duda_bloque",
+                                                               "duda_dom_pie", "duda_dom_debajo")})
             else:
                 duda = ("Leído por encima del bloque del NIF del destinatario, separado de él: puede ser de otra parte (p. ej. "
                         "el emisor). Confírmelo")
                 if nuevo["dom"]:
-                    destinatario.update(dom=nuevo["dom"], dom_pals=nuevo["dom_pals"], duda_bloque=nuevo.get("duda_bloque"))
+                    destinatario.update(dom=nuevo["dom"], dom_pals=nuevo["dom_pals"], duda_bloque=nuevo.get("duda_bloque"),
+                                        duda_dom_pie=nuevo.get("duda_dom_pie"), duda_dom_debajo=nuevo.get("duda_dom_debajo"))
                 else:
                     destinatario["duda_dom"] = duda
                 propio = nuevo.get("texto_sin_nombre")
@@ -1730,7 +2389,29 @@ class Extractor:
             if nuevo["nombre"] and _clave(nuevo["nombre"]) == _clave(perdedor["nombre"]):
                 nuevo.update(nombre=None, nombre_pals=[], nombre_linea=None)
             perdedor.update({k: nuevo.get(k) for k in ("nombre", "nombre_pals", "nombre_linea", "dom", "dom_pals",
-                                                       "duda_monograma", "duda_bloque")})
+                                                       "duda_monograma", "duda_bloque", "duda_dom_pie", "duda_dom_debajo")})
+        # Cabecera del documento: página 1, encima de la tabla de conceptos (y del 40 % superior de la página)
+        self.tabla()
+        tope = min([f.top for f in self.filas if f.pagina == 1 and id(f) in self._ids_filas_tabla]
+                   + [0.4 * self.alto.get(1, 0)])
+        # NIF del destinatario sin nombre ni domicilio en su bloque (p. ej. suelto bajo el título de la factura) y, en la
+        # cabecera, un único bloque sin rótulo ni NIF con razón social y dirección que no es el del emisor (con su razón
+        # social leída junto a su NIF, p. ej. en el pie): es el del destinatario, pero el vínculo es una deducción y se pide
+        # confirmarlo
+        if destinatario and emisor and emisor["nombre"] and not destinatario["nombre"] and not destinatario["dom"] \
+                and not destinatario.get("ilegible"):
+            sin_nif = list(itertools.islice(self._bloques_sin_nif(tope, [emisor, destinatario], emisor=emisor), 2))
+            if len(sin_nif) == 1:
+                c = sin_nif[0]
+                duda = (f"Razón social y domicilio tomados del bloque de la cabecera «{c['nombre']}», sin NIF: el NIF del "
+                        "destinatario figura aparte y se ha supuesto que es de ese bloque. Confírmelo")
+                destinatario.update(nombre=c["nombre"], nombre_pals=self._pals_de(c["nombre"], c["linea"].palabras),
+                                    nombre_linea=c["linea"], duda_nombre=duda, duda_dom=duda,
+                                    x0=min(destinatario["x0"], c["linea"].x0 - 10, *(y.x0 - 10 for y in c["dirs"])),
+                                    x1=max(destinatario["x1"], c["linea"].x1 + 10, *(y.x1 + 10 for y in c["dirs"])))
+                if c["dirs"]:
+                    destinatario.update(dom=", ".join(y.texto.strip().rstrip(",") for y in c["dirs"]),
+                                        dom_pals=[p for y in c["dirs"] for p in y.palabras])
         # Razón social del emisor si no está junto a su NIF (NIF solo en la columna de los datos de la factura o en el pie,
         # sin nombre): la primera de la cabecera, con forma jurídica o de entidad, fuera del bloque del destinatario
         if emisor and not emisor["nombre"] and not emisor.get("ilegible"):
@@ -1752,13 +2433,24 @@ class Extractor:
                     continue  # del bloque del destinatario
                 emisor.update(nombre=txt, nombre_pals=self._pals_de(txt, x.palabras), nombre_linea=None,
                               aviso_nombre="Razón social tomada de la cabecera del documento: no figura junto al NIF del emisor")
+                if destinatario and not destinatario["nombre"]:
+                    # el NIF del destinatario tampoco lleva razón social: el bloque de la cabecera puede ser el suyo (su
+                    # recuadro de dirección) tanto como el membrete del emisor
+                    emisor["duda_nombre_cabecera"] = (
+                        f"Ni el NIF del emisor ni el del destinatario figuran junto a una razón social: «{txt}», tomada de la "
+                        "cabecera, puede ser la del destinatario. Confirme la razón social del emisor")
                 break
-        # Domicilio del emisor si no está junto a su NIF: líneas de dirección de la cabecera fuera del bloque del cliente
+        # Domicilio del emisor si no está junto a su NIF: líneas de dirección de la cabecera fuera del bloque del cliente.
+        # Si salen de un bloque que parece de otra parte (con otro NIF, rotulado como cliente o encabezado por otra razón
+        # social), no se dan por seguras: el emisor no imprime su dirección junto a su NIF y la de la cabecera puede ser la
+        # del recuadro del cliente
         if emisor and not emisor["dom"]:
             cab = [x for x in self.lineas if x.pagina == 1 and x.top < 0.35 * self.alto[1]]
-            partes, pals = [], []
+            partes, pals, ajenos = [], [], []
+            de_dest = {id(p) for p in (destinatario["dom_pals"] + destinatario["nombre_pals"] if destinatario else [])}
             for x in cab:
-                if destinatario and min(x.x1, destinatario["x1"]) - max(x.x0, destinatario["x0"]) > 0.3 * (x.x1 - x.x0):
+                if destinatario and (min(x.x1, destinatario["x1"]) - max(x.x0, destinatario["x0"]) > 0.3 * (x.x1 - x.x0)
+                                     or any(id(p) in de_dest for p in x.palabras)):
                     continue  # pertenece al bloque del destinatario
                 txt = x.texto.strip()
                 etiqueta = re.match(r"^([^\d:]{2,30}?)(?:\.\s*[-–]|:)\s", txt)
@@ -1768,8 +2460,15 @@ class Extractor:
                         and not RE_FORMA_JURIDICA.search(txt) and not _fecha_iso(txt):
                     partes.append(txt.rstrip(","))
                     pals += x.palabras
+                    ajeno = self._bloque_de_otra_parte(x, emisor, destinatario)
+                    if ajeno:
+                        ajenos.append(ajeno)
             if partes:
                 emisor["dom"], emisor["dom_pals"] = ", ".join(partes), pals
+                if ajenos:
+                    emisor["duda_dom_cabecera"] = (
+                        f"El domicilio del emisor no figura junto a su NIF y el de la cabecera sale de un bloque que parece de "
+                        f"otra parte ({ajenos[0]}): compruebe que es el del emisor y no el del destinatario")
         if emisor and emisor["nombre"] and any(p.metodo == "ocr" for p in emisor["nombre_pals"]):
             self._contrastar_nombre_ocr(emisor)
         def extension(b):  # (página, arriba, abajo) del bloque: su NIF, su nombre y su domicilio
@@ -1801,10 +2500,6 @@ class Extractor:
             (pe, ae, be), (po, ao, bo) = extension(emisor), extension(destinatario)
             encima = 1 if (po, bo) <= (pe, ae + 2) else -1 if (pe, be) <= (po, ao + 2) else 0
             contradice = emisor["em_propio"] - emisor["de"] < 1 and (dif > 0) - (dif < 0) + encima + destaca_otro - destaca_propio >= 1
-        # Cabecera del documento: página 1, encima de la tabla de conceptos (y del 40 % superior de la página)
-        self.tabla()
-        tope = min([f.top for f in self.filas if f.pagina == 1 and id(f) in self._ids_filas_tabla]
-                   + [0.4 * self.alto.get(1, 0)])
         # El NIF elegido puede ser de un tercero citado (cesionario de un factoring, promotor, mediador) y el del cliente,
         # faltar: (a) un rótulo de otro papel delante de su razón social o en el renglón de encima de su bloque
         # («Promotor:», «Cesionario:»), o junto al rótulo de su NIF («CIF cesionario:»); (b) el documento rotula como cliente
@@ -1850,21 +2545,42 @@ class Extractor:
             }
             if b.get("aviso_nombre") and nombre_dom["nombre"].get("valor"):
                 nombre_dom["nombre"]["avisos"].append(b["aviso_nombre"])
+            if b.get("duda_nombre_cabecera") and nombre_dom["nombre"].get("valor"):
+                nombre_dom["nombre"]["confianza"] = min(nombre_dom["nombre"]["confianza"], 0.6)
+                nombre_dom["nombre"]["avisos"].append(b["duda_nombre_cabecera"])
             for k, duda in (("nombre", b.get("duda_nombre") or b.get("duda_monograma") or b.get("duda_bloque")),
                             ("domicilio", b.get("duda_dom") or b.get("duda_bloque"))):
                 if rol == "destinatario" and duda and nombre_dom[k].get("valor"):
                     nombre_dom[k]["confianza"] = min(nombre_dom[k]["confianza"], 0.75)
                     nombre_dom[k]["avisos"].append(duda)
+            if b.get("duda_dom_pie") and b["dom"] and nombre_dom["domicilio"].get("valor"):
+                nombre_dom["domicilio"]["confianza"] = min(nombre_dom["domicilio"]["confianza"], 0.75)
+                nombre_dom["domicilio"]["avisos"].append(b["duda_dom_pie"])
+            if b.get("duda_dom_debajo") and b["dom"] and nombre_dom["domicilio"].get("valor"):
+                nombre_dom["domicilio"]["confianza"] = min(nombre_dom["domicilio"]["confianza"], 0.75)
+                nombre_dom["domicilio"]["avisos"].append(b["duda_dom_debajo"])
+            if b.get("duda_dom_cabecera") and nombre_dom["domicilio"].get("valor"):
+                nombre_dom["domicilio"]["confianza"] = min(nombre_dom["domicilio"]["confianza"], 0.6)
+                nombre_dom["domicilio"]["avisos"].append(b["duda_dom_cabecera"])
             if b.get("ilegible"):
                 out[rol] = {**nombre_dom, "nif": _vacio(f"El NIF del bloque del cliente («{b['ilegible']}») no tiene un dígito "
                                                          "de control válido: escriba el NIF correcto")}
                 continue
             cn = _campo(b["nif"], texto=l.texto, palabras=b["pals"], pagina=l.pagina)
             cn["avisos"].append("Rol deducido: " + ", ".join(b["motivos"] or ["por descarte (sin indicios)"]))
-            if b["nif"] in getattr(self, "_nifs_corregidos", ()):
+            if b["nif"] in getattr(self, "_nifs_corregidos", {}):
                 cn["confianza"] = min(cn["confianza"], 0.6)
-                cn["avisos"].append("El OCR leyó la letra O en lugar del dígito 0: NIF corregido (su dígito de control es válido); "
-                                    "compruébelo en el original")
+                leido = self._nifs_corregidos[b["nif"]]
+                cambios = [] if leido is None else \
+                    [(a, c) for a, c in zip(re.sub(r"[.\-–—/]", "", leido), b["nif"]) if a.upper() != c]
+                if all(a.upper() == "O" and c == "0" for a, c in cambios):
+                    cn["avisos"].append("El OCR leyó la letra O en lugar del dígito 0: NIF corregido (su dígito de control es "
+                                        "válido); compruébelo en el original")
+                else:
+                    cn["avisos"].append(f"El OCR leyó «{leido}»: NIF corregido cambiando "
+                                        + ", ".join(f"«{a}» por «{c}»" for a, c in cambios)
+                                        + " (letras y cifras que el OCR confunde); es la única lectura con dígito de control "
+                                        "válido: compruébelo en el original")
             if rol == "emisor":
                 seguro = self.nif_empresa == b["nif"] and "bloque de cliente" not in b["motivos"] and not contradice
             else:
@@ -1985,6 +2701,93 @@ class Extractor:
         aviso = ("Factura sin tabla de conceptos: una sola línea con el texto del apartado «Concepto» y la base imponible como "
                  "importe; revísela")
         c_imp = dict(imp["base_imponible"], avisos=[aviso])
+        c_imp["confianza"] = min(c_imp.get("confianza") or 0.0, 0.7)
+        return {"concepto": _campo(texto, texto=texto, lineas_=parrafo, confianza=0.7, aviso=aviso), "cantidad": _vacio(""),
+                "unidad": _vacio(""), "precio": _vacio(""), "importe": c_imp, "dto": _vacio(""), "iva": _vacio("")}
+
+    @staticmethod
+    def _cifras_del_resumen(imp: dict) -> set:
+        """Importes del resumen (base, cuotas, totales, retención): las únicas cifras que admite una factura de un solo
+        concepto descrito en texto corrido."""
+        vals = [(imp.get(k) or {}).get("valor") for k in ("base_imponible", "cuota_iva", "total_factura", "total_a_pagar")]
+        vals += [d[k].get("valor") for d in imp.get("desglose") or [] for k in ("base", "cuota")]
+        if imp.get("retencion") and imp["retencion"]["importe"].get("valor"):
+            vals.append(imp["retencion"]["importe"]["valor"])
+        out = set()
+        for v in vals:
+            try:
+                if v is not None:
+                    out.add(q2(abs(Decimal(v))))
+            except ArithmeticError:
+                continue
+        return out
+
+    def _linea_unica_carta(self, imp: dict) -> dict | None:
+        """Factura en forma de carta, sin tabla ni apartado «Concepto»: el párrafo justo encima del cuadro de totales («Arrendamiento
+        del local … correspondiente al mes de …», «Servicios de asesoría prestados durante …») describe la
+        operación. Una sola línea con ese párrafo como concepto y la base imponible como importe, para revisar. Solo si todas
+        las cifras impresas desde el párrafo hacia abajo son importes del resumen (con otra cifra puede haber varios
+        conceptos) y el párrafo es texto corrido alineado a la izquierda del cuadro, sin cifras, rótulos ni NIF."""
+        base_c = imp.get("base_imponible") or {}
+        if base_c.get("valor") is None:
+            return None
+        cuota = _num(str((imp.get("cuota_iva") or {}).get("valor") or ""))
+        if not imp.get("desglose") and cuota != 0:
+            return None   # sin desglose, solo la factura sin IVA (cuota cero leída como tal)
+        campos_ = [base_c, imp.get("cuota_iva"), imp.get("total_factura"), imp.get("total_a_pagar")]
+        campos_ += [d[k] for d in imp.get("desglose") or [] for k in ("base", "cuota")]
+        if imp.get("retencion"):
+            campos_.append(imp["retencion"]["importe"])
+        cajas = [(c["pagina"], c["bbox"]) for c in campos_ if isinstance(c, dict) and c.get("bbox") and c.get("pagina")
+                 and c.get("valor") is not None]
+        if not cajas:
+            return None
+        pagina = base_c.get("pagina") if base_c.get("bbox") else min(cajas, key=lambda x: (x[0], x[1][1]))[0]
+        cajas = [b for pg, b in cajas if pg == pagina]
+        tope, izq = min(b[1] for b in cajas), min(b[0] for b in cajas)
+        encima = sorted((l for l in self.lineas if l.pagina == pagina and l.bottom <= tope + 1), key=lambda l: -l.bottom)
+        if not encima:
+            return None
+        ult = encima[0]
+        h = max(6.0, ult.bottom - ult.top)
+        if tope - ult.bottom > 6 * h or ult.x0 > izq + 20:
+            return None   # el párrafo acaba como mucho unos renglones en blanco por encima del cuadro, a su izquierda
+
+        def de_parrafo(l: Linea) -> bool:
+            # texto corrido: ni cifras, ni rótulos de importes o de pago y notas, ni contacto, NIF, fecha de la carta o el
+            # título con el número de la factura
+            t = l.texto
+            return (bool(self.RE_PALABRA.search(t)) and not any(_es_importe(p.texto) for p in l.palabras)
+                    and not self._etiquetas_en(l.palabras[:3]) and not RE_FIN_TABLA.match(t) and not RE_CONTACTO.search(t)
+                    and not re.search(r"\biban\b|^\s*(?:factura|fra\.)\s+(?:" + NUM_ABR + r"|n[úu]m|n[úu]mero)", t, re.I)
+                    and not self._fecha_de_carta(t) and not any(nifmod.es_valido(n) for n, _, _ in _nifs_en(t)))
+        if not de_parrafo(ult):
+            return None
+        parrafo, ref = [ult], ult
+        for l in encima[1:]:
+            if min(l.x1, ult.x1) - max(l.x0, ult.x0) <= 0 or l.bottom > ref.top + 1:
+                continue  # otra columna, o a la altura del renglón de debajo
+            alto = max(6.0, ref.bottom - ref.top)
+            if ref.top - l.bottom > 1.2 * alto or abs(l.x0 - ref.x0) > max(8.0, alto) or not de_parrafo(l):
+                break  # salto de párrafo, renglón no alineado (la fecha de la carta) o un dato
+            parrafo.insert(0, l)
+            ref = l
+            if len(parrafo) > 12:
+                return None
+        texto = re.sub(r"\s*(?:[.…·•_]{2,}|…)\s*$", "", " ".join(l.texto for l in parrafo)).strip()
+        if len(texto.split()) < 5:
+            return None
+        permitidos = self._cifras_del_resumen(imp)
+        for l in self.lineas:
+            if l.pagina != pagina or l.top < parrafo[0].top - 1:
+                continue
+            for p in l.palabras:
+                v = _num(p.texto) if _es_importe(p.texto) else None
+                if v is not None and q2(abs(v)) not in permitidos:
+                    return None
+        aviso = ("Factura sin tabla de conceptos: una sola línea con el párrafo de encima del cuadro de totales como concepto y "
+                 "la base imponible como importe; revísela")
+        c_imp = dict(base_c, avisos=list(base_c.get("avisos") or []) + [aviso])
         c_imp["confianza"] = min(c_imp.get("confianza") or 0.0, 0.7)
         return {"concepto": _campo(texto, texto=texto, lineas_=parrafo, confianza=0.7, aviso=aviso), "cantidad": _vacio(""),
                 "unidad": _vacio(""), "precio": _vacio(""), "importe": c_imp, "dto": _vacio(""), "iva": _vacio("")}
@@ -2141,7 +2944,15 @@ class Extractor:
         self._ids_filas_tabla = {id(f) for f in banda}
         # Anchura de la tabla: lo que queda fuera (una columna lateral de datos, p. ej.) no forma parte de las líneas
         izq_cols = [c for c in cols if concepto_col is None or c["x1"] < concepto_col["x0"] + 5]
-        tab_x0 = (min(c["x0"] for c in izq_cols) - 20) if izq_cols else ((concepto_col["x0"] - 60) if concepto_col else 0)
+        # Sin columnas a la izquierda de la descripción, esta empieza donde se alinean sus renglones, aunque el rótulo vaya
+        # centrado sobre una columna ancha («DESCRIPCIÓN» en el centro y los conceptos desde el margen izquierdo)
+        margen_desc = None
+        if concepto_col and not izq_cols:
+            margen_desc = self._margen_descripcion(cab, fondo, concepto_col, numericas)
+        lim_desc = concepto_col["x0"] - 60 if concepto_col else 0
+        if margen_desc is not None:
+            lim_desc = min(lim_desc, margen_desc - 2)
+        tab_x0 = (min(c["x0"] for c in izq_cols) - 20) if izq_cols else lim_desc
         tab_x1 = max(c["x1"] for c in cols) + 40
         lineas_out, paginas_tabla = [], {cab.pagina}
         filas_cuerpo, filas_cuerpo_orig = [], []
@@ -2169,7 +2980,8 @@ class Extractor:
             if RE_SIGUE.search(txt) or (not ultima and (RE_REGISTRO_MERCANTIL.search(txt) or f.top > 0.9 * self.alto[f.pagina])):
                 saltando = f.pagina  # la tabla sigue en la página siguiente, tras la cabecera repetida
                 continue
-            if self._fila_de_totales(f) or (filas_cuerpo and self._solo_cifras(f)):
+            if self._fila_de_totales(f) or (filas_cuerpo and self._solo_cifras(f)
+                                            and not self._cifras_del_primer_concepto(f, filas_cuerpo, numericas)):
                 break
             if f.pagina != cab.pagina and len({self._clase(p.texto) for p in f.palabras} - {None}) >= 2:
                 continue  # cabecera repetida en una página nueva
@@ -2184,7 +2996,20 @@ class Extractor:
             numericas = [c for c in cols if c["clase"] in ("cantidad", "precio", "dto", "iva", "importe")]
             aviso_tabla = aviso_tabla or ("Columna de precio sin rótulo legible: deducida por la alineación de las cifras entre "
                                           "la cantidad y el importe; revise las líneas")
+        previas: list[tuple] = []   # renglones de texto antes de las cifras del primer concepto
+        con_prefijo = False   # el primer concepto empieza por encima del renglón de sus cifras
+        # Renglones más de la cabecera sin ninguna palabra de rótulo conocida («PRECIO» / «(€/millar)»): pegados a la banda de
+        # cabecera (sin salto de párrafo), antes de la primera cifra, con texto que no es una cifra bajo una columna numérica.
+        # Son cabecera: no son el comienzo de un concepto y su texto cuenta para el rótulo de su columna
+        cab_extra = self._renglones_mas_de_cabecera(cab, fondo, filas_cuerpo, numericas, concepto_col)
+        ids_cab_extra = {id(g) for g in cab_extra}
+        # rótulo de la columna del precio en toda la cabecera («PRECIO / €/MILLAR»): unidad del precio
+        col_precio = next((c for c in cols if c["clase"] == "precio"), None)
+        rot_precio = " ".join(p.texto for g in list(banda) + cab_extra for p in g.palabras if col_precio is not None
+                              and col_precio["x0"] - 4 <= (p.x0 + p.x1) / 2 <= col_precio["x1"] + 4)
         for f in filas_cuerpo:
+            if id(f) in ids_cab_extra:
+                continue
             pals = f.palabras
             nums, textos = [], []
             for i, p in enumerate(pals):
@@ -2227,7 +3052,7 @@ class Extractor:
                 else:
                     textos.append(p)
             izq = [c["x1"] for c in cols if concepto_col and c is not concepto_col and c["x1"] < concepto_col["x0"] + 5]
-            lim_izq = (max(izq) + 2) if izq else ((concepto_col["x0"] - 60) if concepto_col else 0)
+            lim_izq = (max(izq) + 2) if izq else lim_desc
             lim_der = min([c["x0"] for c in numericas if concepto_col and c["x0"] > concepto_col["x1"] - 5] or [10 ** 6]) - 2
             textos.sort(key=lambda p: p.x0)
             codigo = [p for p in textos if self._clase_col_de(p, cols) == "codigo"]
@@ -2247,9 +3072,16 @@ class Extractor:
                         "metodo": metodo, "confianza": cf_conf, "avisos": []}
             if "importe" not in asign and "precio" not in asign:
                 if lineas_out and concepto and f.top - lineas_out[-1]["_bottom"] < 30:
-                    lineas_out[-1]["concepto"]["valor"] = (lineas_out[-1]["concepto"]["valor"] + "\n" + concepto).strip()
-                    lineas_out[-1]["concepto"]["bbox"][3] = round(f.bottom, 1)
-                    lineas_out[-1]["_bottom"] = f.bottom
+                    ult = lineas_out[-1]
+                    if not ult["_seguidos"]:   # la descripción sigue en el renglón de justo debajo de las cifras
+                        ult["_sigue_debajo"] = f.top - ult["_bottom"] <= 0.8 * max(1.0, f.bottom - f.top)
+                    ult["concepto"]["valor"] = (ult["concepto"]["valor"] + "\n" + concepto).strip()
+                    ult["concepto"]["bbox"][3] = round(f.bottom, 1)
+                    ult["_bottom"] = f.bottom
+                    ult["_seguidos"] += 1
+                    ult["_pag_ult"] = f.pagina
+                elif not lineas_out and concepto:
+                    previas.append((f, concepto, concepto_pals))
                 continue
             unidad = None
             col_ud = next((c for c in cols if c["clase"] == "unidad"), None)
@@ -2274,10 +3106,26 @@ class Extractor:
                 "precio": cf("precio"), "importe": cf("importe"),
                 "dto": cf("dto", conv=lambda t: _num(t.replace("%", "")) if t else None),
                 "iva": cf("iva", conv=lambda t: _num(t.replace("%", "")) if t else None),
-                "_bottom": f.bottom,
+                "_bottom": f.bottom, "_seguidos": 0, "_prefijo": [], "_sigue_debajo": False, "_pag_ult": f.pagina,
+                "_propio": concepto,
             }
+            if not lineas_out and previas:
+                # Renglones de texto contiguos (sin salto de párrafo) encima de las cifras del primer concepto: pueden ser el
+                # comienzo de su descripción (cifras en un renglón intermedio) o un encabezado de grupo («Albarán nº …»); se
+                # decide al final, según la descripción siga o no bajo las cifras
+                ref = f
+                for pf, ptxt, ppals in reversed(previas):
+                    if pf.pagina != ref.pagina or ref.top - pf.bottom > 0.8 * max(1.0, pf.bottom - pf.top):
+                        break
+                    linea["_prefijo"].insert(0, (pf, ptxt, ppals))
+                    ref = pf
             if linea["importe"]["valor"] is None and linea["precio"]["valor"] is not None and linea["cantidad"]["valor"] is None:
                 linea["importe"], linea["precio"] = linea["precio"], _vacio("")
+            # Precio por millar o por centenar: la unidad, en el rótulo del precio, junto a las cifras de la fila o en la columna
+            # de la unidad («millar», «mil», «1000»: se lee como «/millar», «/mil», «/1000»)
+            self._precio_por_lote(linea, rot_precio, " ".join(
+                [p.texto for p in textos if (p.x0 + p.x1) / 2 > lim_der and p not in concepto_pals] + ["/" + unidad if unidad else ""]),
+                cf_conf)
             if linea["cantidad"]["valor"] is not None and metodo == "ocr" and not any(c["clase"] == "dto" for c in cols) \
                     and linea["precio"]["valor"] and linea["importe"]["valor"] and Decimal(linea["precio"]["valor"]) != 0 \
                     and q2(Decimal(linea["cantidad"]["valor"]) * Decimal(linea["precio"]["valor"])) != q2(Decimal(linea["importe"]["valor"])):
@@ -2306,11 +3154,222 @@ class Extractor:
                     linea["cantidad"] = _campo(str(q2(q)), metodo="calculado", confianza=0.6,
                                                aviso="Cantidad no legible: deducida de importe ÷ precio")
             lineas_out.append(linea)
+        prim = lineas_out[0] if lineas_out else None
+        prefijo = self._prefijo_del_primer_concepto(prim) if prim and prim["_prefijo"] else None
+        if prefijo:
+            # Descripción de varios renglones con las cifras en uno intermedio o en el último: los renglones de encima son el
+            # comienzo del primer concepto
+            prefijo, dudoso = prefijo
+            con_prefijo = True
+            c_l = prim["concepto"]
+            c_l["valor"] = "\n".join([t for _, t, _ in prefijo] + [c_l["valor"]]).strip()
+            xs = [p for _, _, ps in prefijo for p in ps]
+            c_l["bbox"] = [round(min([c_l["bbox"][0]] + [p.x0 for p in xs]), 1), round(prefijo[0][0].top, 1),
+                           round(max([c_l["bbox"][2]] + [p.x1 for p in xs]), 1), c_l["bbox"][3]]
+            if dudoso:
+                c_l["confianza"] = min(c_l["confianza"], 0.7)
+                c_l["avisos"].append("Concepto con las cifras en un renglón intermedio: los renglones de encima de las cifras "
+                                     "se han tomado como el comienzo de su descripción; compruebe que no sean un encabezado o "
+                                     "una referencia")
+        if con_prefijo and len(lineas_out) > 1:
+            # Con las cifras en un renglón intermedio de la descripción, los renglones de texto entre las cifras de dos líneas
+            # pueden ser el final de la primera o el comienzo de la siguiente: se asignan a la anterior y se pide confirmarlo.
+            # No hay duda si la línea siguiente empieza en otra página (tras la cabecera repetida) que esos renglones
+            aviso = ("Conceptos de varios renglones con las cifras en uno intermedio: compruebe qué renglones de la descripción "
+                     "son de cada línea")
+            for k in range(len(lineas_out) - 1):
+                if lineas_out[k]["_seguidos"] and lineas_out[k]["_pag_ult"] == lineas_out[k + 1]["concepto"]["pagina"]:
+                    for l in (lineas_out[k], lineas_out[k + 1]):
+                        l["concepto"]["confianza"] = min(l["concepto"]["confianza"], 0.7)
+                        if aviso not in l["concepto"]["avisos"]:
+                            l["concepto"]["avisos"].append(aviso)
         for l in lineas_out:
             l.pop("_bottom", None)
+            for k in ("_seguidos", "_prefijo", "_sigue_debajo", "_pag_ult", "_propio"):
+                l.pop(k, None)
             l["concepto"]["valor"] = re.sub(r"[ \t]+", " ", l["concepto"]["valor"]).strip()
         self._tabla = (lineas_out, (aviso_tabla if lineas_out else "Tabla sin líneas reconocibles"))
         return self._tabla
+
+    # Renglón que encabeza un grupo de líneas y no es parte de un concepto: una referencia a otro documento («Albarán nº 45 de
+    # …», «Rectifica la factura 2599», «Según presupuesto nº 26/014»)
+    RE_REF_DOCUMENTO = re.compile(r"\b(?:pedido|albar[aá]n|presupuesto|factura|oferta|contrato|expediente|certificaci[oó]n|"
+                                  r"orden\s+de\s+(?:trabajo|compra)|nota\s+de\s+entrega|parte\s+de\s+trabajo)\s*"
+                                  r"(?:n(?:\.?\s*[º°o]|ro|[uú]m)?\.?|n[uú]mero|#|:)?\s*(?-i:[A-Z]{0,4})[-/]?\d", re.I)
+    # final de renglón que pide continuación: coma, guion de partición, paréntesis abierto o una preposición o conjunción
+    RE_SIGUE_RENGLON = re.compile(r"(?:[,(]|[^\W\d_]-|\b(?:de|del|y|e|o|u|con|en|para|por|a|al|la|el|los|las|sin|sobre|"
+                                  r"seg[uú]n|que|entre|hasta|desde))\s*$")
+
+    @staticmethod
+    def _empieza_en_minuscula(t: str) -> bool:
+        return bool(re.match(r"\s*[a-záéíóúüñ]", t))
+
+    def _parece_encabezado(self, t: str, siguiente: str) -> bool:
+        """Renglón con forma de encabezado de grupo: termina en «:» («TRABAJOS DE IMPRESIÓN:»), es una referencia a otro
+        documento («Pedido nº 00/12 de …», «Rectifica la factura nº 2599») o va todo en mayúsculas cuando el renglón
+        siguiente no."""
+        t = t.strip()
+        if t.endswith(":") or self.RE_REF_DOCUMENTO.search(t):
+            return True
+        letras = re.findall(r"[^\W\d_]", t)
+        return len(letras) >= 4 and not any(c.islower() for c in letras) and any(c.islower() for c in siguiente)
+
+    def _encabezado_de_grupo(self, t: str, siguiente: str) -> bool:
+        """Renglón de texto encima de la primera línea que encabeza el grupo en lugar de empezar su descripción (forma de
+        encabezado, _parece_encabezado). Un renglón siguiente en minúscula continúa la frase: entonces no es encabezado."""
+        return not self._empieza_en_minuscula(siguiente) and self._parece_encabezado(t, siguiente)
+
+    def _prefijo_del_primer_concepto(self, prim: dict) -> tuple[list, bool] | None:
+        """Renglones de texto contiguos encima de las cifras de la primera línea (prim["_prefijo"]) que son el comienzo de su
+        descripción, y si hay que pedir confirmarlo. Los encabezados de grupo (y lo que hay encima) no cuentan. Con texto
+        propio en el renglón de las cifras, el renglón de encima es del concepto si la frase sigue (el renglón de las cifras
+        empieza en minúscula o el de encima acaba en coma, preposición…); se pide confirmar si alguno de esos renglones tiene
+        forma de encabezado. Sin indicio de que la frase siga, si la descripción sigue también debajo de las cifras se
+        antepone pero se pide confirmar (un encabezado sin «:» ni referencia, «Material de oficina», sería igual); si no
+        sigue debajo es un encabezado (no se antepone)."""
+        previas, propio = prim["_prefijo"], prim["_propio"].strip()
+        # lo que sigue al último renglón de encima: el texto del renglón de las cifras o, sin él, el primero de debajo
+        siguiente = propio or prim["concepto"]["valor"].strip().split("\n")[0]
+        textos = [t for _, t, _ in previas] + [siguiente]
+        corte = 0
+        for i in range(len(previas)):
+            if self._encabezado_de_grupo(textos[i], textos[i + 1]):
+                corte = i + 1
+        pref = previas[corte:]
+        sospecha = any(self._parece_encabezado(textos[i], textos[i + 1]) for i in range(corte, len(previas)))
+        if not propio:
+            # renglón de solo cifras: la descripción está encima (y quizá debajo)
+            if pref:
+                return pref, sospecha
+            # solo un encabezado encima y nada debajo: mejor que un concepto vacío, pero se pide confirmar
+            return (previas, True) if not prim["_seguidos"] else None
+        if not pref:
+            return None
+        if self._empieza_en_minuscula(propio) or self.RE_SIGUE_RENGLON.search(pref[-1][1]):
+            return pref, sospecha
+        return (pref, True) if prim["_sigue_debajo"] else None
+
+    @staticmethod
+    def _renglones_mas_de_cabecera(cab: Fila, fondo: float, filas_cuerpo: list[Fila], numericas: list[dict],
+                                   concepto_col: dict | None) -> list[Fila]:
+        """Renglones de la cabecera que no tienen ninguna palabra de rótulo conocida («(€/1.000 uds)», «(por mil)», «‰» bajo
+        «PRECIO»): los primeros del cuerpo, encadenados a la cabecera sin salto de párrafo, sin cifras, y con algún tramo de
+        texto que empieza en la zona de las columnas numéricas y cae bajo una de ellas."""
+        if not numericas:
+            return []
+        lim_num = min((c["x0"] for c in numericas if concepto_col is None or c["x0"] > concepto_col["x1"] - 5), default=10 ** 6)
+        out, ref_bottom = [], fondo
+        for g in filas_cuerpo:
+            if g.pagina != cab.pagina or g.top - ref_bottom > 0.8 * max(1.0, g.bottom - g.top):
+                break
+            if any(_es_importe(p.texto) or re.fullmatch(r"[-−]?\d+(?:[.,]\d+)*", p.texto.strip()) for p in g.palabras):
+                break   # una cifra: ya es el cuerpo de la tabla
+            bajo_num = [b for b in g.bloques if b.x0 >= lim_num - 15
+                        and any(c["x0"] - 4 <= (p.x0 + p.x1) / 2 <= c["x1"] + 4 for p in b.palabras for c in numericas)]
+            if not bajo_num:
+                break
+            out.append(g)
+            ref_bottom = g.bottom
+        return out
+
+    def _margen_descripcion(self, cab: Fila, fondo: float, concepto_col: dict, numericas: list[dict]) -> float | None:
+        """Borde izquierdo de los renglones de la descripción bajo la cabecera (hasta los totales): el x0 más repetido de los
+        bloques con texto que se solapan con la columna del concepto y empiezan antes de la primera columna numérica de su
+        derecha. Si ninguno se solapa con el rótulo (conceptos cortos alineados a la izquierda de un rótulo centrado), el x0
+        más repetido del último tramo de texto antes de las cifras en las filas con cifras (lo que haya más a la izquierda,
+        un número de orden o una columna lateral, no cuenta). None si ningún x0 se repite (salvo que solo haya uno)."""
+        lim_num = min((c["x0"] for c in numericas if c["x0"] > concepto_col["x1"] - 5), default=10 ** 6)
+        xs, xs_cifras, ant = [], [], None
+        for f in self.filas:
+            if f.pagina != cab.pagina or (f.top + f.bottom) / 2 <= fondo:
+                continue
+            if RE_FIN_TABLA.match(f.texto.strip()) or (ant is not None and f.top - ant.bottom > 140) or len(xs) + len(xs_cifras) >= 400:
+                break
+            ant = f
+            con_texto = [b for b in f.bloques if b.x0 < lim_num and self.RE_PALABRA.search(b.texto)]
+            xs += [b.x0 for b in con_texto if min(b.x1, concepto_col["x1"]) - max(b.x0, concepto_col["x0"]) > 0]
+            if con_texto and any(_es_importe(p.texto) and (p.x0 + p.x1) / 2 >= lim_num - 10 for p in f.palabras):
+                xs_cifras.append(max(b.x0 for b in con_texto))
+        m = self._x0_mas_repetido(xs) if xs else None
+        return m if m is not None or not xs_cifras else self._x0_mas_repetido(xs_cifras)
+
+    @staticmethod
+    def _x0_mas_repetido(xs: list[float]) -> float | None:
+        """El x0 más repetido (grupos de 2 pt; con empate, el de más a la izquierda); None si ninguno se repite, salvo que
+        solo haya uno."""
+        xs = sorted(xs)
+        grupos: list[list[float]] = []
+        for x in xs:
+            if grupos and x - grupos[-1][0] <= 2:
+                grupos[-1].append(x)
+            else:
+                grupos.append([x])
+        g = max(grupos, key=len)   # con empate, el de más a la izquierda
+        return g[0] if len(g) >= 2 or len(xs) == 1 else None
+
+    def _cifras_del_primer_concepto(self, f: Fila, filas_cuerpo: list[Fila], numericas: list[dict]) -> bool:
+        """Fila de solo cifras justo bajo renglones de texto sin ninguna cifra (las primeras de la tabla): son la cantidad, el
+        precio y el importe del primer concepto, con la descripción repartida por encima y por debajo, no los valores de un
+        cuadro de totales. Cada cifra cae en una columna numérica distinta de la cabecera, una de ellas la del importe."""
+        if any(_es_importe(p.texto) for g in filas_cuerpo for p in g.palabras):
+            return False
+        ant = filas_cuerpo[-1]
+        if ant.pagina != f.pagina or f.top - ant.bottom > 0.8 * max(1.0, ant.bottom - ant.top):
+            return False
+        cols = []
+        for p in f.palabras:
+            cx = (p.x0 + p.x1) / 2
+            c = next((c for c in numericas if c["x0"] - 6 <= cx <= c["x1"] + 6), None)
+            if c is None or any(c is x for x in cols):
+                return False
+            cols.append(c)
+        return any(c["clase"] == "importe" for c in cols)
+
+    RE_POR_MIL = re.compile(r"‰|/\s*(?:1\.?000(?![\d.,]\d)|mil(?:lar(?:es)?)?\b)|\bpor\s+(?:cada\s+)?mil(?:lar)?\b|\bmillar(?:es)?\b", re.I)
+    RE_POR_CIEN = re.compile(r"/\s*(?:100(?![\d.,]\d)|cien\b|centenar(?:es)?\b)|\bpor\s+(?:cada\s+)?centenar\b|\bcentenar(?:es)?\b", re.I)
+
+    def _precio_por_lote(self, linea: dict, rotulo: str, texto_fila: str, conf: float) -> None:
+        """Precio por millar o por centenar («PRECIO €/MILLAR», «€/100 uds», «por mil», «‰»), en el rótulo de la columna del
+        precio o junto a las cifras de la fila: si importe = precio × cantidad ÷ 1000 (o ÷ 100), la cantidad se expresa en
+        millares (o centenares), como el precio, para que precio × cantidad = importe; la unidad es «millar» («centenar»).
+        Con la cantidad ya en esa unidad (precio × cantidad = importe) solo se anota la unidad si la marca va en la propia
+        fila: con la marca solo en el rótulo, la línea puede ser un importe fijo (portes, diseño) de la misma tabla."""
+        en_fila = True
+        for rx, factor, nombre in ((self.RE_POR_MIL, 1000, "millar"), (self.RE_POR_CIEN, 100, "centenar")):
+            if rx.search(texto_fila):
+                break
+        else:
+            en_fila = False
+            for rx, factor, nombre in ((self.RE_POR_MIL, 1000, "millar"), (self.RE_POR_CIEN, 100, "centenar")):
+                if rx.search(rotulo):
+                    break
+            else:
+                return
+        try:
+            c, p, i = (Decimal(linea[k]["valor"]) for k in ("cantidad", "precio", "importe"))
+        except (TypeError, ValueError, ArithmeticError):
+            return
+        if c <= 0 or p == 0:
+            return
+        if q2(c * p) == q2(i):
+            if not en_fila:
+                return
+        else:
+            q = (c / factor).normalize()
+            dif = abs(q2(q * p) - q2(i))
+            if dif > Decimal("0.01") or q.as_tuple().exponent < -6:
+                return
+            leida = linea["cantidad"]["texto"]
+            campo = dict(linea["cantidad"], valor=format(q, "f"), avisos=list(linea["cantidad"].get("avisos") or []))
+            campo["avisos"].append(f"Precio por {nombre}: la cantidad impresa ({leida}) se expresa en {nombre}es "
+                                   f"({campo['valor']}) para que cantidad × precio = importe")
+            if dif:
+                campo["confianza"] = min(campo.get("confianza") or 0.0, 0.7)
+                campo["avisos"].append("Con la cantidad en esa unidad, cantidad × precio difiere del importe en un céntimo: "
+                                       "confirme")
+            linea["cantidad"] = campo
+        if linea["unidad"].get("valor") is None:
+            linea["unidad"] = _campo(nombre, texto=nombre, palabras=[], confianza=conf)
 
     @staticmethod
     def _precio_sin_rotulo(filas: list[Fila], cols: list[dict]) -> dict | None:
@@ -2471,6 +3530,17 @@ class Extractor:
         t = t.strip()
         return _es_importe(t) or bool(re.fullmatch(r"-?\d{1,3}(?:[.,]\d{1,2})?\s*%?", t)) or bool(RE_PORCENTAJE.fullmatch(t))
 
+    @staticmethod
+    def _signo_del_rotulo_iva(p: Palabra, prev: Palabra | None, sig: Palabra | None, en_et: dict) -> bool:
+        """«IVA %»: un «%» suelto a un espacio tras el rótulo del IVA es parte de ese rótulo (la columna del tipo), salvo que
+        esté igual de cerca o más del rótulo siguiente («% IVA»)."""
+        if p.texto.strip() != "%" or prev is None or id(prev) not in en_et or en_et[id(prev)]["clase"] != "iva":
+            return False
+        hueco = p.x0 - prev.x1
+        if not 0 <= hueco < 0.6 * max(1.0, p.bottom - p.top):
+            return False
+        return not (sig is not None and id(sig) in en_et and sig.x0 - p.x1 <= hueco)
+
     def _segmentos_cabecera(self, f: Fila, ets: list[dict]) -> list[dict]:
         """Columnas de una fila de etiquetas: las de importe (con su clase) y los demás textos (columnas ajenas)."""
         en_et = {id(p): e for e in ets for p in e["pals"]}
@@ -2503,6 +3573,14 @@ class Extractor:
             # «% IVA», «Tipo IVA», «% R.E.»: columna del tipo impositivo de cada fila
             prev = pals[k - 1] if k > 0 else None
             pegado_a_cifra = p.texto.strip() == "%" and prev is not None and self._es_valor(prev.texto) and p.x0 - prev.x1 < 8
+            if self._signo_del_rotulo_iva(p, prev, sig, en_et):
+                # «IVA %»: el signo tras el rótulo del IVA marca su columna como la del tipo
+                e_prev = en_et[id(prev)]
+                e_prev["x1"] = max(e_prev["x1"], p.x1)
+                e_prev["tipo"] = True
+                if segs and segs[-1].get("et") is e_prev:
+                    segs[-1]["x1"] = e_prev["x1"]
+                continue
             if re.fullmatch(r"%|tipo|tipos|t\.", p.texto.strip(), re.I) and not pegado_a_cifra and sig is not None and id(sig) in en_et \
                     and sig.x0 - p.x1 < 15:
                 cerrar()
@@ -2518,7 +3596,9 @@ class Extractor:
             if sg.get("et") is not None:
                 sg["tipo"] = bool(sg["et"].get("tipo")) or "%" in sg["et"]["texto"]
                 sg["x0"] = min(sg["x0"], sg["et"]["x0"])
-        hay_cuota = any(sg["clase"] in ("cuota",) for sg in segs) or sum(1 for sg in segs if sg["clase"] == "iva") >= 2
+        ivas = [sg for sg in segs if sg["clase"] == "iva"]
+        # dos columnas «IVA»: si una ya es la del tipo («% IVA», «Tipo IVA»), la otra es la cuota («% IVA | IVA»), no otro tipo
+        hay_cuota = any(sg["clase"] in ("cuota",) for sg in segs) or (len(ivas) >= 2 and not any(sg["tipo"] for sg in ivas))
         for sg in segs:
             # «IVA» como columna junto a «Cuota IVA»: es el tipo
             if sg["clase"] == "iva" and hay_cuota and not sg["tipo"]:
@@ -2527,10 +3607,15 @@ class Extractor:
 
     def importes(self):
         hechos = []  # (clase, valor Decimal, palabras, pagina, texto, pct, estrategia)
+        # lecturas OCR de formato dudoso («-1 23 50», «550.80» en un documento con coma decimal): solo cuentan si cuadran
+        # con el resto de importes (_confirmar_dudosos)
+        dudosos = []
+        self._marcas_hecho = {}   # id(hecho) → (confianza máxima, aviso) de los importes leídos de forma indirecta
         filas = self.filas
         consumidas: set[int] = set()  # palabras ya usadas como valor de una columna o como tipo de una fila del cuadro
         self.tabla()
         de_tabla = self._ids_filas_tabla
+        coma_decimal = self._coma_decimal()
         for i, f in enumerate(filas):
             if id(f) in de_tabla:
                 continue  # cabecera y líneas de la tabla de conceptos («Base de hormigón…», columna «IVA %»)
@@ -2545,7 +3630,10 @@ class Extractor:
             for k, e in enumerate(ets):
                 lim = ets[k + 1]["x0"] if k + 1 < len(ets) else 10 ** 6
                 validos = []
-                traduccion = False
+                pequenas = []   # cifras pequeñas y poco legibles sobre la línea base: relleno, salvo que no siga otra cifra
+                resto = []   # palabras que siguen a la etiqueta (sin el relleno de puntos)
+                traduccion = cortada = False
+                ref_h, ref_medio = self._altura_rotulo(e["pals"])
                 # solo las palabras entre la etiqueta y la siguiente (búsqueda binaria por x0)
                 for p in pals[bisect.bisect_left(xs, e["x1"] - 1):bisect.bisect_left(xs, lim)]:
                     if p.x0 < e["x1"] - 1 or p.x0 >= lim or p in e["pals"] or id(p) in consumidas:
@@ -2553,16 +3641,46 @@ class Extractor:
                     if p.texto.strip() == "/" and not validos:
                         traduccion = True  # «Total a pagar / Amount due»: rótulo bilingüe
                         continue
-                    if _es_importe(p.texto):
+                    relleno = self._es_relleno(p, ref_h, ref_medio)
+                    if _es_importe(p.texto) and not (relleno and p.conf < 0.5):
                         validos.append(p)
+                    elif relleno:
+                        if _es_importe(p.texto):
+                            pequenas.append(p)
+                        continue  # puntos guía entre el rótulo y la cifra («IVA 21% ……… 315,00 €»), también leídos por OCR
                     elif self.RE_PALABRA.search(p.texto) and not self.RE_NEUTRA.fullmatch(p.texto.strip()) and not traduccion:
+                        cortada = True
                         break  # otro texto entre la etiqueta y la cifra: la cifra no es suya
+                    resto.append(p)
                 if validos:
                     p = validos[-1] if k + 1 == len(ets) else validos[0]
                     v = _num(p.texto)
                     if v is not None:
-                        hechos.append((e["clase"], v, [*e["pals"], p], f.pagina, f.texto, e["pct"], "linea"))
+                        h = (e["clase"], v, [*e["pals"], p], f.pagina, f.texto, e["pct"], "linea")
                         consumidas.add(id(p))
+                        if coma_decimal and p.metodo == "ocr" and RE_PUNTO_DECIMAL.fullmatch(_limpiar_cifra(p.texto)):
+                            dudosos.append((h, p.texto, "punto"))   # «550.80» con coma decimal: coma leída como punto
+                        else:
+                            hechos.append(h)
+                        continue
+                elif pequenas and not cortada:
+                    # la única cifra tras el rótulo es pequeña y poco legible (un total en letra grande con la cifra en
+                    # letra normal): es su cifra, pero dudosa (_confirmar_dudosos)
+                    p = pequenas[-1]
+                    v = _num(p.texto)
+                    if v is not None:
+                        consumidas.add(id(p))
+                        dudosos.append(((e["clase"], v, [*e["pals"], p], f.pagina, f.texto, e["pct"], "linea"), p.texto,
+                                        "pequeña"))
+                        continue
+                elif not cortada:
+                    # cifra con espacios en lugar de separadores en un escaneo («-1 23 50 €»)
+                    esp = self._cifra_espaciada(resto)
+                    if esp:
+                        v, ps = esp
+                        dudosos.append(((e["clase"], v, [*e["pals"], *ps], f.pagina, f.texto, e["pct"], "linea"),
+                                        " ".join(q.texto for q in ps), "espaciada"))
+                        consumidas.update(id(q) for q in ps)
                         continue
                 pendientes.append(e)
             # Un rótulo dentro de una frase («Factura sujeta a retención a cuenta del IRPF del 15 % por …») no encabeza un
@@ -2589,6 +3707,9 @@ class Extractor:
                     prev = por_x[k_p - 1] if k_p > 0 else None
                     if p.texto.strip() == "%" and prev is not None and self._es_valor(prev.texto) and p.x0 - prev.x1 < 8:
                         continue  # «2 %»: el porcentaje de otro rótulo («Dto. pronto pago 2 %»), no la columna del tipo
+                    if self._signo_del_rotulo_iva(p, prev, por_x[k_p + 1] if k_p + 1 < len(por_x) else None,
+                                                  {id(q): e for e in ets for q in e["pals"]}):
+                        continue  # «IVA %»: el signo es del rótulo de su izquierda (lo trata _segmentos_cabecera)
                     sig = [e for e in ets if 0 <= e["x0"] - p.x1 < 15]
                     if sig:
                         continue  # «Tipo IVA», «% IVA»: ya lo trata el segmento de esa etiqueta
@@ -2623,6 +3744,17 @@ class Extractor:
                 zona = [p for b in f2.bloques if x_min <= (b.x0 + b.x1) / 2 <= x_max
                         and not (b.x0 > lim_texto and self.RE_PALABRA.search(b.texto)) for p in b.palabras
                         if x_min <= (p.x0 + p.x1) / 2 <= x_max and id(p) not in consumidas]
+                # en la fila de justo debajo de los rótulos, un tramo de texto que empieza en el cuadro y se sale de él
+                # («1.234,56 EURO (€)» bajo «TOTAL | MONEDA», leído junto): las cifras con que empieza, alineadas bajo una
+                # columna rotulada, son de esa columna (se reparte por posición); el texto que las sigue no cuenta
+                for b in (f2.bloques if ant is f else []):
+                    if x_min <= (b.x0 + b.x1) / 2 <= x_max:
+                        continue
+                    for p in b.palabras:
+                        if not self._es_valor(p.texto) or not any(sg["x0"] - 4 <= (p.x0 + p.x1) / 2 <= sg["x1"] + 4 for sg in seg_pend):
+                            break
+                        if id(p) not in consumidas:
+                            zona.append(p)
                 if not zona:
                     if ant is f:
                         break  # el cuadro empieza justo bajo sus rótulos
@@ -2675,7 +3807,13 @@ class Extractor:
                 if not usados:
                     break
                 ant = f2
-        return self._cifras_sin_clasificar(self._consolidar(hechos), hechos)
+        # Cuadro de totales en renglones con puntos guía y sin rótulo de base («Importe alquiler ……… 650,00 €» encima de
+        # «IVA 21% ……… 136,50 €»)
+        hechos += self._bases_sin_rotulo(hechos, dudosos, consumidas, de_tabla)
+        res = self._consolidar(hechos)
+        if dudosos:
+            res = self._confirmar_dudosos(res, hechos, dudosos)
+        return self._cifras_sin_clasificar(res, hechos)
 
     def _rotulos_en_frase(self, ets: list[dict], pals: list[Palabra]):
         """Función que dice si una etiqueta va dentro de un texto corrido: su celda tiene muchas otras palabras que no son
@@ -2691,6 +3829,331 @@ class Extractor:
             ks = [celda_de[id(p)] for p in e["pals"] if id(p) in celda_de]
             return bool(ks) and otras[min(ks)] >= 6
         return en_frase
+
+    # --- renglones con puntos guía y lecturas OCR dudosas ------------------------------------------------------------
+    def _coma_decimal(self) -> bool:
+        """El documento escribe los importes con coma decimal («1.234,56»): mayoría de cifras con coma frente a las de punto
+        decimal sin separador de miles («550.80»)."""
+        coma = punto = 0
+        for pg in self.paginas:
+            for p in pg.palabras:
+                t = _limpiar_cifra(p.texto)
+                if RE_COMA_DECIMAL.fullmatch(t):
+                    coma += 1
+                elif RE_PUNTO_DECIMAL.fullmatch(t):
+                    punto += 1
+        return coma >= 2 and coma > punto
+
+    @staticmethod
+    def _altura_rotulo(pals: list[Palabra]) -> tuple[float, float]:
+        """Altura y centro vertical (medianas) de las palabras de un rótulo: la referencia para reconocer el relleno."""
+        if not pals:
+            return 0.0, 0.0
+        hs = sorted(p.bottom - p.top for p in pals)
+        ms = sorted((p.top + p.bottom) / 2 for p in pals)
+        return hs[len(hs) // 2], ms[len(ms) // 2]
+
+    def _es_relleno(self, p: Palabra, alto_ref: float, medio_ref: float) -> bool:
+        """Puntos guía entre un rótulo y su cifra. En un escaneo el OCR los lee como basura («oO” s. ..... ..«<.o»,
+        «8888. 11.1 0£.0.»): tramos mucho más bajos que el rótulo y en su mitad inferior (la fila de puntos va sobre la línea
+        base), con confianza baja si tienen letras, o tramos de confianza baja hechos sobre todo de puntos."""
+        t = p.texto.strip()
+        if not t:
+            return False
+        if RE_RELLENO.fullmatch(t):
+            return True
+        if p.metodo != "ocr":
+            return False
+        alto = p.bottom - p.top
+        abajo = alto_ref > 0 and (p.top + p.bottom) / 2 > medio_ref   # en la mitad inferior del rótulo (sobre la línea base)
+        bajo = abajo and alto < 0.6 * alto_ref
+        if bajo and (p.conf < 0.6 or not self.RE_PALABRA.search(t)):
+            return True
+        puntos = t.count(".") + t.count("…") + t.count("·")
+        if p.conf < 0.5 and puntos >= max(3, 0.4 * len(t)):
+            return True
+        # puntos leídos como letras pequeñas («...oo.ooposor.oooopo», «econo...»), sea cual sea la resolución del escaneo: confianza
+        # casi nula, sobre la línea base, no más alto que el rótulo, con puntos y hecho de signos sin trazos altos
+        return (abajo and p.conf < 0.3 and alto <= 1.05 * alto_ref and puntos >= 2 and len(t) >= 4
+                and sum(c in CARACTERES_BAJOS for c in t) >= 0.75 * len(t))
+
+    @staticmethod
+    def _cifra_espaciada(pals: list[Palabra]) -> tuple[Decimal, list[Palabra]] | None:
+        """Importe leído por OCR con espacios en lugar de separadores al final del tramo de un rótulo («-1 23 50 €»): grupos
+        de cifras contiguos, el último de dos (los decimales). Es una lectura dudosa: solo se usa si cuadra con el resto."""
+        j = len(pals)
+        while j > 0 and RE_MONEDA.fullmatch(pals[j - 1].texto.strip()):
+            j -= 1
+        grupo: list[Palabra] = []
+        while j > 0 and len(grupo) < 6:
+            q = pals[j - 1]
+            t = q.texto.strip().replace("−", "-")
+            if not re.fullmatch(r"-?\d{1,3}|-", t) or (t.startswith("-") and not grupo):
+                break
+            if grupo and (not (0 <= grupo[0].x0 - q.x1 <= 1.0 * max(1.0, q.bottom - q.top)) or not _misma_linea(q, grupo[0])):
+                break
+            grupo.insert(0, q)
+            j -= 1
+            if t.startswith("-"):
+                break  # el signo abre la cifra
+        if len(grupo) < 2 or any(q.metodo != "ocr" for q in grupo):
+            return None
+        textos = [q.texto.strip().replace("−", "-") for q in grupo]
+        signo = "-" if textos[0].startswith("-") else ""
+        cifras = [x.lstrip("-") for x in textos if x.lstrip("-")]
+        if len(cifras) < 2 or not re.fullmatch(r"\d{2}", cifras[-1]) or any(not re.fullmatch(r"\d{1,3}", x) for x in cifras[:-1]):
+            return None
+        try:
+            v = Decimal(f"{signo}{''.join(cifras[:-1])}.{cifras[-1]}")
+        except ArithmeticError:
+            return None
+        return (v, grupo) if abs(v) < IMPORTE_MAXIMO else None
+
+    def _renglon_sin_rotulo(self, f: Fila, col: tuple[float, float], alto: float, consumidas: set[int]):
+        """Renglón del cuadro de totales con un texto que no es un rótulo de importe conocido y una sola cifra al final,
+        alineada con la columna de cifras del cuadro y separada del texto por puntos guía o por un hueco ancho («Importe
+        alquiler ……… 745,20 €», «Mes octubre ……… 1.500,00 €»). Devuelve (cifra, palabras del texto, palabra de la cifra)."""
+        pals = f.palabras
+        if len(pals) > 40:
+            return None
+        letras = [p for p in pals if self.RE_PALABRA.search(p.texto) and (p.metodo != "ocr" or p.conf >= 0.5)]
+        alto_ref, medio = self._altura_rotulo(letras)
+        j = len(pals)
+        while j > 0 and RE_MONEDA.fullmatch(pals[j - 1].texto.strip()):
+            j -= 1
+        if j == 0:
+            return None
+        a = pals[j - 1]
+        if id(a) in consumidas or "%" in a.texto or not _es_importe(a.texto):
+            return None
+        v = _num(a.texto)
+        if v is None or v == 0:
+            return None
+        if not (abs(a.x1 - col[1]) <= max(10.0, 1.5 * alto) or min(a.x1, col[1]) - max(a.x0, col[0]) > 0):
+            return None
+        antes = pals[:j - 1]
+        texto = [p for p in antes if not self._es_relleno(p, alto_ref, medio)]
+        relleno = len(texto) < len(antes)
+        if not texto:
+            return None
+        # el texto de la celda más próxima a la cifra: lo de más a la izquierda es otra columna («Forma de pago: …»)
+        rotulo = self._segmentos(texto)[-1]
+        if len(rotulo) > 6 or not any(self.RE_PALABRA.search(p.texto) and (p.metodo != "ocr" or p.conf >= 0.5) for p in rotulo):
+            return None   # sin un texto legible (solo basura del OCR) no es un renglón con rótulo
+        if any(_es_importe(p.texto) for p in rotulo) or self._etiquetas_en(rotulo):
+            return None   # otra cifra en el renglón, o un rótulo de importe conocido (lo trata importes)
+        if _rotulo_de_impuesto(" ".join(p.texto for p in texto)):
+            return None   # «Impuesto 21%», «Tax 21%», «lVA 21%» (OCR): un impuesto que no se reconoce, nunca la base
+        if not relleno and a.x0 - max(p.x1 for p in rotulo) < 4 * alto:
+            return None   # texto corrido que acaba en una cifra, no un renglón del cuadro
+        return v, rotulo, a
+
+    def _bases_sin_rotulo(self, hechos: list, dudosos: list, consumidas: set[int], de_tabla: set[int]) -> list:
+        """Cuadro de totales en renglones con puntos guía sin rótulo de base (cartas de alquiler o de servicios): encima del
+        primer importe con rótulo leído en su propio renglón (IVA, retención, total), los renglones contiguos con un texto
+        que no es un rótulo conocido y una cifra alineada en la columna del cuadro son la base imponible (su suma). Solo si
+        cuadra: base × tipo = cuota, o base + cuota (− retención) = total impreso; sin IVA en el cuadro, base = total (factura
+        sin IVA repercutido, que la validación bloquea). Se pide confirmar salvo que cuadren a la vez el tipo y el total
+        con cifras leídas con seguridad."""
+        self._sin_iva_hecho = None
+        if any(h[0] == "base" for h in hechos):
+            return []
+        anclas = [h for h in hechos if h[6] == "linea" and h[0] in ("iva", "cuota", "retencion", "total", "pagar")]
+        anclas += [d[0] for d in dudosos if d[0][0] in ("iva", "cuota", "retencion", "total", "pagar")]
+        if not anclas:
+            return []
+        fila_de = {}
+        for k, f in enumerate(self.filas):
+            for b in f.bloques:
+                for p in b.palabras:
+                    fila_de[id(p)] = k
+        en_filas = sorted(((fila_de[id(h[2][-1])], h) for h in anclas if id(h[2][-1]) in fila_de), key=lambda x: x[0])
+        if not en_filas:
+            return []
+        # importes rotulados apilados (cuadro de totales): el del IVA si lo hay; si no, el último cuadro de la página (un
+        # «Importe total» en la cabecera no es el cuadro de totales)
+        cuadros = [[en_filas[0]]]
+        for x in en_filas[1:]:
+            ant = self.filas[cuadros[-1][-1][0]]
+            f = self.filas[x[0]]
+            if f.pagina == ant.pagina and f.top - ant.bottom <= 6 * max(4.0, ant.bottom - ant.top):
+                cuadros[-1].append(x)
+            else:
+                cuadros.append([x])
+        cuadro = next((c for c in cuadros if any(h[0] in ("iva", "cuota") for _, h in c)), cuadros[-1])
+        en_filas = cuadro
+        k0, h0 = cuadro[0]
+        f0, v0 = self.filas[k0], h0[2][-1]
+        alto = max(4.0, v0.bottom - v0.top)
+        col = (v0.x0, v0.x1)
+        hueco = self._hueco_del_cuadro(cuadro, alto)
+        renglones, ref, ini, parada = [], f0, k0, None
+        for k in range(k0 - 1, -1, -1):
+            f = self.filas[k]
+            if f.pagina != f0.pagina or id(f) in de_tabla or len(renglones) >= MAX_RENGLONES_BASE:
+                break
+            if f.bottom > ref.top + 0.5 * alto:
+                continue   # a la misma altura que el renglón de debajo (otra columna)
+            if ref.top - f.bottom > hueco:
+                break
+            r = self._renglon_sin_rotulo(f, col, alto, consumidas)
+            if r is None:
+                parada = k   # el renglón que cierra el cuadro por arriba (un rótulo de impuesto, el párrafo…)
+                break
+            renglones.insert(0, (f, *r))
+            ini, ref = k, f
+        if not renglones:
+            return []
+        suma = sum((r[1] for r in renglones), Decimal(0))
+        ivas = [h for h in hechos if h[0] in ("iva", "cuota")]
+        pcts = [h for h in hechos if h[0] == "pct"]
+        totales = [h[1] for h in hechos if h[0] in ("total", "pagar")]
+        rets = [abs(h[1]) for h in hechos if h[0] == "retencion"]
+        if len(ivas) > 1:
+            return []   # varios tipos: la base de cada uno no se deduce de unos renglones sin rótulo
+        if ivas:
+            hc = ivas[0]
+            t = hc[5] if hc[5] is not None else (pcts[0][1] if len(pcts) == 1 else None)
+            por_tipo = t is not None and q2(suma * t / 100) == q2(hc[1])
+            bruto = q2(suma + hc[1])
+            con_total = [h for h in hechos if h[0] in ("total", "pagar")
+                         and (q2(h[1]) == bruto or any(q2(h[1]) == q2(bruto - r) for r in rets))]
+            por_total = bool(con_total)
+            if not (por_tipo or por_total):
+                return []
+            # doble comprobación (tipo × base = cuota y base + cuota = total) con cifras leídas con seguridad: no hace falta
+            # confirmar; con una sola, o con cifras OCR dudosas, se pide confirmar
+            seguras = all(min(p.conf for p in h[2][-1:]) >= UMBRAL_SEGURO for h in [hc, *con_total])
+            conf = 0.85 if por_tipo and por_total and seguras else 0.8
+            motivo = ("cuadra con el tipo y la cuota de IVA y con el total impreso" if por_tipo and por_total else
+                      "cuadra con el tipo y la cuota de IVA" if por_tipo else "cuadra con la cuota y el total impreso")
+        else:
+            # sin IVA: ningún rótulo de IVA en el cuadro, ni siquiera sin cifra legible, y un total impreso igual a la base
+            # (o a la base menos la retención)
+            fin = max(k for k, _ in en_filas)
+            if pcts or any(e["clase"] in ("iva", "cuota") for f in self.filas[ini:fin + 1] for e in self._etiquetas_en(f.palabras)):
+                return []
+            if self._impuesto_en_el_cuadro(parada if parada is not None else ini, fin, hueco):
+                return []   # un renglón de impuesto sin rótulo conocido («Impuesto 21%», «Tax»), o el total lleva el IVA incluido
+            if not any(q2(x) == q2(suma) or any(q2(x) == q2(suma - r) for r in rets) for x in totales):
+                return []
+            conf, motivo = 0.8, "es igual al total impreso y el documento no imprime IVA"
+        rotulos = "», «".join(" ".join(p.texto for p in r[2]) for r in renglones)
+        h = ("base", suma, [p for r in renglones for p in [*r[2], r[3]]], f0.pagina, " / ".join(r[0].texto for r in renglones),
+             None, "sin_rotulo")
+        self._marcas_hecho[id(h)] = (conf, f"Base imponible leída {'de los renglones' if len(renglones) > 1 else 'del renglón'} "
+                                           f"sin rótulo de base «{rotulos}» del cuadro de totales: {motivo}"
+                                           + ("" if conf >= 0.85 else "; confírmela"))
+        if not ivas:
+            self._sin_iva_hecho = h
+        return [h]
+
+    def _hueco_del_cuadro(self, cuadro: list, alto: float) -> float:
+        """Separación máxima entre dos renglones del cuadro de totales: un renglón en blanco. Con el paso entre los renglones
+        con rótulo del cuadro si tiene varios; si no, seis alturas de la cifra (en un escaneo la caja del OCR solo cubre la
+        altura de las cifras, no la del cuerpo de letra; con un cuerpo de 9 puntos o un interlineado amplio, un renglón en
+        blanco ocupa más de cuatro alturas)."""
+        lim = 6 * alto
+        tops = [self.filas[k].top for k, _ in cuadro]
+        pasos = [b - a for a, b in zip(tops, tops[1:]) if b - a > alto]
+        if pasos:
+            lim = max(lim, min(2.2 * min(pasos) - alto, 10 * alto))
+        return lim
+
+    def _impuesto_en_el_cuadro(self, k_ini: int, k_fin: int, hueco: float) -> bool:
+        """El cuadro de totales (renglones k_ini..k_fin y los pegados por debajo) imprime un impuesto que no se reconoce como
+        rótulo de IVA («Impuesto 21%», «Tax 21 %», «lVA 21%» leído por OCR, «I.V.A. al 21 por 100»), o la página dice que
+        el total incluye el IVA. Una exención declarada («exenta de IVA») no cuenta: es compatible con la factura sin IVA."""
+        filas = list(self.filas[k_ini:k_fin + 1])
+        ult = self.filas[k_fin]
+        for f in self.filas[k_fin + 1:k_fin + 4]:
+            if f.pagina != ult.pagina or f.top - ult.bottom > hueco:
+                break
+            filas.append(f)
+            ult = f
+        for f in filas:
+            t = " ".join(p.texto for p in f.palabras)
+            for e in self._etiquetas_en(f.palabras):
+                if e["clase"] == "recargo":
+                    return True   # el recargo de equivalencia va con el IVA
+                if e["clase"] in ("retencion", "garantia"):
+                    # el porcentaje de la retención («Retención 19%») no es un impuesto repercutido
+                    t = re.sub(re.escape(e["texto"]) + r"(?:[\s(]*(?:al|del|a|de)?\s*\d{1,2}(?:[.,]\d{1,2})?\s*%\)?)?", " ", t,
+                               count=1, flags=re.I)
+            if _rotulo_de_impuesto(t) and not RE_SIN_IVA_DECLARADO.search(t):
+                return True
+        pagina = self.filas[k_fin].pagina
+        return any(RE_IVA_INCLUIDO.search(l.texto) for l in self.lineas if l.pagina == pagina)
+
+    def _cuadra_dudoso(self, h: tuple, res: dict) -> bool:
+        """Una lectura OCR dudosa cuadra con los importes ya leídos: retención = base × % (o, sin porcentaje legible, base +
+        cuota − retención = el importe a pagar impreso), cuota = base × tipo, total = base + cuota (− retención), base × tipo
+        = cuota."""
+        def val(campo):
+            v = (campo or {}).get("valor") if isinstance(campo, dict) else None
+            try:
+                return Decimal(v) if v is not None else None
+            except ArithmeticError:
+                return None
+        base, cuota = val(res.get("base_imponible")), val(res.get("cuota_iva"))
+        ret = val((res.get("retencion") or {}).get("importe"))
+        rec = val(res.get("recargo_equivalencia")) or Decimal(0)
+        tipos = [val(d["tipo_iva"]) for d in res.get("desglose") or []]
+        clase, v, pct = h[0], h[1], h[5]
+        if clase == "retencion":
+            if base is not None and pct is not None and q2(base * pct / 100) == q2(abs(v)):
+                return True
+            # sin porcentaje («Retención IRPF -150.00»): el líquido impreso (no calculado) es base + cuota − retención
+            impresos = [val(c) for c in (res.get("total_a_pagar"), res.get("total_factura"))
+                        if isinstance(c, dict) and c.get("metodo") != "calculado"]
+            return (base is not None and cuota is not None
+                    and any(x is not None and q2(x) == q2(base + cuota + rec - abs(v)) for x in impresos))
+        if clase in ("iva", "cuota"):
+            t = pct if pct is not None else (tipos[0] if len(tipos) == 1 else None)
+            return base is not None and t is not None and q2(base * t / 100) == q2(v)
+        if clase in ("total", "pagar"):
+            if base is None or cuota is None:
+                return False
+            bruto = q2(base + cuota + rec)
+            return q2(v) == bruto or (ret is not None and q2(v) == q2(bruto - abs(ret)))
+        if clase == "base":
+            return cuota is not None and len(tipos) == 1 and tipos[0] is not None and q2(v * tipos[0] / 100) == q2(cuota)
+        return False
+
+    @staticmethod
+    def _lectura_dudosa(leido: str, tipo: str) -> str:
+        if tipo == "pequeña":
+            return f"Cifra leída por OCR con poca seguridad («{leido}», más pequeña que su rótulo)"
+        return f"Cifra leída por OCR con un formato dudoso («{leido}»)"
+
+    def _confirmar_dudosos(self, res: dict, hechos: list, dudosos: list) -> dict:
+        """Añade las lecturas OCR dudosas que cuadran con los demás importes (con confianza baja y un aviso) y vuelve a
+        consolidar. Las de punto decimal y las cifras pequeñas poco legibles que no cuadran se conservan con confianza más
+        baja y un aviso de que no cuadran (la cifra impresa puede ser esa y la factura estar descuadrada: la validación lo
+        señala; no se sustituye por un cálculo). Las cifras con espacios que no cuadran se descartan (quedan como cifras sin
+        interpretar): agrupar los dígitos así solo es una lectura si la confirma la aritmética."""
+        pendientes = list(dudosos)
+        for _ in range(3):   # una lectura confirmada puede confirmar otra (la retención, y con ella el total líquido)
+            aceptados = [d for d in pendientes if self._cuadra_dudoso(d[0], res)]
+            if not aceptados:
+                break
+            for h, leido, tipo in aceptados:
+                hechos.append(h)
+                v = q2(abs(h[1]) if h[0] == "retencion" else h[1])
+                self._marcas_hecho[id(h)] = (0.75, f"{self._lectura_dudosa(leido, tipo)}: se toma como {v} porque cuadra con los "
+                                                   "demás importes; confírmela en el original")
+            ids = {id(d) for d in aceptados}
+            pendientes = [d for d in pendientes if id(d) not in ids]
+            res = self._consolidar(hechos)
+        sueltos = [d for d in pendientes if d[2] in ("punto", "pequeña")]
+        if sueltos:
+            for h, leido, tipo in sueltos:
+                hechos.append(h)
+                v = q2(abs(h[1]) if h[0] == "retencion" else h[1])
+                self._marcas_hecho[id(h)] = (0.6, f"{self._lectura_dudosa(leido, tipo)}: se toma como {v}, pero no cuadra con "
+                                                  "los demás importes; compruébela en el original")
+            res = self._consolidar(hechos)
+        return res
 
     def _resumen_traspuesto(self, i: int, f: Fila, pendientes: list[dict], consumidas: set[int]):
         """Resumen de IVA traspuesto: una columna por tipo («IVA 4 % | IVA 10 % | IVA 21 % | Totales») y una fila por concepto
@@ -2855,8 +4318,16 @@ class Extractor:
         res = {"desglose": [], "base_imponible": None, "cuota_iva": None, "tipo_iva": None, "total_factura": None,
                "total_a_pagar": None, "retencion": None, "recargo_equivalencia": None}
 
+        marcas = getattr(self, "_marcas_hecho", None) or {}
+
         def c(h, valor=None, aviso=None, conf=None):
-            return _campo(str(q2(valor if valor is not None else h[1])), texto=h[4], palabras=h[2], pagina=h[3], aviso=aviso, confianza=conf)
+            campo = _campo(str(q2(valor if valor is not None else h[1])), texto=h[4], palabras=h[2], pagina=h[3], aviso=aviso,
+                           confianza=conf)
+            marca = marcas.get(id(h))
+            if marca:   # leído de forma indirecta (renglón sin rótulo, cifra OCR dudosa): se pide confirmar
+                campo["confianza"] = min(campo["confianza"], marca[0])
+                campo["avisos"].append(marca[1])
+            return campo
         por = {}
         for h in hechos:
             por.setdefault(h[0], []).append(h)
@@ -2947,6 +4418,15 @@ class Extractor:
             cuotas = [Decimal(d["cuota"]["valor"]) for d in desglose]
             res["cuota_iva"] = desglose[0]["cuota"] if len(cuotas) == 1 else _campo(
                 str(q2(sum(cuotas))), metodo="calculado", confianza=0.9, aviso="Suma de cuotas por tipo")
+        sin_iva = getattr(self, "_sin_iva_hecho", None)
+        sin_iva = sin_iva is not None and not ivas and not pcts and any(h is sin_iva for h in bases)
+        if sin_iva:
+            # el cuadro de totales no imprime IVA y el total es la base: cuota cero, sin desglose (la validación lo bloquea:
+            # las operaciones exentas o no sujetas no están soportadas)
+            res["cuota_iva"] = _campo("0.00", metodo="calculado", confianza=0.8,
+                                      aviso="El documento no imprime IVA: el total es igual a la base imponible (sin IVA "
+                                            "repercutido); confírmelo")
+            res["tipo_iva"] = _vacio("El documento no imprime IVA")
         totales = por.get("total", [])
         if totales:
             # el total que cuadra con base + cuota; si no, el mayor impreso
@@ -2984,12 +4464,21 @@ class Extractor:
         if rec:
             res["recargo_equivalencia"] = c(rec[-1])
         # Comprobador aritmético: si no hay coherencia por etiquetas, busca la combinación coherente impresa
-        if not self._coherente(res):
+        if not self._coherente(res) and not sin_iva:
             etiquetados = {k: {q2(h[1]) for h in por.get(k, [])} for k in ("base", "total")}
             etiquetados["cuota"] = {q2(h[1]) for h in ivas}
             alt = self._subconjunto_coherente(desglose, oks, por, c, res) or self._resolver_aritmetica(etiquetados)
             if alt:
                 res.update(alt)
+        if ret and not totales and not pagar and res["base_imponible"] and res["cuota_iva"] \
+                and res["base_imponible"].get("valor") is not None and res["cuota_iva"].get("valor") is not None:
+            # con retención y sin total legible (un escaneo), el importe a pagar es base + cuota − retención: se calcula
+            # para que no se tome el total de la factura (base + cuota) como importe a pagar; se pide confirmar
+            neto = q2(Decimal(res["base_imponible"]["valor"]) + Decimal(res["cuota_iva"]["valor"]) +
+                      sum((x[1] for x in rec[-1:]), Decimal(0)) - abs(ret[-1][1]))
+            res["total_a_pagar"] = _campo(str(neto), metodo="calculado", confianza=0.8,
+                                          aviso="No se ha leído el total impreso: importe a pagar calculado como base + "
+                                                "cuota − retención; compruébelo en el original")
         for k in ("base_imponible", "cuota_iva", "total_factura"):
             if res[k] is None:
                 res[k] = _vacio()
@@ -3113,8 +4602,23 @@ class Extractor:
         for k, (et, val) in defs.items():
             cands = self.candidatos(et, val, abajo=k in ("certificacion", "pedido", "contrato", "partida_presupuestaria", "expediente",
                                                                   "proyecto", "periodo", "albaran"))
-            if cands:
-                out[k] = self._campo_de(cands[0])
+            c = self._campo_cerca_del_rotulo(cands)
+            if c is not None:
+                out[k] = c
+        # Referencia comercial del documento («REFERENCIA : Campaña de otoño», «Ref.: PC-00123»): el rótulo solo, al comienzo
+        # del bloque y con dos puntos. No la cita de otra factura («Referencia factura nº …», «Su referencia factura nº …»: el
+        # rótulo no acaba en dos puntos; «Ref.: Factura rectificada F-030», «Abono nº 3» o el encabezado «Factura
+        # rectificada» encima: el valor o el encabezado nombra otro documento, como en RE_REF_OTRA para el número)
+        propias = []
+        for cand in self.candidatos(r"^\s*(?:referencia|ref\.?)(?:\s*" + NUM_ABR + r")?\s*:", self._v_texto, abajo=False):
+            _, prev = self._renglon_previo(cand)
+            if re.search(r"\b(?:factura|fra|invoice|abono|rectificativa)\b", cand[0], re.I) or self.RE_REF_OTRA.search(cand[0]) \
+                    or (prev is not None and (self.RE_REF_OTRA.search(prev.texto) or re.search(r"\babono\b", prev.texto, re.I))):
+                continue
+            propias.append(cand)
+        c = self._campo_cerca_del_rotulo(propias)
+        if c is not None:
+            out["referencia"] = c
         # Descripción de la obra/servicio bajo un encabezado («DESCRIPCIÓN DE LOS SERVICIOS…:»), si no hay «Obra:»
         if "obra" not in out:
             for i, l in enumerate(self.lineas):
@@ -3130,11 +4634,149 @@ class Extractor:
                     break
         return out
 
+    # Valor tomado del bloque de la derecha de un rótulo, a más de HUECO_DERECHA_OTRO_BLOQUE renglones: si es un renglón de
+    # otro bloque de texto (el recuadro del cliente frente a un «Referencia:» u «Obra:» vacíos), no es su valor; si está en
+    # la columna de valores de una rejilla de rótulos (en un renglón contiguo, un rótulo suelto en la columna del rótulo
+    # tiene su valor alineado con este), sí; si está solo y a más de HUECO_DERECHA_CONFIRMAR renglones, se toma a confirmar
+    HUECO_DERECHA_OTRO_BLOQUE = 5.0
+    HUECO_DERECHA_CONFIRMAR = 10.0
+
+    def _valor_de_la_derecha(self, cand: tuple):
+        """(hueco en renglones, bloque del rótulo, bloque del valor, alto) de un candidato tomado del bloque de la derecha de
+        su rótulo; None si no lo es."""
+        v, pals, pag, texto, estr = cand
+        if estr != "derecha" or not pals:
+            return None
+        p0 = pals[0]
+        h = max(1.0, max(p.bottom - p.top for p in pals))
+        linea = next((self.lineas[k] for k in self._entre_tops(pag, p0.top - 3 * h, p0.top + 1)
+                      if any(p is p0 for p in self.lineas[k].palabras)), None)
+        if linea is None:
+            return None
+        izq = [b for b in self._fila_de(linea).bloques if b is not linea and b.x1 <= linea.x0 + 1]
+        rot = max((b for b in izq if texto.startswith(b.texto)), key=lambda b: b.x1, default=None) \
+            or max(izq, key=lambda b: b.x1, default=None)
+        if rot is None:
+            return None
+        return max(0.0, linea.x0 - rot.x1) / h, rot, linea, h
+
+    def _columna_de_valores(self, rot: Linea, val: Linea, h: float) -> bool | None:
+        """True si `val` está en la columna de valores de una rejilla de rótulos (un renglón contiguo alineado con él es el
+        valor de un rótulo suelto, sin cifras, en la columna de `rot`: alineado con él a la izquierda o a la derecha); False
+        si los renglones contiguos alineados con él son de otro bloque de texto; None si no tiene renglones contiguos
+        alineados."""
+        tol = max(2.0, 0.3 * h)
+        vecinos = [self.lineas[k] for k in self._entre_tops(val.pagina, val.top - 2.2 * h, val.top + 2.2 * h)]
+        alineados = [a for a in vecinos if a is not val and 0 < abs(a.top - val.top) <= 2.2 * h
+                     and (abs(a.x0 - val.x0) <= tol or abs(a.x1 - val.x1) <= tol)]
+        if not alineados:
+            return None
+        for a in alineados:
+            fila = self._fila_de(a).bloques
+            for b in fila:
+                if b is a or (abs(b.x0 - rot.x0) > tol and abs(b.x1 - rot.x1) > tol) or b.x1 > a.x0 + 1:
+                    continue
+                entre = [x for x in fila if x is not a and x is not b and x.x0 >= b.x1 - 1 and x.x1 <= a.x0 + 1]
+                if not entre and not re.search(r"\d", b.texto) and len(b.texto.strip(" :")) <= 30:
+                    return True
+        return False
+
+    def _campo_cerca_del_rotulo(self, cands: list) -> dict | None:
+        """Campo del primer candidato cuyo valor no es otro bloque lejano del rótulo (ver HUECO_DERECHA_OTRO_BLOQUE)."""
+        for cand in cands:
+            d = self._valor_de_la_derecha(cand)
+            if d is not None and d[0] > self.HUECO_DERECHA_OTRO_BLOQUE:
+                col = self._columna_de_valores(d[1], d[2], d[3])
+                if col is False:
+                    continue
+                if col is None and d[0] > self.HUECO_DERECHA_CONFIRMAR:
+                    return self._campo_de(cand, conf=0.6, aviso="El valor está lejos de su rótulo: confirme")
+            return self._campo_de(cand)
+        return None
+
+    MAX_RENGLONES_CONTINUACION = 2
+    # Renglón que no continúa un valor aunque esté en su columna: rótulos sin dos puntos de datos bancarios, notas y
+    # totales («BIC FICTESMM», «Titular Talleres…», «OBSERVACIONES», «Portes», «Vto. 15/11»)
+    RE_NO_CONTINUA = re.compile(r"^\W*(?:bic|swift|titular|beneficiario|observaci[oó]n|observaciones|notas?|nota\s+importante|"
+                                r"concepto|vtos?|venc\w*|portes|firma|sello|recargo|descuento|dto|retenci[oó]n|irpf|base|"
+                                r"total|subtotal|importe|iva|igic|ipsi|entrega|env[ií]o|transporte|atentamente|gracias|"
+                                r"condiciones\s+generales|protecci[oó]n\s+de\s+datos|registro|inscrita|p[aá]gina)\b", re.I)
+    # Vocabulario de una forma de pago: si algún renglón unido no lo tiene, la unión se marca para confirmar
+    RE_TERMINO_PAGO = re.compile(r"transfer|banc|bank|caja|caixa|kutxa|recibo|domicilia|giro|pagar[eé]|cheque|tal[oó]n|"
+                                 r"efectivo|contado|tarjeta|confirming|letra|remesa|d[ií]as|\bf\.?\s?f\b|vista|\bpago|"
+                                 r"cobro|ingreso|cuenta|entidad|sepa|bizum|reembolso|anticipad|aplazad|plazos?\b|mensual|"
+                                 r"trimestral|\bvencim", re.I)
+
+    def _continuacion_valor(self, cand: tuple) -> list[Linea]:
+        """Renglones que continúan por debajo el valor de un rótulo, en su misma columna («FORMA DE PAGO:  60 días f.f.» ⏎
+        «                Transferencia bancaria»): empiezan alineados con el valor, con su mismo cuerpo de letra, a
+        interlineado normal, y a su izquierda la columna del rótulo está vacía (no son el valor de otro rótulo). Se para:
+        tras un valor que acaba en punto de final de frase (no de abreviatura: «f.f.», «S.L.»); en el primer renglón con
+        rótulo propio («IBAN:», «C.C.C.:», «Vencimiento», o sin dos puntos: «BIC …», «Titular …», «OBSERVACIONES»,
+        «Portes»: RE_NO_CONTINUA), con cifras largas (cuentas, teléfonos), fechas, importes, NIF o datos de contacto, con un
+        importe o el rótulo de un importe a su derecha en la misma fila, o de la tabla de conceptos; como mucho
+        MAX_RENGLONES_CONTINUACION. Solo para valores en el renglón del rótulo (los de debajo de un rótulo pueden ser otra
+        fila de una rejilla)."""
+        v, pals, pag, texto, estr = cand
+        if estr not in ("mismo_bloque", "derecha") or not pals:
+            return []
+        # el valor empieza tras el rótulo: en el mismo bloque, la palabra del final del rótulo («PAGO:») va delante
+        ini = 0
+        while ini < len(pals) - 1 and (pals[ini].texto.endswith(":") or not re.search(r"\w", pals[ini].texto)):
+            ini += 1
+        p0 = pals[ini]
+        h = max(p.bottom - p.top for p in pals)
+        linea = next((self.lineas[k] for k in self._entre_tops(pag, p0.top - 3 * h, p0.top + 1)
+                      if any(p is p0 for p in self.lineas[k].palabras)), None)
+        if linea is None:
+            return []
+        x_rot = linea.x0
+        if estr == "derecha":   # el rótulo es el bloque de su izquierda en la fila
+            izq = [b for b in self._fila_de(linea).bloques if b is not linea and b.x1 <= linea.x0 + 1]
+            x_rot = max(izq, key=lambda b: b.x1).x0 if izq else linea.x0
+        self.tabla()
+        en_tabla = {id(b) for f in self.filas if id(f) in self._ids_filas_tabla for b in f.bloques}
+        out, ultimo, previo = [], linea, " ".join(p.texto for p in pals[ini:])   # el valor tal cual (con su punto final)
+        while len(out) < self.MAX_RENGLONES_CONTINUACION:
+            if previo.rstrip().endswith(".") and not self.RE_ABREVIATURA_FINAL.search(previo.strip()):
+                break   # el valor acaba una frase: lo de debajo es otra («Rogamos indiquen…»)
+            # el primer renglón de debajo que solapa la columna del valor (no otra columna de la fila, como los totales)
+            bajo = [l for l in self._lineas_bajo(ultimo, 0.8 * h) if l.x1 > p0.x0 and l.x0 < max(linea.x1, ultimo.x1)]
+            l = min(bajo, key=lambda l: l.top, default=None)
+            if l is None or abs(l.x0 - p0.x0) > max(2.0, 0.3 * h) or abs((l.bottom - l.top) - h) > 0.3 * h \
+                    or id(l) in en_tabla:
+                break
+            fila = self._fila_de(l).bloques
+            if any(b is not l and b.x0 < l.x0 and b.x1 > x_rot for b in fila):
+                break   # algo en la columna del rótulo: es el valor de otro rótulo («Banco:  Banco Ficticio»)
+            if any(b is not l and b.x0 >= l.x1 - 1 and (RE_IMPORTE.search(b.texto) or self._rotulo_importe(b)) for b in fila):
+                break   # un importe a su derecha: es un rótulo de los totales («Portes   15,00»)
+            t = l.texto
+            if re.match(r"^[^\d:]{1,30}:", t) or self._es_etiqueta(t) or self.RE_NO_CONTINUA.search(t) \
+                    or re.search(r"\d{4}|\d[\s.-]\d{3}|\b\d{1,2}\s*[/.-]\s*\d{1,2}\b", t) or _fecha_iso(t) \
+                    or RE_IMPORTE.search(t) or RE_CONTACTO.search(t) or RE_NIF_ETIQUETA.search(t) or any(True for _ in _nifs_en(t)) \
+                    or self._rotulo_importe(l) or self._v_texto(t) is None:
+                break
+            out.append(l)
+            ultimo, previo = l, t
+        return out
+
     def pago(self):
         out = {}
         c = self.candidatos(r"forma\s+de\s+pago|condiciones\s+de\s+pago|modo\s+de\s+pago|medio\s+de\s+pago", self._v_texto)
         if c:
             out["forma_pago"] = self._campo_de(c[0])
+            sig = self._continuacion_valor(c[0])
+            if sig:
+                v, pals, pag, texto, estr = c[0]
+                cont = [self._v_texto(x.texto) for x in sig]
+                unido = (" ".join([v] + cont), list(pals) + [p for x in sig for p in x.palabras], pag,
+                         " / ".join([texto] + [x.texto for x in sig]), estr)
+                if all(self.RE_TERMINO_PAGO.search(t) for t in cont):
+                    out["forma_pago"] = self._campo_de(unido)
+                else:   # algún renglón unido no habla del pago: puede ser otra cosa escrita en la misma columna
+                    out["forma_pago"] = self._campo_de(unido, conf=0.6, aviso="Forma de pago completada con los renglones de "
+                                                                           "debajo: confirme que todos son parte de ella")
         else:
             for l in self.lineas:
                 m = re.search(r"\b(?:pago|abono|a\s+pagar)\s+(?:por|mediante|con|a\s+trav[eé]s\s+de|v[ií]a)\s+(.{4,80})", l.texto, re.I) or \
@@ -3316,7 +4958,8 @@ class Extractor:
             "desglose": [], "base_imponible": _vacio(a), "cuota_iva": _vacio(a), "tipo_iva": _vacio(a), "total_factura": _vacio(a),
             "total_a_pagar": _vacio(a), "retencion": None, "recargo_equivalencia": None}, "base_imponible")
         if not lineas_det and not self._ids_filas_tabla:
-            unica = self._seccion("la línea única", lambda: self._linea_unica_texto(imp), lambda a: None, "lineas")
+            unica = self._seccion("la línea única", lambda: self._linea_unica_texto(imp) or self._linea_unica_carta(imp),
+                                  lambda a: None, "lineas")
             if unica:
                 lineas_det, aviso_lineas = [unica], "Factura sin tabla de conceptos: línea única deducida del texto y de la base imponible"
         partes = self._seccion("emisor y destinatario", self.partes, lambda a: {

@@ -463,6 +463,11 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
             "El domicilio del destinatario contiene el del emisor: compruebe que no se ha leído del bloque del emisor.")
     if not em.get("domicilio"):
         add("bloqueo", "emisor.domicilio", "EMISOR_DOMICILIO", "Falta el domicilio del emisor (art. 6 RD 1619/2012).")
+    elif len(k_de := _clave(de.get("domicilio"))) >= 8 and not re.fullmatch(r"\d{5}[a-z]+", k_de) \
+            and k_de in _clave(em["domicilio"]):  # (el inverso de DEST_DOMICILIO_EMISOR; no solo «CP ciudad»)
+        add("confirmar", "emisor.domicilio", "EMISOR_DOMICILIO_DESTINATARIO",
+            "El domicilio del emisor contiene el del destinatario: compruebe que no se ha leído del bloque del destinatario "
+            "(p. ej. el recuadro de la dirección del cliente, si el emisor solo imprime la suya en el pie).")
 
     # --- Número y serie
     ns = (datos.get("num_serie") or "").strip()
@@ -566,7 +571,14 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
     base = _dec(datos.get("base_imponible"))
     cuota = _dec(datos.get("cuota_total"))
     total = _dec(datos.get("importe_total"))
-    if not desglose:
+    if not desglose and base is not None and total is not None and base > 0 and q2(base) == q2(total) \
+            and (cuota is None or q2(cuota) == 0):
+        # factura sin IVA repercutido (p. ej. alquiler de vivienda): total = base, sin cuota ni desglose
+        add("bloqueo", "desglose", "SIN_IVA",
+            f"La factura no repercute IVA: el total ({q2(total)}) es igual a la base imponible y no hay cuota. Las operaciones "
+            "exentas o no sujetas al impuesto no están soportadas por esta aplicación. Si la operación está sujeta a IVA, "
+            "indique el tipo, la base y la cuota en el desglose y corrija la cuota y el total.")
+    elif not desglose:
         add("bloqueo", "desglose", "DESGLOSE_FALTA", "No se ha identificado el desglose de bases y cuotas por tipo de IVA.")
     suma_base, suma_cuota = Decimal("0"), Decimal("0")
     for i, d in enumerate(desglose):
@@ -610,11 +622,16 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
         add("bloqueo", "importe_total", "MACRODATO", "Importes ≥ 100.000.000 € (macrodato) no soportados.")
     # Total no leído en el documento: datos_desde_extraccion lo deduce como base + cuota, lo que siempre cuadra
     if total_no_leido and total is not None and "importe_total" not in cambiados:
+        # con retención, el total impreso puede ser el de la factura o el importe a pagar (ya descontada la retención)
+        ret_i = _dec((datos.get("retencion") or {}).get("importe"))
+        ret_i = ret_i if ret_i is not None and ret_i > 0 else None
         add("confirmar", "importe_total", "TOTAL_NO_LEIDO",
-            f"No se ha leído el total de la factura en el documento: se ha calculado como base + cuota ({q2(total)}). "
+            f"No se ha leído el total de la factura en el documento: se ha calculado como base + cuota ({q2(total)})"
+            + (f", y el importe a pagar como ese total menos la retención ({q2(total - ret_i)})" if ret_i else "") + ". "
             + (f"El cuadro de totales imprime además cifras sin interpretar ({'; '.join(sin_clasificar)}). " if sin_clasificar else "")
-            + "Compruebe en el original que el total impreso es ese y que no incluye otros conceptos (tasas, suplidos, "
-            "portes…); si es distinto, corríjalo.")
+            + "Compruebe en el original que el total impreso es ese"
+            + (" (o, si ya descuenta la retención, el importe a pagar)" if ret_i else "")
+            + " y que no incluye otros conceptos (tasas, suplidos, portes…); si es distinto, corríjalo.")
     # Total leído con cifras sin interpretar debajo, alguna mayor (p. ej. «TOTAL 1.210 / Tasa 30 / IMPORTE 1.240»): el total
     # leído puede ser un subtotal; nada más lo detecta si el importe final lleva un rótulo no reconocido
     bajo_total = [str(x) for x in tf_ext.get("bajo_total") or []] if isinstance(tf_ext, dict) and not total_no_leido else []
@@ -687,8 +704,12 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
             add("bloqueo", "retencion.importe", "RET_IMPORTE", "Importe de retención no válido.")
         else:
             if rp is not None and base is not None and q2(base * rp / 100) != q2(ri):
-                add("bloqueo", "retencion.importe", "RET_DESCUADRE",
-                    f"Retención {q2(ri)} ≠ base × {rp} % = {q2(base * rp / 100)}.")
+                # un céntimo de diferencia es un redondeo distinto (o truncado) del emisor, como en la cuota: se confirma
+                esperado_r = q2(base * rp / 100)
+                add("confirmar" if abs(esperado_r - q2(ri)) <= Decimal("0.01") else "bloqueo", "retencion.importe",
+                    "RET_DESCUADRE", f"Retención {q2(ri)} ≠ base × {rp} % = {esperado_r}."
+                    + (" La diferencia de un céntimo suele ser un redondeo distinto del emisor: compruébelo en el original."
+                       if abs(esperado_r - q2(ri)) <= Decimal("0.01") else ""))
             if total is not None and pagar is not None and q2(total - ri) != q2(pagar):
                 add("bloqueo", "total_a_pagar", "PAGAR_DESCUADRE",
                     f"Total a pagar {q2(pagar)} ≠ total {q2(total)} − retención {q2(ri)} = {q2(total - ri)}.")

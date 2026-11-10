@@ -6,17 +6,56 @@ import re
 LETRAS_DNI = "TRWAGMYFPDXBNJZSQVHLCKE"
 _CIF_LETRA_CONTROL = "JABCDEFGHI"
 
-NIF_REGEX = re.compile(
-    r"(?<![A-Z0-9])(?:ES[\s-]?)?([ABCDEFGHJKLMNPQRSUVW][\s.-]?\d{2}[\s.]?\d{3}[\s.]?\d{2}[\s.-]?[0-9A-J]"
-    r"|[XYZ][\s.-]?\d{7}[\s.-]?[A-Z]"
-    r"|\d{8}[\s.-]?[A-Z])(?![A-Z0-9])"
-)
+# Separador dentro de un NIF: un espacio, un punto o un guion («B-46.871.232», «21.987.654-E»)
+SEP_SIMPLE = r"[\s.\-]?"
+# … y, solo detrás del rótulo del NIF (ver forma_admitida), la raya «–», «—» o el guion separados por espacios
+# («CIF: A – 00543215», «N.I.F.: 44444444 – A»)
+SEP = r"(?:\s?[\-–—]\s?|[\s.])?"
+# Separadores que solo valen detrás del rótulo: la barra tras el código de provincia, la raya y el guion con espacios
+RE_SEP_TRAS_ROTULO = re.compile(r"[/–—]|\s-|-\s")
+# Rótulo del NIF, también como lo lee el OCR («N.LF.», «C.l.F.», «N.1.F.»: la I leída como L, l, 1 o |)
+ROTULO_NIF = (r"c\.?\s?i\.?\s?f\.?|n\.?\s?i\.?\s?f\.?|n\.?\s?i\.?\s?e\.?|d\.?\s?n\.?\s?i\.?|[cn]\.\s?[l1|]\.?\s?f\.?|vat|tax\s?id|"
+              r"nif-iva|nif/cif|cif/nif")
+# Rótulo del NIF justo delante de una posición (solo separadores, la abreviatura de «número» y el prefijo «ES» entre ambos:
+# «CIF: », «C.I.F. nº », «NIF núm.: ES»)
+RE_ROTULO_DELANTE = re.compile(r"(?<![^\W\d_])(?:" + ROTULO_NIF + r")[\s:.\-–—]*(?:(?:n\.?[º°]|n[uú]m(?:ero)?)\.?[\s:.\-–—]*)?"
+                               r"(?:ES[\s-]?)?$", re.I)
+
+
+def _nif_regex(sep: str, barra: bool) -> re.Pattern:
+    return re.compile(
+        r"(?<![A-Z0-9])(?:ES[\s-]?)?([ABCDEFGHJKLMNPQRSUVW]" + sep + r"\d{2}" + (r"(?:[\s.]?|/)" if barra else r"[\s.]?")
+        + r"\d{3}[\s.]?\d{2}" + sep + r"[0-9A-J]"
+        r"|[XYZ]" + sep + r"\d{7}" + sep + r"[A-Z]"
+        r"|\d{8}" + sep + r"[A-Z])(?![A-Z0-9])"
+    )
+
+
+NIF_REGEX = _nif_regex(SEP, barra=True)
+NIF_REGEX_SIMPLE = _nif_regex(SEP_SIMPLE, barra=False)  # (sin rótulo delante: solo espacio, punto o guion)
+
+
+def forma_admitida(texto: str, ini: int, candidato: str) -> bool:
+    """Un NIF con barra tras el código de provincia («B00/123455») o con la raya o el guion separados por espacios
+    («A – 00543215», «44444444 – A») solo cuenta detrás de su rótulo («CIF: …»): sin él, esas formas son las de un número
+    de factura («F26/000123», «A – 26000125») o de una referencia («Pedido 20261105 – Z»)."""
+    return not RE_SEP_TRAS_ROTULO.search(candidato) or bool(RE_ROTULO_DELANTE.search(texto, max(0, ini - 40), ini))
+
+
+def candidatos(regex: re.Pattern, regex_simple: re.Pattern, texto: str):
+    """Coincidencias de `regex` admitidas por forma_admitida; donde una no lo es, las de `regex_simple` (sin la barra ni
+    la raya) en su tramo: «Pedido B00123455 – C/ Mayor» da «B00123455»."""
+    for m in regex.finditer(texto):
+        if forma_admitida(texto, m.start(1), m.group(1)):
+            yield m
+        else:
+            yield from regex_simple.finditer(texto, m.start(), m.end())
 
 
 def normalizar(nif: str | None) -> str:
     if not nif:
         return ""
-    n = re.sub(r"[\s.\-]", "", nif.upper())
+    n = re.sub(r"[\s.\-–—/]", "", nif.upper())
     if n.startswith("ES") and len(n) == 11:
         n = n[2:]
     return n
@@ -80,7 +119,8 @@ def parecidos(a: str | None, b: str | None, max_dif: int = 2) -> bool:
 def buscar_nifs(texto: str) -> list[tuple[str, int, int]]:
     """Devuelve (nif_normalizado, inicio, fin) de los NIF con dígito de control válido."""
     out = []
-    for m in NIF_REGEX.finditer(texto.upper()):
+    t = texto.upper()
+    for m in candidatos(NIF_REGEX, NIF_REGEX_SIMPLE, t):
         n = normalizar(m.group(1))
         if es_valido(n):
             out.append((n, m.start(1), m.end(1)))

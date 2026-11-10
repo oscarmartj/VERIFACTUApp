@@ -5,10 +5,11 @@ La aplicación **bloquea** la producción hasta que se cumplen los requisitos qu
 
 ## Bloqueantes
 
-1. **Modelos reales de la empresa**: se recibió un PDF real (factura firmada; se usa solo como prueba privada,
-   nunca se emite ni se remite: `tests/privado/`, excluido del repositorio) y la extracción lo lee completo. Antes de
-   producción conviene probar con una muestra de los PDF **preparatorios** reales que vaya a usar la empresa (sin
-   emitirlos), por si su programa de origen genera algún diseño no cubierto.
+1. **Modelos reales de la empresa**: se han probado 9 facturas reales de 5 emisores (solo como prueba privada,
+   nunca se emiten ni se remiten: `tests/privado/`, excluido del repositorio). La primera medición dio un 69,6 % de
+   campos (2 de 9 perfectas), muy por debajo de los corpus sintéticos; tras corregir las causas generales, 100 %.
+   Cada modelo nuevo puede traer formatos no vistos: antes de producción conviene probar una muestra de los PDF
+   **preparatorios** reales de cada empresa que vaya a usar la aplicación (sin emitirlos).
 2. **Productor del sistema**: designar a la persona o entidad responsable, completar sus datos en la aplicación y en la declaración responsable, y que esta la **suscriba** (no puede hacerlo una herramienta de IA ni firmarse en su nombre).
 3. **Esquemas oficiales**: contrastar los XSD/WSDL/catálogo de errores con la AEAT (`python scripts/verificar_esquemas.py`) desde una red con acceso a la sede. Se obtuvieron de una réplica pública con sumas SHA-256 declaradas (ver `app/verifactu/esquemas/PROCEDENCIA.md`).
 4. **Certificado y legitimación**: certificado electrónico de la empresa (sello o persona jurídica) o de su representante, o de un tercero con apoderamiento o colaboración social en la AEAT. Se carga en la aplicación (formulario seguro, nunca en el chat), que comprueba titularidad o representación. El apoderamiento solo lo verifica la AEAT al remitir (error 4112).

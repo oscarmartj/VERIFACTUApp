@@ -27,9 +27,11 @@ módulo. Si falta alguno de los métodos que se amplían, o si al leer un PDF de
 mecanismos anteriores deja de detectarse (_autocomprobacion, en cada ejecución), el proceso falla y la importación se
 rechaza, en vez de leer sin filtrar.
 """
+import bisect
 import json
 import math
 import re
+import struct
 import sys
 import unicodedata
 
@@ -186,6 +188,8 @@ class _Agregador(_pagina_pdfplumber.PDFPageAggregatorWithMarkedContent):
             c.glifo = f"{_clave_fuente(font)}:{cid}"
             # un glifo que dibuja algo y cuyo texto es vacío o un carácter de control: lo que se lee no es lo que se ve
             t = c.get_text()
+            if not t.strip():
+                c._fuente_cid = (font, cid)   # para ver si su glifo tiene contornos (_blancos_junto_a_cifras)
             if vis == VISIBLE and (t == "" or any(unicodedata.category(ch) == "Cc" and not ch.isspace() for ch in t)):
                 vis = DUDOSO
         c.visibilidad = vis
@@ -453,11 +457,214 @@ def _tramo_numerico(chars) -> dict | None:
             "der": round(min(ch["x0"] for ch in despues), 2) if despues else None}
 
 
+MAX_FUENTE_TT = 32 * 1024 * 1024   # bytes de un programa TrueType incrustado que se examinan (glifos sin contornos)
+
+
+def _tt_tablas(datos: bytes) -> dict:
+    """Directorio de tablas de un programa TrueType (o de la primera fuente de una colección): {etiqueta: (inicio, largo)}.
+    Vacío si no es TrueType con contornos en «glyf» (una fuente CFF «OTTO» no los tiene)."""
+    base = struct.unpack_from(">I", datos, 12)[0] if datos[:4] == b"ttcf" else 0
+    if datos[base:base + 4] not in (b"\x00\x01\x00\x00", b"true"):
+        return {}
+    out = {}
+    for i in range(min(struct.unpack_from(">H", datos, base + 4)[0], 256)):
+        etiqueta, _, ini, largo = struct.unpack_from(">4sIII", datos, base + 12 + 16 * i)
+        if ini + largo <= len(datos):
+            out[etiqueta.decode("latin-1")] = (ini, largo)
+    return out if all(k in out for k in ("head", "loca", "glyf", "maxp")) else {}
+
+
+def _tt_subtabla_cmap(datos: bytes, ini: int):
+    """Función código → glifo de una subtabla «cmap» de formato 0, 4, 6 o 12 (None: otro formato)."""
+    fmt = struct.unpack_from(">H", datos, ini)[0]
+    if fmt == 0:
+        ids = datos[ini + 6:ini + 6 + 256]
+        return lambda c: ids[c] if 0 <= c < len(ids) else 0
+    if fmt == 6:
+        primero, n = struct.unpack_from(">HH", datos, ini + 6)
+        return lambda c: struct.unpack_from(">H", datos, ini + 10 + 2 * (c - primero))[0] if primero <= c < primero + n else 0
+    if fmt == 4:
+        n = struct.unpack_from(">H", datos, ini + 6)[0] // 2
+        fines = struct.unpack_from(f">{n}H", datos, ini + 14)
+        inicios = struct.unpack_from(f">{n}H", datos, ini + 16 + 2 * n)
+        deltas = struct.unpack_from(f">{n}h", datos, ini + 16 + 4 * n)
+        p_rangos = ini + 16 + 6 * n
+        rangos = struct.unpack_from(f">{n}H", datos, p_rangos)
+
+        def f4(c):
+            i = bisect.bisect_left(fines, c)
+            if i >= n or inicios[i] > c:
+                return 0
+            if not rangos[i]:
+                return (c + deltas[i]) & 0xFFFF
+            g = struct.unpack_from(">H", datos, p_rangos + 2 * i + rangos[i] + 2 * (c - inicios[i]))[0]
+            return (g + deltas[i]) & 0xFFFF if g else 0
+        return f4
+    if fmt == 12:
+        n = min(struct.unpack_from(">I", datos, ini + 12)[0], 200_000)
+        grupos = [struct.unpack_from(">III", datos, ini + 16 + 12 * k) for k in range(n)]
+        fines = [g[1] for g in grupos]
+
+        def f12(c):
+            i = bisect.bisect_left(fines, c)
+            return grupos[i][2] + c - grupos[i][0] if i < n and grupos[i][0] <= c else 0
+        return f12
+    return None
+
+
+def _tt_cmaps(datos: bytes, tablas: dict) -> dict:
+    """Subtablas «cmap» de la fuente: {(plataforma, codificación): función código → glifo}."""
+    if "cmap" not in tablas:
+        return {}
+    ini = tablas["cmap"][0]
+    out = {}
+    for k in range(min(struct.unpack_from(">H", datos, ini + 2)[0], 64)):
+        plat, cod, off = struct.unpack_from(">HHI", datos, ini + 4 + 8 * k)
+        try:
+            f = _tt_subtabla_cmap(datos, ini + off)
+        except (struct.error, IndexError, ValueError):
+            f = None
+        if f is not None:
+            out.setdefault((plat, cod), f)
+    return out
+
+
+class _ProgramaTT:
+    """Programa TrueType incrustado (FontFile2): si el glifo de un código tiene contornos."""
+
+    def __init__(self, datos: bytes):
+        self.datos = datos
+        self.tablas = _tt_tablas(datos)
+        self.cmaps = _tt_cmaps(datos, self.tablas) if self.tablas else {}
+        if self.tablas:
+            self.formato_loca = struct.unpack_from(">h", datos, self.tablas["head"][0] + 50)[0]
+            self.n_glifos = struct.unpack_from(">H", datos, self.tablas["maxp"][0] + 4)[0]
+
+    def vacio(self, gid: int) -> bool | None:
+        """True: el glifo no tiene contornos (no dibuja nada); False: los tiene (o es compuesto); None: no se sabe."""
+        if not self.tablas or not 0 < gid < self.n_glifos:
+            return None   # el 0 es .notdef: según el visor, una caja o nada
+        loca = self.tablas["loca"][0]
+        if self.formato_loca == 0:
+            a, b = (2 * v for v in struct.unpack_from(">HH", self.datos, loca + 2 * gid))
+        else:
+            a, b = struct.unpack_from(">II", self.datos, loca + 4 * gid)
+        if b == a:
+            return True
+        ini, largo = self.tablas["glyf"]
+        if b < a or b > largo:
+            return None
+        return struct.unpack_from(">h", self.datos, ini + a)[0] == 0
+
+
+def _programa_tt(font) -> "_ProgramaTT | None":
+    p = getattr(font, "_programa_tt", False)
+    if p is not False:
+        return p
+    p = None
+    try:
+        desc = getattr(font, "descriptor", None)
+        flujo = resolve1(desc.get("FontFile2")) if isinstance(desc, dict) else None
+        if flujo is None and isinstance(desc, dict):   # OpenType con contornos TrueType («glyf»)
+            flujo = resolve1(desc.get("FontFile3"))
+            if not isinstance(flujo, PDFStream) or literal_name(flujo.get("Subtype")) != "OpenType":
+                flujo = None
+        if isinstance(flujo, PDFStream):
+            datos = flujo.get_data()
+            if len(datos) <= MAX_FUENTE_TT:
+                p = _ProgramaTT(datos)
+    except Exception:
+        p = None
+    try:
+        font._programa_tt = p
+    except Exception:
+        pass
+    return p
+
+
+def _gids_candidatos(font, prog: _ProgramaTT, cid) -> set:
+    """Glifos que un visor puede dibujar para el código `cid` de la fuente (todas las interpretaciones razonables de la
+    especificación, para no dar por vacío un glifo que alguno dibuja)."""
+    spec = getattr(font, "_spec", None) or {}
+    if isinstance(font, PDFCIDFont):
+        desc = resolve1(spec.get("DescendantFonts"))   # _spec es el diccionario Type0; el mapa está en la descendiente
+        if isinstance(desc, list) and desc:
+            spec = resolve1(desc[0])
+        if not isinstance(spec, dict) or not isinstance(cid, int):
+            return set()
+        mapa = resolve1(spec.get("CIDToGIDMap"))
+        if mapa is None or (isinstance(mapa, PSLiteral) and literal_name(mapa) == "Identity"):
+            return {cid}
+        if isinstance(mapa, PDFStream):
+            d = mapa.get_data()
+            return {struct.unpack_from(">H", d, 2 * cid)[0]} if 2 * cid + 2 <= len(d) else set()
+        return set()
+    if literal_name(spec.get("Subtype")) != "TrueType" or not isinstance(cid, int):
+        return set()
+    u = (getattr(font, "cid2unicode", None) or {}).get(cid)
+    if not (isinstance(u, str) and len(u) == 1 and u.isspace()):
+        # /Encoding da a este código un nombre de glifo que no es un blanco, o uno desconocido que un visor puede buscar
+        # en la tabla «post» de la fuente (aquí no se examina): no se sabe qué dibuja
+        return set()
+    if not prog.cmaps:
+        return {cid}   # sin «cmap», los visores usan el código como número de glifo
+    out = set()
+    for (plat, cod), f in prog.cmaps.items():
+        codigos = []
+        if plat == 0 or (plat == 3 and cod in (1, 10)):
+            # por el nombre del glifo de /Encoding; en una fuente simbólica, algún visor usa el código tal cual
+            codigos = [ord(u), cid]
+        elif plat == 3 and cod == 0:
+            codigos = [cid, 0xF000 + cid, 0xF100 + cid, 0xF200 + cid]
+        elif plat == 1 and cod == 0:
+            codigos = [cid]
+            try:
+                codigos.append(u.encode("mac_roman")[0])
+            except UnicodeEncodeError:
+                pass
+        for c in codigos:
+            try:
+                g = f(c)
+            except (struct.error, IndexError, ValueError):
+                g = 0
+            if g:
+                out.add(g)
+    return out
+
+
+def _glifo_sin_contornos(font, cid) -> bool:
+    """El glifo de este código en el programa TrueType incrustado no tiene contornos según todas las tablas que un visor
+    puede usar: no dibuja nada, aunque una línea de la página pase por su caja. False si lo dibuja o no se puede saber."""
+    cache = getattr(font, "_sin_contornos", None)
+    if cache is None:
+        cache = {}
+        try:
+            font._sin_contornos = cache
+        except Exception:
+            pass
+    if cid in cache:
+        return cache[cid]
+    r = False
+    prog = _programa_tt(font)
+    if prog is not None and prog.tablas:
+        try:
+            gids = _gids_candidatos(font, prog, cid)
+            r = bool(gids) and all(prog.vacio(g) is True for g in gids)
+        except Exception:
+            r = False
+    cache[cid] = r
+    return r
+
+
 def _blancos_junto_a_cifras(page, chars, descartar) -> list | None:
     """Caracteres cuyo texto es un blanco (o nada), dibujados junto a una cifra, cuyo glifo puede dibujar
     algo: de una fuente de dibujo libre, o con un /ToUnicode que contradice su codificación (el «1» de «1.250,00»
     traducido por un espacio deja «.250,00»). [x0, top, x1, bottom, seguro] en las coordenadas de las palabras; seguro=1
-    si el /ToUnicode ya contradice el glifo, 0 si texto.py debe mirar si hay tinta en la imagen. None si son demasiados."""
+    si el /ToUnicode ya contradice el glifo, 0 si texto.py debe mirar si hay tinta en la imagen. None si son demasiados.
+    Un 6.º elemento, sin_contornos=1, si el glifo del programa TrueType incrustado no tiene contornos según todas las
+    tablas que un visor puede usar (_glifo_sin_contornos): el blanco no dibuja nada, así que la tinta de una línea recta
+    larga que cruza su caja (borde de un recuadro, separador de columnas) es de otra cosa y texto.py no la cuenta; la
+    demás tinta sí (algo dibujado encima del blanco: una cifra trazada aparte)."""
     alto = float(page.height)
     mx, mt = (float(v) for v in page.mediabox[:2])
     out = []
@@ -472,8 +679,9 @@ def _blancos_junto_a_cifras(page, chars, descartar) -> list | None:
             continue   # ni a uno ni a dos caracteres de una cifra («1.250,00» con el «1» en blanco: le sigue el punto)
         if len(out) >= MAX_BLANCOS_PAGINA:
             return None
+        sin_contornos = not seguro and getattr(c, "_fuente_cid", None) is not None and _glifo_sin_contornos(*c._fuente_cid)
         out.append([round(float(c.x0) + mx, 2), round(alto - float(c.y1) + mt, 2), round(float(c.x1) + mx, 2),
-                    round(alto - float(c.y0) + mt, 2), int(seguro)])
+                    round(alto - float(c.y0) + mt, 2), int(seguro), int(sin_contornos)])
     return out
 
 

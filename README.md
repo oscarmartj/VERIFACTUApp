@@ -54,7 +54,7 @@ Con Docker: `docker compose up --build` (ver `docker-compose.yml`).
 python -m pytest -q
 ```
 
-Más de 500 pruebas: los 14 casos de aceptación del encargo, las regresiones de cuatro rondas de verificación adversarial (tres del núcleo y una del extractor y el flujo de borradores) y la extracción sobre el corpus de diseños variados (ver `docs/pruebas.md`; evaluación detallada con `python scripts/evaluar_extraccion.py tests/corpus tests/corpus_holdout* --detalle`). Todas son **simuladas o locales**; las evidencias (PDF, PNG, XML, JSON y capturas) se guardan en `docs/evidencias/`.
+Casi 900 pruebas: los 14 casos de aceptación del encargo, las regresiones de cuatro rondas de verificación adversarial (tres del núcleo y una del extractor y el flujo de borradores), las de la prueba con 9 facturas reales (reproducidas con documentos sintéticos) y la extracción sobre el corpus de diseños variados (ver `docs/pruebas.md`; evaluación detallada con `python scripts/evaluar_extraccion.py tests/corpus tests/corpus_holdout* --detalle`). Todas son **simuladas o locales**; las evidencias (PDF, PNG, XML, JSON y capturas) se guardan en `docs/evidencias/`.
 
 ## Documentación
 
@@ -83,19 +83,19 @@ tests/          pruebas de aceptación y fixtures sintéticos
 
 ## Tamaño del código
 
-**28.098 líneas de código** propio (sin líneas en blanco ni comentarios), en 70 ficheros. Contando también los
-comentarios (2.389) y las líneas en blanco (3.481), son 33.968 líneas.
+**31.525 líneas de código** propio (sin líneas en blanco ni comentarios), en 76 ficheros. Contando también los
+comentarios (3.146) y las líneas en blanco (4.078), son 38.749 líneas.
 
 | Parte | Ficheros | Líneas de código |
 |---|---:|---:|
-| Aplicación (`app/`): servidor, extracción, validación, emisión, PDF y SQL | 34 | 9.746 |
+| Aplicación (`app/`): servidor, extracción, validación, emisión, PDF y SQL | 34 | 11.238 |
 | Interfaz web (`app/static/`): JavaScript, CSS y HTML | 3 | 4.016 |
 | Scripts (`scripts/`): generadores de facturas sintéticas, evaluación y utilidades | 14 | 9.962 |
-| Pruebas (`tests/`) | 17 | 4.342 |
+| Pruebas (`tests/`) | 23 | 6.277 |
 | Despliegue (`Dockerfile`, `docker-compose.yml`) | 2 | 32 |
-| **Total** | **70** | **28.098** |
+| **Total** | **76** | **31.525** |
 
-Por lenguaje: Python 23.730, JavaScript 3.390, CSS 603, SQL 320, HTML 23, Dockerfile 17 y YAML 15.
+Por lenguaje: Python 27.157, JavaScript 3.390, CSS 603, SQL 320, HTML 23, Dockerfile 17 y YAML 15.
 
 No se cuentan los esquemas oficiales de la AEAT (XSD, WSDL y catálogo de errores, 2.316 líneas), los datos esperados del
 corpus de pruebas (JSON, 3.910), los PDF de prueba ni la documentación. Medido el 10/11/2026 con

@@ -350,8 +350,10 @@ def _marcar_sin_tinta(datos: bytes, paginas: list[Pagina], recortes: dict, capas
     reconocido debajo (degradado muestreado o calculado, malla, modo de fusión…): vuelven a ser seguras si en la imagen
     se ven claras sobre un fondo más oscuro (sin contar la tinta de las demás palabras).
     blancos: por página, los caracteres de texto en blanco junto a una cifra cuyo glifo puede dibujar algo (x0, top, x1,
-    bottom, seguro; None: demasiados). Si dibujan (tinta en la parte central de su caja, fuera de las palabras) o su
-    /ToUnicode ya contradice el glifo (seguro), las palabras contiguas del renglón son dudosas: falta una cifra que se ve."""
+    bottom, seguro[, sin_contornos]; None: demasiados). Si dibujan (tinta en la parte central de su caja, fuera de las
+    palabras) o su /ToUnicode ya contradice el glifo (seguro), las palabras contiguas del renglón son dudosas: falta una
+    cifra que se ve. Si el glifo del blanco no tiene contornos en la fuente incrustada (sin_contornos), la tinta de una
+    línea recta larga que cruza su caja no cuenta (_reglas_que_cruzan): es de un recuadro o de una tabla, no del blanco."""
     capas_en_imagen, sobre_papel, blancos = capas_en_imagen or {}, sobre_papel or {}, blancos or {}
     if not paginas:
         return []
@@ -453,12 +455,19 @@ def _blancos_que_dibujan(pg: Pagina, cajas: list | None, a, s: float, cx0: float
                 i0, i1 = max(0, int((x0 + 0.2 * an - cx0) * s)), min(a.shape[1], int((x1 - 0.2 * an - cx0) * s) + 1)
                 if y1 <= y0 or i1 <= i0 or caja[1] <= caja[0] or caja[3] <= caja[2]:
                     continue
-                z = a[y0:y1, i0:i1][~palabras[y0:y1, i0:i1]].astype(int)
+                libre = ~palabras[y0:y1, i0:i1]
+                z = a[y0:y1, i0:i1][libre].astype(int)
                 fondo = a[caja[0]:caja[1], caja[2]:caja[3]][~palabras[caja[0]:caja[1], caja[2]:caja[3]]]
                 if z.size < 4 or not fondo.size:
                     continue
-                tinta = int((np.abs(z - int(np.median(fondo))) >= 60).sum())
-                if tinta < max(3, 0.12 * z.size):
+                papel = int(np.median(fondo))
+                oscuro = np.abs(z - papel) >= 60
+                if len(c) > 5 and c[5]:
+                    # el glifo no dibuja nada: la tinta de una línea recta larga que cruza su caja es de otra cosa (borde de
+                    # un recuadro, separador de columnas); lo demás que haya encima sigue contando. Con un glifo que dibuja
+                    # algo no se quita: el palo de un «1» cruzado por una línea es tinta del glifo
+                    oscuro &= ~_reglas_que_cruzan(a, papel, (y0, y1, i0, i1), caja, h * s)[libre]
+                if int(oscuro.sum()) < max(3, 0.12 * z.size):
                     continue
             dibujan.append((x0, top, x1, bottom))
     for i, w in enumerate(pg.palabras):
@@ -468,6 +477,43 @@ def _blancos_que_dibujan(pg: Pagina, cajas: list | None, a, s: float, cx0: float
         if dibujan is None or any(min(w.bottom, b) - max(w.top, t) >= 0.5 * min(h, b - t) and w.x0 - h <= x1 and x0 <= w.x1 + h
                                   for x0, t, x1, b in dibujan):
             pg.palabras[i] = Palabra(w.texto, w.x0, w.top, w.x1, w.bottom, CONF_TEXTO_DUDOSO, w.metodo)
+
+
+def _reglas_que_cruzan(a, papel: int, zona: tuple, caja: tuple, h: float):
+    """Máscara de la zona (y0, y1, i0, i1) de la imagen en gris `a` con la tinta de una línea recta larga que cruza la caja
+    de un carácter (caja: filas y columnas en píxeles; h: alto del renglón en píxeles; papel: gris del fondo):
+    - una columna oscura en toda la altura de la zona cuyo tramo continuo mide 1,2 renglones o más (borde vertical de un
+      recuadro, aunque sea de un solo renglón; separador de columnas de una tabla);
+    - una fila oscura en todo el ancho de la zona que continúa sin cortes un renglón o más a izquierda y a derecha de la
+      caja (línea horizontal).
+    Una cifra del tamaño del texto no traza segmentos rectos tan largos (su altura es unos dos tercios del renglón): el
+    resto de la tinta de la zona sigue contando. Solo para blancos cuyo glifo no dibuja nada (ver _blancos_que_dibujan)."""
+    import numpy as np
+    y0, y1, i0, i1 = zona
+    alto, ancho = a.shape
+    m = np.zeros((y1 - y0, i1 - i0), dtype=bool)
+    largo = max(4, int(round(1.2 * h)))
+    ya, yb = max(0, y0 - largo), min(alto, y1 + largo)
+    osc = np.abs(a[ya:yb, i0:i1].astype(int) - papel) >= 60
+    for j in range(i1 - i0):
+        c = osc[:, j]
+        if not c[y0 - ya:y1 - ya].all():
+            continue
+        k, q = y0 - ya, y1 - ya
+        while k > 0 and c[k - 1]:
+            k -= 1
+        while q < len(c) and c[q]:
+            q += 1
+        if q - k >= largo:
+            m[:, j] = True
+    ext = max(2, int(round(h)))
+    xa, xb = max(0, caja[2] - ext), min(ancho, caja[3] + ext)
+    osc = np.abs(a[y0:y1, xa:xb].astype(int) - papel) >= 60
+    for r in range(y1 - y0):
+        f = osc[r]
+        if f.all():   # de un extremo a otro de la ventana, que deja un renglón a cada lado de la caja
+            m[r, :] = True
+    return m
 
 
 def _cifras_no_ascii(texto: str) -> bool:

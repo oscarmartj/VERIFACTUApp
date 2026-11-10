@@ -319,6 +319,21 @@ def _imp(v, moneda: bool = True) -> str:
         return ""
 
 
+def _cant(v) -> str:
+    """Cantidad para mostrar: con dos decimales, o con todos los que tenga si son más (hasta seis), para que cantidad ×
+    precio siga dando el importe impreso (p. ej. 1,258 millares a un precio por millar); vacía si no es un número."""
+    try:
+        d = Decimal(str(v))
+        n = -d.normalize().as_tuple().exponent
+    except (ArithmeticError, TypeError, ValueError):
+        return ""
+    if not d.is_finite() or n <= 2:
+        return _imp(v, moneda=False)
+    n = min(n, 6)
+    s = f"{abs(d.quantize(Decimal(1).scaleb(-n))):,.{n}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return ("-" if d < 0 else "") + s
+
+
 def _imp_negativo(v) -> str:
     try:
         return fmt_es(-Decimal(str(v)))
@@ -438,7 +453,7 @@ def reconstruir(datos: dict, *, modo: str, entorno: str | None, url_qr: str | No
                   _p("PRECIO", est["der_neg"]), _p("IMPORTE", est["der_neg"])]]
         for l in _filas(datos.get("lineas")):
             filas.append([_p(l.get("concepto"), est["base"]),
-                          _p(_imp(l.get("cantidad"), moneda=False), est["der"]),
+                          _p(_cant(l.get("cantidad")), est["der"]),
                           _p(l.get("unidad") or "", est["base"]),
                           _p(_imp(l.get("precio"), moneda=False), est["der"]),
                           _p(_imp(l.get("importe"), moneda=False), est["der"])])
