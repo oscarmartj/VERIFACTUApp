@@ -1,7 +1,10 @@
 FROM python:3.13-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
       poppler-utils tesseract-ocr tesseract-ocr-spa qpdf zbar-tools && rm -rf /var/lib/apt/lists/*
-RUN useradd --create-home --uid 10001 facturas
+RUN useradd --create-home --uid 10001 facturas \
+    && mkdir -p /datos /diario /secretos \
+    && chown facturas:facturas /datos /diario /secretos \
+    && chmod 700 /datos /diario /secretos
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

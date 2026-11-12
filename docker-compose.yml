@@ -10,7 +10,8 @@ services:
     volumes:
       - datos:/datos          # base de datos y almacén de documentos
       - diario:/diario        # diario de recuperación: en otro disco/volumen que /datos
-      - ./secretos:/secretos  # clave maestra (fuera de las copias de la base de datos)
+      - secretos:/secretos    # clave maestra (fuera de las copias de la base de datos)
 volumes:
   datos: {}
   diario: {}
+  secretos: {}

@@ -42,7 +42,11 @@ VERIFACTU_DATA_DIR=./data-demo uvicorn app.main:app --port 8000
 ```
 
 Abra `http://localhost:8000` (usuario de demostración `demo@ejemplo.test` / `demo-clave-segura`; datos sintéticos).
-Con Docker: `docker compose up --build` (ver `docker-compose.yml`).
+Con Docker: `docker compose up --build -d` y abra `http://localhost:8000` (la primera pantalla crea la cuenta del
+operador de la plataforma y su primera empresa; solo simulador local mientras no se activen los interruptores).
+Los datos, el diario y la clave maestra quedan en volúmenes separados (`datos`, `diario`, `secretos`); `docker compose
+down` la detiene sin borrarlos. La cookie de sesión es «Secure»: Chrome la acepta en `http://localhost`; en un servidor,
+ponga delante un proxy HTTPS (ver `docker-compose.yml`).
 
 ### Variables de entorno
 
