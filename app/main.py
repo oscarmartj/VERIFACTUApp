@@ -12,8 +12,10 @@ import glob
 import shutil
 import tempfile
 
-from . import copias, db, diario
+from . import copias, db, diario, errores, multiusuario
 from .api import router
+from .api_multiusuario import router as router_multiusuario
+from .api_certificados import router as router_certificados
 from .config import BASE_DIR, ajustes
 from .remision import Trabajador
 
@@ -29,6 +31,7 @@ def _purgar_claves_temporales() -> None:
 
 @asynccontextmanager
 async def ciclo_vida(app: FastAPI):
+    copias.proteger_ficheros()   # base de datos, copias y copias apartadas: solo para el usuario del servicio
     copias.comprobar_arranque()
     _purgar_claves_temporales()
     con = db.conectar()
@@ -36,6 +39,7 @@ async def ciclo_vida(app: FastAPI):
     copias.reconciliar_diario(con)
     if diario.LINEAS_INVALIDAS:
         db.actividad(con, "diario.lineas_invalidas", detalle={"lineas": diario.LINEAS_INVALIDAS[:50]})
+    multiusuario.avisar_nifs_no_ascii(con)   # NIF guardados con caracteres no ASCII (aceptados por versiones anteriores)
     con.close()
     app.state.trabajador = None
     if os.environ.get("VERIFACTU_TRABAJADOR", "1") == "1":
@@ -45,6 +49,7 @@ async def ciclo_vida(app: FastAPI):
     yield
     if app.state.trabajador:
         app.state.trabajador.parar()
+    errores.volcar(todos=True)   # errores internos contados, también los del minuto en curso
 
 
 class LimiteCuerpo:
@@ -113,17 +118,21 @@ def crear_app() -> FastAPI:
         # texto recibido que no puede guardarse (p. ej. un sustituto UTF-16 suelto): la transacción ya se ha deshecho
         return JSONResponse({"detail": "El texto enviado contiene caracteres no válidos."}, status_code=422)
 
+    @app.exception_handler(OverflowError)
+    async def error_numero(request: Request, exc: OverflowError):
+        # número recibido (p. ej. un identificador en la ruta) fuera del rango de enteros de SQLite: la transacción ya se
+        # ha deshecho
+        return JSONResponse({"detail": "Número fuera del rango admitido."}, status_code=422)
+
     @app.exception_handler(Exception)
     async def error_generico(request: Request, exc: Exception):
-        try:
-            c = db.conectar()
-            db.actividad(c, "error.interno", detalle={"ruta": request.url.path, "tipo": type(exc).__name__})
-            c.close()
-        except Exception:
-            pass
-        return JSONResponse({"detail": "Error interno. Consulte el registro de actividad."}, status_code=500)
+        # Una fila por ruta, tipo y minuto (con contador), también en la actividad de la empresa si quien pide es miembro;
+        # el mensaje solo remite a una actividad que esa persona puede ver (app/errores.py)
+        return JSONResponse({"detail": errores.anotar(request, exc)}, status_code=500)
 
     app.include_router(router)
+    app.include_router(router_multiusuario)
+    app.include_router(router_certificados)
     estaticos = BASE_DIR / "static"
     app.mount("/static", StaticFiles(directory=estaticos), name="static")
 

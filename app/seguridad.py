@@ -55,7 +55,7 @@ def crear_sesion(con, usuario_id: int) -> tuple[str, str]:
 def sesion_por_token(con, token: str | None) -> dict | None:
     if not token:
         return None
-    s = db.fila(con, """SELECT s.*, u.email, u.nombre, u.activo FROM sesiones s JOIN usuarios u ON u.id = s.usuario_id
+    s = db.fila(con, """SELECT s.*, u.email, u.nombre, u.activo, u.cambiar_clave FROM sesiones s JOIN usuarios u ON u.id = s.usuario_id
                         WHERE s.token_hash = ?""", (_hash_token(token),))
     if not s or not s["activo"]:
         return None

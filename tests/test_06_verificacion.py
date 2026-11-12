@@ -274,7 +274,9 @@ def test_privilegios_de_instalacion(app_cliente):
     from fastapi.testclient import TestClient
     lec = Cliente(TestClient(c.tc.app))
     lec.csrf = lec.ok(lec.post("/api/sesion", {"email": "lec@ejemplo.test", "clave": "clave-lector-123"}))["csrf"]
-    assert lec.post("/api/empresas", {"nif": "B00000257", "razon_social": "X", "domicilio": "y"}).status_code == 403
+    lec.ok(lec.put("/api/yo/clave", {"clave_actual": "clave-lector-123", "clave_nueva": "clave-lector-456"}))  # contraseña temporal
+    # Plataforma multiusuario: cualquier usuario da de alta sus propias empresas (sin acceso a las demás)
+    assert lec.post("/api/empresas", {"nif": "B00000257", "razon_social": "X", "domicilio": "y"}).status_code == 200
     assert lec.put("/api/productor", {"nombre": "X", "nif": "B00000257"}).status_code == 403
     assert lec.post("/api/simulador/modo", {"modo": "caido"}).status_code == 403
     assert c.ok(c.put("/api/productor", {"nombre": "Productor", "nif": "B82991316", "domicilio": "x"}))["nif"] == "B82991316"

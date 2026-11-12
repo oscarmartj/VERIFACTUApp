@@ -27,7 +27,7 @@ def importar(con, *, empresa: dict, usuario_id: int, nombre: str, datos: bytes) 
     previo = db.fila(con, "SELECT id, nombre_archivo, subido_en FROM documentos WHERE empresa_id=? AND sha256=?", (empresa["id"], sha))
     if previo:
         return {"nombre": nombre, "documento_id": previo["id"], "duplicado": True, "estado": "duplicado",
-                "duplicado_de": previo, "mensaje": f"Este archivo ya se importó el {previo['subido_en']} como «{previo['nombre_archivo']}»."}
+                "duplicado_de": previo, "mensaje": f"Este archivo ya se importó el {db.legible(previo['subido_en'])} como «{previo['nombre_archivo']}»."}
     # Todo el procesamiento se hace ANTES de guardar nada: un PDF rechazado o un fallo no deja ficheros huérfanos
     try:
         insp = inspeccion.inspeccionar(datos)
@@ -123,11 +123,12 @@ def _lecturas_serie(con, empresa_id: int, numero: str, patrones: list[str] | Non
 
 def _probar_serie(patron: str, numero) -> dict:
     """series.probar sin distinguir espacios ni mayúsculas («fra20260166» impreso es el «FRA{aaaa}{n}» de la serie): solo
-    para reconocer el mismo número, nunca para validar el que se expide."""
+    para reconocer el mismo número, nunca para validar el que se expide. El número se lee con cualquier ancho: con
+    «{n:3}/A{aa}», «042/A26», «42/A26» y «0042/A26» son el mismo número 42 de 2026."""
     texto = str(numero or "")
     r = {"coincide": False}
     for variante in dict.fromkeys([texto, re.sub(r"\s+", "", texto), texto.upper(), re.sub(r"\s+", "", texto).upper()]):
-        r = seriesmod.probar(patron, variante)
+        r = seriesmod.probar(patron, variante, estricto=False)
         if r["coincide"]:
             break
     return r

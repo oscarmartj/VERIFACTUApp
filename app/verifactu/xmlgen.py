@@ -45,7 +45,8 @@ class DatosAlta:
     fecha_expedicion: str           # dd-mm-aaaa
     tipo_factura: str               # F1, R1...
     descripcion_operacion: str
-    desglose: list[dict]            # impuesto, clave_regimen, calificacion, tipo_impositivo, base, cuota
+    desglose: list[dict]            # impuesto, clave_regimen, calificacion, tipo_impositivo, base, cuota (sujeta) o
+                                    # impuesto, clave_regimen, operacion_exenta, base (exenta)
     cuota_total: str
     importe_total: str
     fecha_hora_huso: str
@@ -144,6 +145,12 @@ def registro_alta(d: DatosAlta) -> etree._Element:
         dd = _e(des, "DetalleDesglose")
         _e(dd, "Impuesto", linea.get("impuesto", "01"))
         _e(dd, "ClaveRegimen", linea.get("clave_regimen", "01"))
+        if linea.get("operacion_exenta"):
+            # Operación exenta: OperacionExenta en lugar de CalificacionOperacion (choice del XSD) y solo la base; sin
+            # TipoImpositivo ni CuotaRepercutida ni recargo (validaciones AEAT 1195, 1196 y 1238)
+            _e(dd, "OperacionExenta", linea["operacion_exenta"])
+            _e(dd, "BaseImponibleOimporteNoSujeto", linea["base"])
+            continue
         _e(dd, "CalificacionOperacion", linea["calificacion"])
         _e(dd, "TipoImpositivo", linea["tipo_impositivo"])
         _e(dd, "BaseImponibleOimporteNoSujeto", linea["base"])
@@ -208,13 +215,24 @@ def mensaje_remision(cabecera: dict, registros_xml: list[str]) -> etree._Element
 
 
 def mensaje_consulta(*, nif: str, nombre: str, ejercicio: str, periodo: str,
-                     num_serie: str | None = None, fecha_expedicion: str | None = None) -> etree._Element:
+                     num_serie: str | None = None, fecha_expedicion: str | None = None,
+                     clave_paginacion: dict | None = None, representante: bool = False,
+                     mostrar_sistema: bool = False) -> etree._Element:
+    """ConsultaFactuSistemaFacturacion (ConsultaLR.xsd) por obligado tributario y periodo de imputación.
+
+    clave_paginacion: IDFactura del último registro de la página anterior ({id_emisor, num_serie, fecha_expedicion}),
+    cuando la respuesta trae IndicadorPaginacion=S. representante: IndicadorRepresentante=S, que según el XSD limita la
+    respuesta a «los registros de facturación en los que figura como representante» quien consulta (la aplicación solo lo
+    usa si la AEAT rechaza la consulta sin él). mostrar_sistema: DatosAdicionalesRespuesta/MostrarSistemaInformatico=S,
+    para que la respuesta traiga el bloque SistemaInformatico de cada registro (identifica la instalación)."""
     root = etree.Element(f"{{{NS_CON}}}ConsultaFactuSistemaFacturacion", nsmap={"con": NS_CON, "sum1": NS_SF})
     cab = _e(root, "Cabecera", ns=NS_CON)
     _e(cab, "IDVersion", ID_VERSION)
     ob = _e(cab, "ObligadoEmision")
     _e(ob, "NombreRazon", nombre)
     _e(ob, "NIF", nif)
+    if representante:
+        _e(cab, "IndicadorRepresentante", "S")
     filtro = _e(root, "FiltroConsulta", ns=NS_CON)
     per = _e(filtro, "PeriodoImputacion", ns=NS_CON)
     _e(per, "Ejercicio", ejercicio)
@@ -224,6 +242,14 @@ def mensaje_consulta(*, nif: str, nombre: str, ejercicio: str, periodo: str,
     if fecha_expedicion:
         fe = _e(filtro, "FechaExpedicionFactura", ns=NS_CON)
         _e(fe, "FechaExpedicionFactura", fecha_expedicion)
+    if clave_paginacion:
+        cp = _e(filtro, "ClavePaginacion", ns=NS_CON)
+        _e(cp, "IDEmisorFactura", clave_paginacion["id_emisor"])
+        _e(cp, "NumSerieFactura", clave_paginacion["num_serie"])
+        _e(cp, "FechaExpedicionFactura", clave_paginacion["fecha_expedicion"])
+    if mostrar_sistema:
+        da = _e(root, "DatosAdicionalesRespuesta", ns=NS_CON)
+        _e(da, "MostrarSistemaInformatico", "S", ns=NS_CON)
     return root
 
 

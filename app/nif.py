@@ -53,9 +53,15 @@ def candidatos(regex: re.Pattern, regex_simple: re.Pattern, texto: str):
 
 
 def normalizar(nif: str | None) -> str:
-    if not nif:
+    """Mayúsculas y sin separadores. Un NIF solo tiene caracteres ASCII: si quedan otros (cifras de ancho completo, de
+    otros alfabetos o matemáticas, letras que en mayúsculas se convierten en ASCII…), se devuelve sin convertir y no es
+    válido (nunca se «arregla» en silencio: «B８２…» no es el mismo obligado que «B82…» ni otro distinto)."""
+    if not nif or not isinstance(nif, str):
         return ""
-    n = re.sub(r"[\s.\-–—/]", "", nif.upper())
+    n = re.sub(r"[\s.\-–—/]", "", nif)
+    if not n.isascii():
+        return n
+    n = n.upper()
     if n.startswith("ES") and len(n) == 11:
         n = n[2:]
     return n
@@ -63,13 +69,13 @@ def normalizar(nif: str | None) -> str:
 
 def tipo(nif: str) -> str | None:
     n = normalizar(nif)
-    if re.fullmatch(r"\d{8}[A-Z]", n):
+    if re.fullmatch(r"[0-9]{8}[A-Z]", n):
         return "DNI"
-    if re.fullmatch(r"[XYZ]\d{7}[A-Z]", n):
+    if re.fullmatch(r"[XYZ][0-9]{7}[A-Z]", n):
         return "NIE"
-    if re.fullmatch(r"[KLM]\d{7}[A-Z]", n):
+    if re.fullmatch(r"[KLM][0-9]{7}[A-Z]", n):
         return "NIF_ESPECIAL"
-    if re.fullmatch(r"[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]", n):
+    if re.fullmatch(r"[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-J]", n):
         return "PERSONA_JURIDICA"
     return None
 

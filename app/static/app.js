@@ -132,6 +132,9 @@ const MODOS_SIMULADOR = [
   ['fault_servidor', 'Fallo del servicio (SOAP Server)', 'Responde con un SOAP Fault de servidor: se trata como sin respuesta y se reintenta.'],
   ['rechazo', 'Rechazo del envío completo', 'Rechaza la petición entera (p. ej. certificado no autorizado, 4112): los registros quedan bloqueados.'],
   ['rechazo_registro', 'Rechazo de registros', 'Rechaza cada registro con un error de validación (1100): permite probar la subsanación y la reanulación.'],
+  ['no_apoderado', 'Representante no apoderado', 'Rechaza (4112) los envíos que llevan Cabecera/Representante: simula que el titular del certificado no está apoderado ni es colaborador social.'],
+  ['representante_nif_no_censado', 'NIF del representante no censado', 'Rechaza (4123) los envíos que llevan Cabecera/Representante: simula que la AEAT no encuentra en su censo el NIF del titular del certificado.'],
+  ['representante_nombre_no_censado', 'Nombre del representante no censado', 'Rechaza (4124) los envíos que llevan Cabecera/Representante: simula que el nombre enviado no es el que la AEAT tiene en su censo para ese NIF.'],
 ];
 const REFERENCIAS = [
   ['obra', 'Obra'],
@@ -165,6 +168,7 @@ const INDICIOS = {
   recargo_equivalencia: 'Recargo de equivalencia', suplidos: 'Suplidos', descuento: 'Descuento',
   rectificativa: 'Rectificativa / abono', intracomunitaria: 'Operación intracomunitaria', criterio_caja: 'Criterio de caja',
   regimen_especial: 'Régimen especial', verifactu_existente: 'Marcas de VERI*FACTU ya presentes',
+  importes_ajenos: 'Tasas, fianzas, indemnizaciones o gastos repercutidos',
 };
 const NOTA_ACEPTACION = 'La aceptación del registro por la AEAT no supone una validación del tratamiento fiscal de la operación.';
 
@@ -266,18 +270,34 @@ function fmtFecha(v) {
   return fmtFechaHora(v);
 }
 
+/** Las fechas y horas se muestran en hora peninsular (la de la aplicación), sea cual sea la zona del navegador. */
+const ZONA_HORARIA = 'Europe/Madrid';
+
 function fmtFechaHora(v) {
   if (!v) return '—';
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return String(v);
-  return d.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
+  return d.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short', timeZone: ZONA_HORARIA });
+}
+
+/** Solo el día (dd/mm/aaaa) de una fecha o de una marca de tiempo, en hora peninsular. */
+function fmtDia(v) {
+  if (!v || /^\d{4}-\d{2}-\d{2}$/.test(String(v))) return fmtFecha(v);
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: ZONA_HORARIA });
 }
 
 const fmtPct = (c) => `${Math.round(Number(c) * 100)} %`;
 
 function hoyISO() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: ZONA_HORARIA }).format(new Date());
+}
+
+/** Año y mes de hoy en hora peninsular (no los del reloj del navegador, que puede estar en otra zona horaria). */
+function anioMesHoy() {
+  const [anio, mes] = hoyISO().split('-').map(Number);
+  return { anio, mes };
 }
 
 function textoValor(v) {
@@ -291,6 +311,57 @@ function humanizar(clave) {
   const s = String(clave).replace(/_/g, ' ');
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
+
+/** Nombres de las comprobaciones del PDF definitivo (pdf_final.verificar) en «Verificación de integridad». */
+const ETIQUETAS_VERIFICACION = {
+  num_serie: 'Número de factura', importe_total: 'Importe total', nif_emisor: 'NIF del emisor',
+  nif_destinatario: 'NIF del destinatario', fecha_expedicion: 'Fecha de expedición', leyenda_qr: 'Leyenda del QR',
+  mencion_exencion: 'Mención de la exención', lectura_qr: 'Lectura del QR', qr_primera_pagina: 'QR en la primera página',
+  qr_una_sola_vez: 'QR una sola vez', sin_qr: 'Sin código QR',
+};
+
+/** Nombres de los datos del detalle del registro de actividad (empresa y plataforma). */
+const ETIQUETAS_DETALLE = {
+  email: 'Correo', rol: 'Rol', dias: 'Días', usuario: 'Usuario', invitacion: 'Invitación', propia: 'Por decisión propia',
+  entorno: 'Entorno', motivo: 'Motivo', clave: 'Ajuste', valor: 'Valor', nif: 'NIF', nombre: 'Nombre', tipo: 'Tipo',
+  titular_nif: 'NIF del titular', titular_nombre: 'Nombre del titular', representante_nif: 'NIF del representante',
+  representado_nif: 'NIF representado', valido_hasta: 'Válido hasta', asignacion_id: 'Asignación',
+  asignaciones_retiradas: 'Asignaciones retiradas', propietario_id: 'Propietario', propio: 'Certificado propio',
+  operacion: 'Operación', envio_id: 'Envío', tls: 'Conexión TLS', num_serie: 'Número de factura', registro_id: 'Registro',
+  factura: 'Factura', factura_id: 'Factura', relacion: 'Relación', clasificacion: 'Clasificación',
+  clasificacion_sugerida: 'Clasificación propuesta', paginas: 'Páginas', ocr: 'OCR', sha256: 'Huella SHA-256',
+  claves: 'Confirmaciones', corrige: 'Corrige el registro', afectados: 'Registros afectados',
+  siguiente_intento_en: 'Siguiente intento', error: 'Error', ruta: 'Ruta', evidencia: 'Evidencia',
+  estado_aeat: 'Estado en la AEAT', estado_anterior: 'Estado anterior', estado_nuevo: 'Estado nuevo', huella: 'Huella',
+  id_peticion: 'Petición', ejercicio: 'Ejercicio', periodo: 'Periodo', resumen: 'Resumen', metodo: 'Método',
+  anio: 'Año', anterior: 'Contador anterior', siguiente: 'Siguiente número', saltados: 'Números saltados',
+  codigo: 'Código', patron: 'Patrón', cuenta: 'Cuenta', por: 'Por', pdf: 'PDF', verificacion_pdf: 'Verificación del PDF',
+  modo: 'Modo', veces: 'Veces', servicio: 'Servicio', razon_social: 'Razón social', domicilio: 'Domicilio',
+  tipo_contribuyente: 'Tipo de contribuyente', territorio: 'Territorio', sii: 'SII',
+  canarias_ceuta_melilla: 'Canarias, Ceuta o Melilla', otras_exclusiones: 'Otras exclusiones',
+  origen_pdf: 'Origen de los PDF', origen_pdf_detalle: 'Detalle del origen', puede_emitir: 'Puede emitir',
+  motivos: 'Motivos', siguiente_numero: 'Siguiente número', facturas: 'Facturas', registros: 'Registros',
+  estados: 'Estados', contadores_avanzados: 'Contadores avanzados', filas_contexto: 'Filas de contexto',
+  anotacion: 'Anotación', id: 'Identificador', lineas: 'Líneas',
+  ultimo_registro_aeat: 'Último registro en la AEAT', registros_posteriores: 'Registros posteriores',
+  cabeza_local: 'Último registro local', ancla: 'Encadenado a', fecha_expedicion: 'Fecha de expedición',
+  fecha_hora_huso: 'Fecha, hora y huso', verificado: 'Verificado', filas: 'Filas', aviso: 'Aviso',
+  cadenas_aeat: 'Estados de la cadena recuperados', copia: 'Copia', empresas_pendientes: 'Empresas pendientes de consultar',
+};
+
+/** Por qué puede usarse un certificado en la empresa: propio (de la empresa, de su representante o del titular) o de un tercero legitimado. */
+const METODO_LEGITIMACION_TEXTO = {
+  apoderamiento_aeat: 'Apoderamiento en la AEAT', colaborador_social: 'Colaboración social',
+  certificado_empresa: 'Certificado de la empresa', representante_pj: 'Certificado de representante de la empresa',
+  titular: 'Titular del certificado (el obligado tributario)',
+};
+
+/** Tipos de objeto del registro de actividad. */
+const OBJETOS_ACTIVIDAD = {
+  factura: 'Factura', borrador: 'Borrador', documento: 'Documento', invitacion: 'Invitación', certificado: 'Certificado',
+  certificado_usuario: 'Certificado de «Mis certificados»', legitimacion: 'Legitimación', usuario: 'Usuario',
+  registro: 'Registro', serie: 'Serie',
+};
 
 /** Abrevia una huella: primeros 10 y últimos 6 caracteres. */
 function abreviar(t, ini = 10, fin = 6) {
@@ -407,8 +478,66 @@ async function api(ruta, { metodo = 'GET', json, form, sinRedireccion = false } 
     sesionPerdida();
     throw new ApiError(401, 'La sesión ha caducado. Inicie sesión de nuevo.', datos);
   }
-  if (!r.ok) throw new ApiError(r.status, mensajeDeError(datos, r.status), datos);
+  if (!r.ok) {
+    const err = new ApiError(r.status, mensajeDeError(datos, r.status), datos);
+    // Un 404 de la empresa elegida puede deberse a que otro administrador le ha quitado el acceso
+    if (r.status === 404 && app.empresaId && new RegExp(`^/empresas/${enc(app.empresaId)}(?:[/?]|$)`).test(ruta)) {
+      err.accesoComprobado = true;
+      err.sinAcceso = await comprobarAccesoEmpresa();
+    }
+    throw err;
+  }
   return datos;
+}
+
+let comprobacionAcceso = null;
+
+/**
+ * Vuelve a leer la sesión (GET /api/yo) cuando la empresa elegida responde 404. Si ya no es miembro, aplica la sesión,
+ * lo avisa y lleva a la pantalla de inicio (sin dejar un «Reintentar» que siempre falla). Devuelve true en ese caso.
+ */
+function comprobarAccesoEmpresa() {
+  if (!comprobacionAcceso) {
+    comprobacionAcceso = (async () => {
+      if (!app.usuario || !app.empresaId) return false;
+      let yo;
+      try { yo = await api('/yo'); } catch { return false; }
+      if (!sincronizarEmpresas(yo)) return false;
+      // En una pantalla de la empresa, al inicio; en una que no depende de ella (Mi cuenta, Mis certificados…), se repinta
+      const { ruta } = analizarHash();
+      const def = RUTAS.find(([re]) => re.test(ruta));
+      if (def && def[2] && (def[2].sinEmpresa || def[2].publica)) enrutar({ forzar: true });
+      else irA(rutaInicioMU());
+      return true;
+    })().finally(() => { comprobacionAcceso = null; });
+  }
+  return comprobacionAcceso;
+}
+
+/**
+ * Aplica la lista de empresas de GET /api/yo. Si la empresa elegida ya no está (le han quitado el acceso o ha salido
+ * desde otra ventana), vuelve a aplicar la sesión y lo avisa: devuelve true. Si no tenía ninguna elegida y ahora tiene
+ * alguna (p. ej. aceptó una invitación en otra ventana), la elige como al entrar y lo avisa. Si no, solo actualiza la
+ * lista y los roles.
+ */
+function sincronizarEmpresas(yo) {
+  const lista = comoLista(yo && yo.empresas);
+  if (app.empresaId && !lista.some((e) => String(e.id) === String(app.empresaId))) {
+    const antes = empresaActual();
+    guardiaSalida = null;
+    aplicarSesion(yo);
+    notificar(`Ya no tiene acceso a esa empresa${antes && antes.razon_social ? ` (${antes.razon_social})` : ''}.`, 'warn');
+    return true;
+  }
+  if (!app.empresaId && lista.length) {
+    aplicarSesion(yo);
+    const nueva = empresaActual();
+    notificar(`Ya tiene acceso a ${nueva ? nueva.razon_social : 'una empresa'}: la tiene elegida arriba, en «Empresa».`, 'info');
+    return false;
+  }
+  app.empresas = lista;
+  construirCabecera();
+  return false;
 }
 
 /** Privilegio de instalación (productor, alta de empresas, simulador): no basta con administrar una empresa. */
@@ -617,13 +746,15 @@ function confirmar({ titulo: t, texto, textoBoton = 'Confirmar', peligro = false
   return new Promise((resolver) => {
     let resultado = false;
     const ok = boton(textoBoton, () => { resultado = true; dlg.close(); }, { tipo: peligro ? 'peligro' : 'primario' });
+    const cancelar = boton('Cancelar', () => dlg.close());
     const dlg = dialogo({
       titulo: t,
       contenido: [texto ? h('p', null, texto) : null, contenido],
-      acciones: [boton('Cancelar', () => dlg.close()), ok],
+      acciones: [cancelar, ok],
       alCerrar: () => resolver(resultado),
     });
-    ok.focus();
+    // En una acción irreversible el foco empieza en «Cancelar»: un Intro de más (o una tecla mantenida) no la ejecuta
+    (peligro ? cancelar : ok).focus();
   });
 }
 
@@ -667,7 +798,9 @@ const NAVEGACION = [
   ['/importar', 'Documentos'],
   ['/facturas', 'Facturas'],
   ['/remision', 'Remisión'],
+  ['/consulta-aeat', 'Consulta AEAT'],
   ['/configuracion', 'Configuración'],
+  ['/mis-certificados', 'Mis certificados'],
   ['/actividad', 'Actividad'],
   ['/declaracion', 'Declaración responsable'],
 ];
@@ -676,7 +809,7 @@ function construirCabecera() {
   const cab = document.getElementById('cabecera');
   vaciar(cab);
   document.body.dataset.entorno = app.usuario ? app.entorno : '';
-  if (!app.usuario) { cab.hidden = true; return; }
+  if (!app.usuario || app.usuario.cambiar_clave) { cab.hidden = true; return; }
   cab.hidden = false;
   const habilitados = entornosHabilitados();
   const selEmpresa = h('select', { id: 'sel-empresa', onchange: (e) => cambiarEmpresa(e.target.value, e.target) },
@@ -694,6 +827,7 @@ function construirCabecera() {
       h('div', { class: 'badge-contenedor', 'aria-live': 'polite' }, badgeEntorno(app.entorno, true))),
     h('div', { class: 'barra-usuario' },
       h('span', { class: 'usuario-nombre', title: app.usuario.email }, app.usuario.nombre || app.usuario.email),
+      enlacesCuentaMU(),
       boton('Cerrar sesión', cerrarSesion, { tipo: 'enlace', pequeno: true })));
   const nav = h('nav', { class: 'nav-principal', 'aria-label': 'Secciones' },
     h('ul', null, NAVEGACION.map(([ruta, texto]) => h('li', null, h('a', { href: `#${ruta}`, dataset: { ruta } }, texto)))));
@@ -722,7 +856,7 @@ function pintarAvisos() {
 }
 
 async function refrescarAvisos(forzar = false) {
-  if (!app.usuario || !app.empresaId) { app.avisos = []; pintarAvisos(); return; }
+  if (!app.usuario || !app.empresaId || app.usuario.cambiar_clave) { app.avisos = []; pintarAvisos(); return; }
   if (!forzar && Date.now() - app.avisosEn < 30000) return;
   app.avisosEn = Date.now();
   const eid = app.empresaId;
@@ -864,6 +998,11 @@ function fijarQuery(params) {
 const RUTAS = [
   [/^\/instalar$/, paginaInstalar, { publica: true }],
   [/^\/login$/, paginaLogin, { publica: true }],
+  [/^\/registro$/, paginaRegistro, { publica: true }],
+  [/^\/cambiar-clave$/, paginaCambiarClave, { publica: true }],
+  [/^\/cuenta$/, paginaCuenta, { sinEmpresa: true }],
+  [/^\/empresa-nueva$/, paginaEmpresaNueva, { sinEmpresa: true }],
+  [/^\/plataforma$/, paginaPlataforma, { sinEmpresa: true }],
   [/^\/configuracion(?:\/([a-z_]+))?$/, paginaConfiguracion],
   [/^\/importar$/, paginaImportar],
   [/^\/documento\/(\d+)$/, paginaDocumento],
@@ -871,7 +1010,9 @@ const RUTAS = [
   [/^\/facturas$/, paginaFacturas],
   [/^\/factura\/(\d+)$/, paginaFactura],
   [/^\/remision$/, paginaRemision],
+  [/^\/consulta-aeat$/, paginaConsultaAeat],
   [/^\/actividad$/, paginaActividad],
+  [/^\/mis-certificados$/, paginaMisCertificados, { sinEmpresa: true }],
   [/^\/declaracion$/, paginaDeclaracion],
 ];
 
@@ -893,13 +1034,15 @@ async function enrutar({ forzar = false } = {}) {
   if (!app.estado.instalada) {
     if (ruta !== '/instalar') { irA('/instalar'); return; }
   } else if (!app.usuario) {
-    if (ruta !== '/login') { app.volverA = ruta === '/' ? null : ruta; irA('/login'); return; }
-  } else if (ruta === '/' || ruta === '/login' || ruta === '/instalar') {
-    irA('/importar');
+    if (ruta !== '/login' && ruta !== '/registro') { app.volverA = ruta === '/' ? null : ruta; irA('/login'); return; }
+  } else if (app.usuario.cambiar_clave) {
+    if (ruta !== '/cambiar-clave') { irA('/cambiar-clave'); return; }
+  } else if (ruta === '/' || ruta === '/login' || ruta === '/instalar' || ruta === '/cambiar-clave') {
+    irA(rutaInicioMU());
     return;
   }
   const main = document.getElementById('contenido');
-  document.body.classList.toggle('vista-publica', ruta === '/login' || ruta === '/instalar');
+  document.body.classList.toggle('vista-publica', ['/login', '/instalar', '/registro', '/cambiar-clave'].includes(ruta));
   marcarNavegacion();
   vaciar(main);
   window.scrollTo(0, 0);
@@ -917,10 +1060,18 @@ async function enrutar({ forzar = false } = {}) {
     vigente: () => token === tokenNavegacion,
     alSalir: (f) => limpiezas.push(f),
   };
-  if (!(opciones && opciones.publica) && !app.empresaId) {
+  if (!(opciones && (opciones.publica || opciones.sinEmpresa)) && !app.empresaId) {
+    // ¿Le han dado acceso a una empresa desde otra ventana (invitación aceptada, alta)? Se relee la sesión antes de decir que no tiene
+    try {
+      const yo = await api('/yo');
+      if (token !== tokenNavegacion) return;
+      sincronizarEmpresas(yo);
+    } catch { /* sin conexión: se muestra la vista sin empresa */ }
+    if (token !== tokenNavegacion) return;
+  }
+  if (!(opciones && (opciones.publica || opciones.sinEmpresa)) && !app.empresaId) {
     titulo('Sin empresa');
-    main.append(cabeceraPagina('Sin empresa asignada'),
-      alerta('warn', 'Su usuario no tiene ninguna empresa asignada. Pida a un administrador que le dé acceso.'));
+    anadir(main, vistaSinEmpresaMU());
     return;
   }
   main.append(cargando());
@@ -930,6 +1081,11 @@ async function enrutar({ forzar = false } = {}) {
     await fn(ctx);
   } catch (err) {
     if (!ctx.vigente() || (err instanceof ApiError && err.estado === 401)) return;
+    if (err instanceof ApiError && err.estado === 404 && !(opciones && (opciones.publica || opciones.sinEmpresa))) {
+      // ¿Sigue siendo miembro de la empresa? (p. ej. /documentos/… de una empresa de la que le han quitado)
+      if (err.sinAcceso || (!err.accesoComprobado && await comprobarAccesoEmpresa())) return;
+      if (!ctx.vigente()) return;
+    }
     vaciar(main);
     main.append(cajaError(err, () => enrutar({ forzar: true })));
   }
@@ -962,6 +1118,7 @@ async function paginaInstalar(ctx) {
   const nif = entrada({ required: true, maxlength: 20, autocomplete: 'off', spellcheck: 'false', class: 'mayus' });
   const razon = entrada({ required: true, maxlength: 120, autocomplete: 'organization' });
   const domicilio = h('textarea', { required: true, rows: 2, maxlength: 300 });
+  const registroMU = campoRegistroAbiertoMU();
   const error = h('div', { 'aria-live': 'assertive' });
   const enviar = h('button', { type: 'submit', class: 'btn btn-primario' }, 'Instalar y entrar');
   const form = h('form', { class: 'form', novalidate: false },
@@ -974,6 +1131,7 @@ async function paginaInstalar(ctx) {
       campo('NIF', nif),
       campo('Razón social', razon),
       campo('Domicilio fiscal', domicilio)),
+    registroMU.nodo,
     error,
     h('div', { class: 'acciones' }, enviar));
   form.addEventListener('submit', async (e) => {
@@ -986,7 +1144,7 @@ async function paginaInstalar(ctx) {
         const r = await api('/instalar', {
           metodo: 'POST', sinRedireccion: true,
           json: {
-            email: email.value.trim(), nombre: nombre.value.trim(), clave: clave.value,
+            email: email.value.trim(), nombre: nombre.value.trim(), clave: clave.value, registro_abierto: registroMU.valor(),
             empresa: { nif: nif.value.trim().toUpperCase(), razon_social: razon.value.trim(), domicilio: domicilio.value.trim() },
           },
         });
@@ -1026,7 +1184,7 @@ async function paginaLogin(ctx) {
         aplicarSesion(r);
         const destino = app.volverA;
         app.volverA = null;
-        irA(destino && destino !== '/login' ? destino : '/importar');
+        irA(destino && destino !== '/login' ? destino : rutaInicioMU());
       } catch (err) {
         clave.value = '';
         error.append(alerta('danger', err.estado === 401 ? 'Correo o contraseña incorrectos.' : err.message));
@@ -1034,7 +1192,7 @@ async function paginaLogin(ctx) {
       }
     }, 'Entrando…');
   });
-  montar(ctx, marcoPublico(h('h1', null, 'Iniciar sesión'), form));
+  montar(ctx, marcoPublico(h('h1', null, 'Iniciar sesión'), form, pieLoginMU()));
   email.focus();
 }
 
@@ -1088,13 +1246,17 @@ async function paginaConfiguracion(ctx) {
     ambito: emp.ambito_confirmado_en ? (amb.puede_emitir ? 'ok' : 'error') : 'pendiente',
     autorizacion: emp.declaracion_autorizacion_en ? 'ok' : 'pendiente',
     series: series && series.some((s) => s.entorno === app.entorno && s.confirmada_en) ? 'ok' : 'pendiente',
-    certificados: app.entorno === 'simulador' ? 'na' : (certs && certs.some((c) => c.entorno === app.entorno) ? 'ok' : 'pendiente'),
-    productor: emp.productor && emp.productor.nif && emp.productor.confirmado_en ? 'ok' : 'pendiente',
+    certificados: app.entorno === 'simulador' ? 'na' : (certs && certs.some((c) => c.entorno === app.entorno && c.en_uso) ? 'ok' : 'pendiente'),
+    // El productor lo identifica el operador de la plataforma: no es una tarea pendiente de la empresa
+    productor: emp.productor && emp.productor.nif && emp.productor.confirmado_en ? 'ok' : (esSuperadmin() ? 'pendiente' : 'operador'),
     produccion: prod && prod.habilitada ? 'ok' : 'pendiente',
     usuarios: 'opcional',
   };
-  const textoEstado = { ok: 'completado', pendiente: 'pendiente', error: 'no soportado', na: 'no necesario en el simulador', opcional: 'opcional' };
-  const icono = { ok: '✓', pendiente: '○', error: '✗', na: '–', opcional: '+' };
+  const textoEstado = {
+    ok: 'completado', pendiente: 'pendiente', error: 'no soportado', na: 'no necesario en el simulador', opcional: 'opcional',
+    operador: 'lo completa el operador de la plataforma',
+  };
+  const icono = { ok: '✓', pendiente: '○', error: '✗', na: '–', opcional: '+', operador: '–' };
   const pasos = h('nav', { class: 'stepper', 'aria-label': 'Pasos de la configuración' },
     h('ol', null, PASOS_CONFIG.map(([k, t], i) => h('li', { class: `paso paso-${estadoPaso[k]}` },
       h('a', { href: `#/configuracion/${k}`, 'aria-current': k === paso ? 'step' : null },
@@ -1111,7 +1273,7 @@ async function paginaConfiguracion(ctx) {
     case 'series': contenido = pasoSeries(series, rSeries.reason, recargar); break;
     case 'certificados': contenido = pasoCertificados(certs, rCerts.reason, recargar); break;
     case 'productor': contenido = pasoProductor(emp, recargar); break;
-    case 'usuarios': contenido = pasoUsuarios(emp); break;
+    case 'usuarios': contenido = pasoUsuariosMU(emp, recargar); break;
     default: contenido = pasoProduccion(prod, rProd.reason, emp, recargar);
   }
   const idx = PASOS_CONFIG.findIndex(([k]) => k === paso);
@@ -1168,7 +1330,7 @@ function pasoAmbito(emp, amb, recargar) {
       { ayuda: 'Las empresas acogidas al SII están excluidas de VERI*FACTU.' }),
     grupoRadios('canarias_ceuta_melilla', '¿Realiza operaciones en Canarias, Ceuta o Melilla (IGIC / IPSI)?', siNo, String(Number(emp.canarias_ceuta_melilla || 0))),
     campo('Otras exclusiones o particularidades (opcional)', otras,
-      { ayuda: 'Por ejemplo: regímenes especiales, operaciones exentas habituales, inversión del sujeto pasivo… Déjelo vacío si no hay ninguna.' }),
+      { ayuda: 'Por ejemplo: regímenes especiales, inversión del sujeto pasivo, operaciones no sujetas… (las operaciones exentas E1–E4 y E6 sí están soportadas: se indican en el desglose de cada factura). Déjelo vacío si no hay ninguna.' }),
     grupoRadios('origen_pdf', '¿Cómo se generan los PDF que va a importar?', ORIGENES_PDF, emp.origen_pdf,
       { ayuda: 'Si proceden de un programa de facturación, ese programa podría ser por sí mismo un sistema de facturación sujeto al reglamento.' }),
     campo('Detalle del origen (programa, plantilla…)', detalle),
@@ -1229,8 +1391,8 @@ function pasoAmbito(emp, amb, recargar) {
   const casos = Array.isArray(emp.casos_soportados) ? emp.casos_soportados : [];
   const tarjetaCasos = casos.length ? tarjeta('Casos que la aplicación puede expedir',
     h('ul', { class: 'lista-motivos' }, casos.map((c) => h('li', null, String(c)))),
-    h('p', { class: 'ayuda' }, 'Cualquier otro supuesto (exenciones, inversión del sujeto pasivo, recargo de equivalencia, suplidos, regímenes especiales, '
-      + 'operaciones intracomunitarias…) se bloquea al revisar el borrador.')) : null;
+    h('p', { class: 'ayuda' }, 'Cualquier otro supuesto (operaciones no sujetas, inversión del sujeto pasivo, recargo de equivalencia, suplidos, '
+      + 'regímenes especiales, entregas intracomunitarias exentas —E5—…) se bloquea al revisar el borrador.')) : null;
   return [tarjeta('Preguntas sobre el ámbito del emisor', form), resultado, tarjetaCasos];
 }
 
@@ -1265,8 +1427,7 @@ function pasoAutorizacion(emp) {
 }
 
 function ejemploPatron(patron, numero) {
-  const anio = String(new Date().getFullYear());
-  return String(patron || '').replace(/\{n\}/g, String(numero || 1)).replace(/\{aaaa\}/g, anio).replace(/\{aa\}/g, anio.slice(2));
+  return formatearPatron(patron, numero || 1, anioMesHoy().anio);
 }
 
 function pasoSeries(series, error, recargar) {
@@ -1278,17 +1439,35 @@ function pasoSeries(series, error, recargar) {
       { titulo: 'Patrón', celda: (s) => h('code', null, s.patron) },
       { titulo: 'Descripción', celda: (s) => s.descripcion || '—' },
       { titulo: 'Tipo', celda: (s) => (s.tipo === 'rectificativa' ? 'Rectificativa' : 'Ordinaria') },
-      { titulo: 'Siguiente nº', clase: 'num', celda: (s) => s.siguiente_numero },
+      {
+        // El siguiente número real: el contador del año en curso (o el único de una serie sin año), escrito con el patrón
+        titulo: 'Siguiente nº',
+        celda: (s) => h('code', { title: s.con_anio ? `Contador de ${s.anio_actual}` : 'Contador único de la serie' },
+          s.siguiente_texto || formatearPatron(s.patron, s.siguiente_actual || s.siguiente_numero, s.anio_actual || anioMesHoy().anio)),
+      },
+      {
+        // El número guardado al crear la serie solo es el inicial: el del año de confirmación (series con año) o el
+        // primero de una serie sin año
+        titulo: 'Número inicial',
+        celda: (s) => (s.con_anio && Number(s.siguiente_numero) !== 1
+          ? h('span', { class: 'ayuda' }, 'Primer número de cada año: ', h('code', null, String(s.siguiente_numero)),
+            s.anio_confirmacion ? ` en ${s.anio_confirmacion} (año de confirmación); 1 en los demás` : ' (año de confirmación); 1 en los demás')
+          : (s.con_anio ? h('span', { class: 'ayuda' }, 'Primer número de cada año: ', h('code', null, '1'))
+            : h('code', null, String(s.siguiente_numero)))),
+      },
       {
         titulo: 'Contadores por año',
         celda: (s) => (Array.isArray(s.contadores) && s.contadores.length
-          ? s.contadores.map((c) => h('span', { class: 'bloque mono' }, `${c.anio}: siguiente ${c.siguiente}`))
+          ? s.contadores.map((c) => h('span', { class: 'bloque' }, `${c.anio ? c.anio : 'Único'}: siguiente `,
+            h('code', null, c.siguiente_texto || formatearPatron(s.patron, c.siguiente, c.anio || anioMesHoy().anio))))
           : h('span', { class: 'muted' }, '—')),
       },
       {
         titulo: 'Estado',
         celda: (s) => (s.confirmada_en
-          ? [pill('Confirmada', 'ok'), h('span', { class: 'muted bloque' }, fmtFechaHora(s.confirmada_en))]
+          ? [pill('Confirmada', 'ok'), h('span', { class: 'muted bloque' }, fmtFechaHora(s.confirmada_en)),
+            dis ? null : boton('Avanzar contador…', () => dialogoAvanceContador(s, {}, recargar),
+              { pequeno: true, title: 'Saltar números ya usados fuera de esta instalación (p. ej. tras un desastre)' })]
           : [pill('Sin confirmar', 'warn'), ' ', boton('Confirmar', (ev) => confirmarSerie(s, ev.currentTarget), { pequeno: true, disabled: dis })]),
       },
     ], series || [], { vacio: 'No hay series creadas.', leyenda: 'Series de numeración' });
@@ -1317,10 +1496,11 @@ function pasoSeries(series, error, recargar) {
   // Alta de serie
   const entorno = selector(Object.keys(ENTORNOS).map((k) => [k, ENTORNOS[k].corto]), app.entorno, { disabled: dis });
   const codigo = entrada({ required: true, maxlength: 20, placeholder: 'p. ej. 26', disabled: dis });
-  const patron = entrada({ required: true, maxlength: 60, value: '{n}/{aa}', class: 'mono', disabled: dis });
+  const propuesta = parametrosAltaSerie();
+  const patron = entrada({ required: true, maxlength: 60, value: propuesta.patron || '{n}/{aa}', class: 'mono', disabled: dis });
   const descripcion = entrada({ maxlength: 120, disabled: dis });
   const tipo = selector([['ordinaria', 'Ordinaria'], ['rectificativa', 'Rectificativa']], 'ordinaria', { disabled: dis });
-  const siguiente = entrada({ type: 'number', min: 1, step: 1, value: '1', required: true, disabled: dis });
+  const siguiente = entrada({ type: 'number', min: 1, step: 1, value: propuesta.siguiente || '1', required: true, disabled: dis });
   const ejemplo = h('p', { class: 'ayuda', 'aria-live': 'polite' });
   const actualizarEjemplo = () => { ejemplo.textContent = `Ejemplo del siguiente número: ${ejemploPatron(patron.value, siguiente.value)}`; };
   patron.addEventListener('input', () => { actualizarEjemplo(); patronPrueba.value = patron.value; });
@@ -1329,13 +1509,13 @@ function pasoSeries(series, error, recargar) {
   const crear = h('button', { type: 'submit', class: 'btn btn-primario', disabled: dis }, 'Crear serie');
   const formAlta = h('form', { class: 'form' },
     h('div', { class: 'fila-campos' }, campo('Entorno', entorno), campo('Código interno', codigo), campo('Tipo', tipo)),
-    campo('Patrón del número', patron, { ayuda: '{n} = número correlativo; {aa} = año con 2 cifras; {aaaa} = año con 4 cifras. Ejemplos: {n}/{aa} → 166/26; PRB-{n} → PRB-1.' }),
+    campo('Patrón del número', patron, { ayuda: AYUDA_PATRON }),
     ejemplo,
     h('div', { class: 'fila-campos' }, campo('Descripción (opcional)', descripcion), campo('Siguiente número', siguiente)),
     h('div', { class: 'acciones' }, crear));
   formAlta.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (!/\{n\}/.test(patron.value)) { notificar('El patrón debe contener {n}.', 'danger'); patron.focus(); return; }
+    if (!patronValido(patron.value)) { notificar('El patrón debe contener {n} (o {n:3} con ceros de relleno) una sola vez.', 'danger'); patron.focus(); return; }
     await conEspera(crear, async () => {
       try {
         await api(`/empresas/${enc(app.empresaId)}/series`, {
@@ -1351,9 +1531,12 @@ function pasoSeries(series, error, recargar) {
     }, 'Creando…');
   });
 
-  // Prueba de un número con un patrón
-  const patronPrueba = entrada({ required: true, value: '{n}/{aa}', class: 'mono' });
-  const numPrueba = entrada({ required: true, placeholder: 'p. ej. 166/26', class: 'mono' });
+  // Prueba de un número con un patrón (con el patrón propuesto desde un borrador, se rellena con ese número)
+  const patronPrueba = entrada({ required: true, value: propuesta.patron || '{n}/{aa}', class: 'mono' });
+  const numPrueba = entrada({
+    required: true, placeholder: 'p. ej. 166/26', class: 'mono',
+    value: propuesta.patron ? formatearPatron(propuesta.patron, Number(propuesta.siguiente) || 1, Number(propuesta.anio) || anioMesHoy().anio) : '',
+  });
   const resultadoPrueba = h('div', { 'aria-live': 'polite' });
   const probar = h('button', { type: 'submit', class: 'btn btn-secundario' }, 'Probar');
   const formPrueba = h('form', { class: 'form' },
@@ -1387,7 +1570,7 @@ function resumenLegitimacion(leg) {
   return h('div', { class: 'legitimacion' },
     'ok' in l ? (l.ok ? pill('Legitimación comprobada', 'ok') : pill('Legitimación no acreditada', 'danger')) : null,
     'vigente' in l ? [' ', l.vigente ? pill('Vigente', 'ok') : pill('No vigente', 'danger')] : null,
-    l.metodo ? h('span', { class: 'muted bloque' }, `Método: ${humanizar(l.metodo)}`) : null,
+    l.metodo ? h('span', { class: 'muted bloque' }, `Método: ${METODO_LEGITIMACION_TEXTO[l.metodo] || humanizar(l.metodo)}`) : null,
     l.detalle ? h('span', { class: 'bloque' }, l.detalle) : null);
 }
 
@@ -1396,6 +1579,7 @@ function pasoCertificados(certs, error, recargar) {
   const listado = error ? cajaError(error)
     : tabla([
       { titulo: 'Entorno', celda: (c) => badgeEntorno(c.entorno) },
+      { titulo: 'Origen', celda: origenCertC },
       { titulo: 'Sujeto', celda: (c) => h('span', { class: 'valor-largo' }, c.sujeto || '—') },
       { titulo: 'Titular', celda: (c) => h('span', { class: 'mono' }, c.titular_nif || '—') },
       { titulo: 'Representado', celda: (c) => h('span', { class: 'mono' }, c.representado_nif || '—') },
@@ -1441,54 +1625,15 @@ function pasoCertificados(certs, error, recargar) {
       } catch (err) { resultado.append(alerta('danger', err.message)); }
     }, 'Cargando…');
   });
-  const tarjetaLeg = tarjetaLegitimacion();
   return [
+    tarjetaCertificadoEnUsoC(certs, recargar),
     tarjeta('Certificados electrónicos',
       h('p', null, 'Para remitir registros a la AEAT (pruebas o producción) se necesita un certificado de la empresa, de un representante o de alguien apoderado. El simulador local no necesita certificado.'),
       listado),
     tarjeta('Cargar certificado', form),
-    tarjetaLeg,
+    tarjetaMisCertificadosEmpresaC(recargar),
+    tarjetaLegitimacionC(recargar),
   ];
-}
-
-function tarjetaLegitimacion() {
-  const dis = !esAdmin();
-  const metodo = selector([
-    ['apoderamiento_aeat', 'Apoderamiento inscrito en el Registro de apoderamientos de la AEAT'],
-    ['colaborador_social', 'Colaborador social (acuerdo de colaboración social con la AEAT)'],
-  ], 'apoderamiento_aeat', { disabled: dis });
-  const evidencia = selector([['', 'Cargando documentos…']], '', { disabled: true });
-  const notas = h('textarea', { rows: 2, maxlength: 500, disabled: dis });
-  const enviar = h('button', { type: 'submit', class: 'btn btn-secundario', disabled: dis }, 'Declarar legitimación');
-  const resultado = h('div', { 'aria-live': 'polite' });
-  api(`/empresas/${enc(app.empresaId)}/documentos`).then((docs) => {
-    const lista = comoLista(docs, 'documentos');
-    vaciar(evidencia).append(h('option', { value: '' }, '(sin documento)'),
-      ...lista.map((d) => h('option', { value: d.id }, `${d.nombre_archivo || `Documento ${d.id}`} · ${fmtFechaHora(d.subido_en)}`)));
-    evidencia.disabled = dis;
-  }).catch(() => { vaciar(evidencia).append(h('option', { value: '' }, '(no se pudieron cargar los documentos)')); });
-  const form = h('form', { class: 'form' },
-    campo('Método', metodo),
-    campo('Documento que lo acredita', evidencia, { ayuda: 'Importe antes el PDF del apoderamiento o del acuerdo en «Documentos» (clasifíquelo como «Desconocido / no procesar»).' }),
-    campo('Notas (opcional)', notas),
-    h('div', { class: 'acciones' }, enviar), resultado);
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    vaciar(resultado);
-    await conEspera(enviar, async () => {
-      try {
-        await api(`/empresas/${enc(app.empresaId)}/legitimacion`, {
-          metodo: 'POST',
-          json: { metodo: metodo.value, evidencia_documento_id: evidencia.value ? Number(evidencia.value) : null, notas: notas.value.trim() },
-        });
-        resultado.append(alerta('ok', 'Legitimación declarada. Vuelva a cargar el certificado para que se evalúe de nuevo. La AEAT la comprobará en cada envío.'));
-      } catch (err) { if (err.estado !== 401) resultado.append(alerta('danger', err.message)); }
-    }, 'Guardando…');
-  });
-  return tarjeta('Legitimación con certificado de un tercero',
-    h('p', null, 'Si el certificado no es de la empresa ni de su representante legal, solo puede usarse si su titular está apoderado ante la AEAT '
-      + 'o es colaborador social. Declárelo aquí aportando la evidencia.'),
-    form);
 }
 
 function pasoProductor(emp, recargar) {
@@ -1515,21 +1660,27 @@ function pasoProductor(emp, recargar) {
       } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
     }, 'Guardando…');
   });
-  return tarjeta('Productor del sistema informático de facturación',
-    h('p', null, 'El productor es la persona o entidad que asume el papel de productor de este sistema informático de facturación '
+  let aviso;
+  if (confirmado) aviso = alerta('ok', h('strong', null, 'Productor confirmado '), `el ${fmtFechaHora(p.confirmado_en)}.`);
+  else if (dis) {
+    aviso = alerta('info', h('strong', null, 'Productor sin identificar. '), 'Lo identifica y confirma el operador de la plataforma; '
+      + 'no es una tarea de su empresa ni tiene que hacer nada en este paso. Hasta entonces, la emisión en producción permanece bloqueada.');
+  } else aviso = alerta('warn', h('strong', null, 'Productor sin identificar. '), 'La emisión en producción permanece bloqueada hasta que lo identifique y confirme.');
+  return tarjeta('Productor del sistema',
+    h('p', null, 'El productor del sistema es la persona o entidad que asume el papel de productor de este sistema informático de facturación '
       + '(art. 13 del RD 1007/2023): quien lo produce o lo pone a disposición de los usuarios y suscribe su declaración responsable. '
-      + 'Su NIF y nombre viajan en cada registro de facturación (bloque «SistemaInformatico»).'),
-    confirmado
-      ? alerta('ok', h('strong', null, 'Productor confirmado '), `el ${fmtFechaHora(p.confirmado_en)}.`)
-      : alerta('warn', h('strong', null, 'Productor sin identificar. '), 'La emisión en producción permanece bloqueada hasta que se identifique y confirme.'),
+      + 'En esta plataforma lo es su operador. Su NIF y nombre viajan en cada registro de facturación (bloque «SistemaInformatico»).'),
+    aviso,
     kv([
       ['Nombre', p.nombre || '—'],
       ['NIF', p.nif || '—'],
       ['Domicilio', p.domicilio || '—'],
       ['Número de instalación', p.numero_instalacion ? h('span', { class: 'mono' }, p.numero_instalacion) : '—'],
     ]),
-    h('p', { class: 'ayuda' }, 'Afecta a toda la instalación (todas las empresas). Solo un administrador puede modificarlo.'),
-    form);
+    h('p', { class: 'ayuda' }, dis
+      ? 'Afecta a toda la instalación (todas las empresas). Solo el operador de la plataforma puede identificarlo o modificarlo.'
+      : 'Afecta a toda la instalación (todas las empresas): como operador de la plataforma, usted es el productor del sistema.'),
+    dis ? null : form);
 }
 
 const ROLES = [
@@ -1537,67 +1688,6 @@ const ROLES = [
   ['lector', 'Lector', 'Solo consulta.'],
   ['admin', 'Administrador', 'Además configura la empresa, series y certificados, y puede anular y subsanar registros.'],
 ];
-
-function pasoUsuarios(emp) {
-  const dis = !esAdmin();
-  // Alta de usuario en la empresa
-  const email = entrada({ type: 'email', required: true, autocomplete: 'off', disabled: dis });
-  const nombre = entrada({ required: true, maxlength: 120, autocomplete: 'off', disabled: dis });
-  const clave = entrada({ type: 'password', required: true, minlength: 10, autocomplete: 'new-password', disabled: dis });
-  const relacion = selector(RELACIONES, 'empleado_autorizado', { disabled: dis });
-  const formU = h('form', { class: 'form' },
-    h('div', { class: 'fila-campos' }, campo('Correo electrónico', email), campo('Nombre', nombre)),
-    campo('Contraseña inicial', clave, { ayuda: 'Al menos 10 caracteres. Si el usuario ya existe, solo se le da acceso a esta empresa y su contraseña no cambia.' }),
-    grupoRadios('rol_nuevo', 'Rol en la empresa', ROLES, 'emisor'),
-    campo('Relación con la empresa', relacion),
-    h('div', { class: 'acciones' }, h('button', { type: 'submit', class: 'btn btn-primario', disabled: dis }, 'Dar de alta')));
-  if (dis) formU.querySelectorAll('input').forEach((x) => { x.disabled = true; });
-  formU.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const btn = formU.querySelector('button[type="submit"]');
-    await conEspera(btn, async () => {
-      try {
-        await api(`/empresas/${enc(emp.id)}/miembros`, {
-          metodo: 'POST',
-          json: { email: email.value.trim(), nombre: nombre.value.trim(), clave: clave.value, rol: valorRadio(formU, 'rol_nuevo'), relacion: relacion.value },
-        });
-        clave.value = '';
-        notificar(`Acceso concedido a ${email.value.trim()}.`, 'ok');
-        formU.reset();
-      } catch (err) { clave.value = ''; if (err.estado !== 401) notificar(err.message, 'danger'); }
-    }, 'Guardando…');
-  });
-
-  // Alta de otra empresa
-  const nifE = entrada({ required: true, maxlength: 20, class: 'mono mayus', spellcheck: 'false' });
-  const razonE = entrada({ required: true, maxlength: 120 });
-  const domE = h('textarea', { rows: 2, maxlength: 300, required: true });
-  const formE = h('form', { class: 'form' },
-    h('div', { class: 'fila-campos' }, campo('NIF', nifE), campo('Razón social', razonE)),
-    campo('Domicilio fiscal', domE),
-    h('div', { class: 'acciones' }, h('button', { type: 'submit', class: 'btn btn-secundario', disabled: !esSuperadmin() }, 'Crear empresa')),
-    esSuperadmin() ? null : h('p', { class: 'ayuda' }, 'Solo la administración de la instalación puede dar de alta empresas.'));
-  formE.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const btn = formE.querySelector('button[type="submit"]');
-    await conEspera(btn, async () => {
-      try {
-        const nueva = await api('/empresas', { metodo: 'POST', json: { nif: nifE.value.trim().toUpperCase(), razon_social: razonE.value.trim(), domicilio: domE.value.trim() } });
-        if (nueva && nueva.id) guardarLS(LS_EMPRESA, String(nueva.id));
-        aplicarSesion(await api('/yo'));
-        notificar('Empresa creada. Complete su configuración.', 'ok');
-        irA('/configuracion/empresa');
-      } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
-    }, 'Creando…');
-  });
-  return [
-    tarjeta(`Dar acceso a un usuario a ${emp.razon_social || 'esta empresa'}`,
-      dis ? alerta('info', 'Solo un administrador puede dar de alta usuarios.') : null, formU),
-    tarjeta('Añadir otra empresa',
-      h('p', null, 'Puede gestionar la facturación de varias empresas. Usted quedará como administrador de la nueva empresa; elíjala después en la barra superior.'),
-      formE),
-  ];
-}
 
 function listaRequisitos(requisitos) {
   return h('ul', { class: 'requisitos' }, requisitos.map((r) => h('li', { class: r.cumplido ? 'req-ok' : 'req-no' },
@@ -1731,7 +1821,7 @@ function etiquetaCampo(ruta) {
   let m = /^lineas\.(\d+)(?:\.(\w+))?$/.exec(ruta);
   if (m) return `Línea ${Number(m[1]) + 1}${m[2] ? `: ${(COLUMNAS_LINEA[m[2]] || m[2]).toLowerCase()}` : ''}`;
   m = /^desglose\.(\d+)(?:\.(\w+))?$/.exec(ruta);
-  if (m) return `Desglose ${Number(m[1]) + 1}${m[2] ? `: ${COLUMNAS_DESGLOSE[m[2]] || m[2]}` : ''}`;
+  if (m) return `Desglose ${Number(m[1]) + 1}${m[2] ? `: ${COLUMNAS_DESGLOSE[m[2]] || COLUMNAS_DESGLOSE_EXENTA[m[2]] || m[2]}` : ''}`;
   m = /^referencias\.(\w+)$/.exec(ruta);
   if (m) return `Referencia: ${(REFERENCIAS.find(([k]) => k === m[1]) || [null, humanizar(m[1])])[1]}`;
   return humanizar(ruta);
@@ -2694,9 +2784,11 @@ async function paginaBorrador(ctx) {
         const info = proc.get(`${sec.tabla}.${i}.${esLineas ? 'importe' : 'cuota'}`) || proc.get(`${sec.tabla}.${i}.${esLineas ? 'concepto' : 'tipo_iva'}`);
         return info && info.pagina ? h('span', { class: 'muted bloque' }, `p. ${info.pagina}`) : null;
       })()),
-      cols.map((c) => celdaEditable(`${sec.tabla}.${i}.${c}`, tipos[c], `${nombreFila} ${i + 1}: ${nombres[c]}`, cambios)),
-      esLineas ? null : h('td', null, h('span', { class: 'mono' }, `${f.calificacion || 'S1'} · ${f.clave_regimen || '01'}`),
-        h('span', { class: 'muted bloque' }, 'Sujeta, régimen general')),
+      cols.map((c) => (esLineas ? null : celdaSinIvaDesglose(f, c)) || celdaEditable(`${sec.tabla}.${i}.${c}`, tipos[c], `${nombreFila} ${i + 1}: ${nombres[c]}`, cambios)),
+      esLineas ? null : celdaCalificacionDesglose(f, i, {
+        editable: editable(), cambios, celda: celdaEditable, lista: () => copiaLista(sec.tabla),
+        cambiar: (lista, t) => cambioEstructural(sec.id, sec.tabla, lista, t),
+      }),
       editable() ? h('td', null, boton('Quitar', () => {
         const lista = copiaLista(sec.tabla);
         lista.splice(i, 1);
@@ -2712,7 +2804,7 @@ async function paginaBorrador(ctx) {
       filas.length
         ? h('div', { class: 'tabla-wrap' }, h('table', { class: 'tabla tabla-editable' }, h('caption', { class: 'sr-only' }, sec.titulo), h('thead', null, cabecera), h('tbody', null, cuerpo)))
         : h('p', { class: 'vacio' }, esLineas ? 'No se han identificado líneas de detalle.' : 'No se ha identificado el desglose por tipo de IVA.'),
-      esLineas ? null : h('p', { class: 'ayuda' }, 'Solo se admiten operaciones sujetas y no exentas (S1) en régimen general (01) con tipos del 21 %, 10 % o 4 %.'),
+      esLineas ? null : h('p', { class: 'ayuda' }, AYUDA_DESGLOSE_EXENTAS),
       anadirBtn ? h('div', { class: 'acciones' }, anadirBtn) : null,
     ];
   }
@@ -2766,7 +2858,7 @@ async function paginaBorrador(ctx) {
                 (sd.numero_detectado ?? sd.numero) !== undefined && (sd.numero_detectado ?? sd.numero) !== null ? `número ${sd.numero_detectado ?? sd.numero}` : null,
                 sd.siguiente_numero ? `siguiente esperado ${sd.siguiente_numero}` : null, sd.entorno ? `entorno ${(ENTORNOS[sd.entorno] || {}).corto || sd.entorno}` : null]
                 .filter(Boolean).join(' · '))
-            : h('p', { class: 'muted' }, 'No se ha identificado una serie confirmada para este número. ', h('a', { href: '#/configuracion/series' }, 'Configurar series')),
+            : avisoSinSerie(b.serie_propuesta),
           h('p', { class: 'ayuda' }, `La factura se expedirá con fecha de hoy (${fmtFecha(hoyISO())}). Si la operación se realizó en otra fecha, indíquela como fecha de operación.`))];
     }
     // Incidencias de la sección que no corresponden a un campo concreto mostrado
@@ -3230,6 +3322,7 @@ async function paginaFactura(ctx) {
           try {
             await api(`/registros/${enc(reg.id)}/reintentar`, { metodo: 'POST', json: {} });
             notificar('Registro puesto en cola para reenvío.', 'ok');
+            refrescarAvisos(true);
             recargar();
           } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
         });
@@ -3326,7 +3419,11 @@ async function paginaFactura(ctx) {
   ], envios, { vacio: 'Todavía no se ha realizado ningún envío de esta factura.', leyenda: 'Envíos' }));
 
   const cardVerif = r.verificacion && (typeof r.verificacion !== 'object' || Object.keys(r.verificacion).length)
-    ? tarjeta('Verificación de integridad', renderGenerico(r.verificacion)) : null;
+    ? tarjeta('Verificación de integridad',
+      h('p', { class: 'ayuda' }, 'Comprobaciones del PDF definitivo al expedirlo: refleja los datos aprobados y el QR lleva a la URL registrada.'),
+      r.verificacion && typeof r.verificacion === 'object' && !Array.isArray(r.verificacion)
+        ? kv(Object.entries(r.verificacion).map(([k, v]) => [ETIQUETAS_VERIFICACION[k] || humanizar(k), renderGenerico(v)]))
+        : renderGenerico(r.verificacion)) : null;
 
   montar(ctx, cabecera,
     h('div', { class: 'split' },
@@ -3376,6 +3473,7 @@ function dialogoAnular(f, num, recargar) {
         await api(`/facturas/${enc(f.id)}/anular`, { metodo: 'POST', json: { motivo: motivo.value.trim(), confirmo: true } });
         dlg.close();
         notificar('Registro de anulación generado.', 'ok');
+        refrescarAvisos(true);
         recargar();
       } catch (err) { if (err.estado !== 401) error.append(alerta('danger', err.message)); }
     }, 'Anulando…');
@@ -3411,6 +3509,7 @@ function dialogoSubsanar(reg, num, recargar) {
         await api(`/registros/${enc(reg.id)}/subsanar`, { metodo: 'POST', json: { motivo: motivo.value.trim(), confirmo: true } });
         dlg.close();
         notificar('Registro de subsanación generado.', 'ok');
+        refrescarAvisos(true);
         recargar();
       } catch (err) { if (err.estado !== 401) error.append(alerta('danger', err.message)); }
     }, 'Generando…');
@@ -3463,6 +3562,7 @@ async function paginaRemision(ctx) {
       const r = await api(`/empresas/${enc(eid)}/remision?entorno=${enc(entorno)}`);
       if (!ctx.vigente()) return;
       ultimaCarga = new Date();
+      refrescarAvisos(true);   // la banda de la cabecera no contradice nunca a esta pantalla (todos los entornos)
       const cf = r.control_flujo || {};
       proximo = cf.proximo_envio_en || null;
       tic();
@@ -3507,7 +3607,7 @@ async function paginaRemision(ctx) {
           { titulo: 'Destino', celda: (e) => h('span', { class: 'valor-largo muted' }, e.destino || '—') },
           { titulo: 'Error', celda: (e) => (e.error ? h('span', { class: 'valor-largo' }, e.error) : '—') },
         ], comoLista(r.ultimos_envios), { vacio: 'Todavía no se ha realizado ningún envío en este entorno.', leyenda: 'Últimos envíos' }),
-        h('p', { class: 'muted' }, `Actualizado: ${ultimaCarga.toLocaleTimeString('es-ES')}. Se actualiza cada 15 s.`)]);
+        h('p', { class: 'muted' }, `Actualizado: ${ultimaCarga.toLocaleTimeString('es-ES', { timeZone: ZONA_HORARIA })}. Se actualiza cada 15 s.`)]);
       renderSimulador(r);
     } catch (err) {
       if (ctx.vigente() && err.estado !== 401) vaciar(estado).append(cajaError(err, cargar));
@@ -3528,30 +3628,33 @@ async function paginaRemision(ctx) {
       return;
     }
     simuladorPintado = true;
+    const puedeCambiar = esAdmin();   // el operador, si no es administrador de la empresa, lo fija desde su panel
     const vecesInput = entrada({ type: 'number', min: 1, max: 20, step: 1, value: '1' });
     const form = h('form', { class: 'form' },
-      grupoRadios('modo_sim', 'Comportamiento del simulador en los próximos envíos', MODOS_SIMULADOR.map(([k, t, desc]) => [k, t, desc]), modoActual || 'normal'),
+      grupoRadios('modo_sim', 'Comportamiento del simulador en los próximos envíos de esta empresa', MODOS_SIMULADOR.map(([k, t, desc]) => [k, t, desc]), modoActual || 'normal'),
       h('div', { class: 'fila-entorno' }, campo('Número de envíos afectados', vecesInput)),
-      h('div', { class: 'acciones' }, h('button', { type: 'submit', class: 'btn btn-secundario', disabled: !esSuperadmin() }, 'Aplicar modo')));
-    if (!esSuperadmin()) form.querySelectorAll('input').forEach((x) => { x.disabled = true; });
+      h('div', { class: 'acciones' }, h('button', { type: 'submit', class: 'btn btn-secundario', disabled: !puedeCambiar }, 'Aplicar modo')));
+    if (!puedeCambiar) form.querySelectorAll('input').forEach((x) => { x.disabled = true; });
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const btn = form.querySelector('button[type="submit"]');
       const modo = valorRadio(form, 'modo_sim');
       await conEspera(btn, async () => {
         try {
-          await api('/simulador/modo', { metodo: 'POST', json: { modo, veces: Math.max(1, Math.min(20, Number(vecesInput.value) || 1)) } });
-          notificar(`Simulador: modo «${(MODOS_SIMULADOR.find(([k]) => k === modo) || [null, modo])[1]}».`, 'ok');
+          await api(`/empresas/${enc(eid)}/simulador/modo`, { metodo: 'POST', json: { modo, veces: Math.max(1, Math.min(20, Number(vecesInput.value) || 1)) } });
+          notificar(`Simulador: modo «${(MODOS_SIMULADOR.find(([k]) => k === modo) || [null, modo])[1]}» para esta empresa.`, 'ok');
           cargar();
         } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
       });
     });
     vaciar(simulador).append(h('section', { class: 'card card-simulador' },
       h('h2', { class: 'card-titulo' }, 'Simulación local — no es la AEAT'),
-      h('p', null, 'Permite probar cómo responde la aplicación ante fallos del servicio. Solo afecta al simulador local; nunca a la AEAT.'),
+      h('p', null, 'Permite probar cómo responde la aplicación ante fallos del servicio. Solo afecta a los envíos de esta empresa al simulador local; '
+        + 'nunca a la AEAT ni a otras empresas.'),
       h('p', { class: 'modo-actual muted' }, textoModo),
-      h('p', { class: 'ayuda' }, 'Los modos de fallo se aplican al número de envíos indicado y después el simulador vuelve automáticamente a «Normal».'),
-      esAdmin() ? null : alerta('info', 'Solo un administrador puede cambiar el modo del simulador.'),
+      h('p', { class: 'ayuda' }, 'Los modos de fallo se aplican al número de envíos indicado y después el simulador vuelve automáticamente a «Normal». '
+        + 'Los modos de representación solo cuentan los envíos que llevan representante (certificado de un tercero).'),
+      puedeCambiar ? null : alerta('info', 'Solo un administrador de la empresa puede cambiar el modo del simulador (el operador de la plataforma, desde su panel, con el NIF de la empresa).'),
       form));
   }
 
@@ -3600,13 +3703,119 @@ async function paginaRemision(ctx) {
  * Actividad y declaración responsable
  * ====================================================================================== */
 
+/** Textos de los códigos internos que aparecen como valor en el detalle de actividad (los mismos de los formularios). */
+const VALORES_DETALLE = {
+  tipo_contribuyente: Object.fromEntries(TIPOS_CONTRIBUYENTE),
+  territorio: Object.fromEntries(TERRITORIOS),
+  origen_pdf: Object.fromEntries(ORIGENES_PDF),
+  relacion: Object.fromEntries(RELACIONES),
+  clasificacion: { ...Object.fromEntries(Object.entries(CLASIFICACIONES).map(([c, d]) => [c, d.etiqueta])), pendiente_confirmar: 'Requiere su decisión' },
+  modo: Object.fromEntries(MODOS_SIMULADOR.map(([m, t]) => [m, t])),
+  pdf: { reconstruccion: 'Reconstruido con los datos aprobados', superposicion: 'QR añadido sobre el PDF original' },
+  operacion: { remision: 'Envío de registros', consulta: 'Consulta a la AEAT' },
+  servicio: { remision: 'Envío de registros', consulta: 'Consulta' },
+  estado: Object.fromEntries(Object.entries(ESTADO_ENVIO).map(([e, [t]]) => [e, t])),
+  tipo: TIPOS_CERTIFICADO,
+  metodo: METODO_LEGITIMACION_TEXTO,
+  motivo: {
+    conciliacion_aeat: 'Conciliación con la consulta a la AEAT', operador: 'Verificado por el operador de la plataforma',
+    alta_por_operador: 'La dio de alta el operador de la plataforma',
+    version_anterior: 'Dada de alta por el operador en la versión anterior',
+    envio_certificado_propio: 'Envío aceptado con su propio certificado',
+    sin_registros_posteriores: 'La AEAT ya no muestra registros posteriores al último local',
+  },
+  clave: { registro_abierto: 'Registro de cuentas abierto', invitaciones_empresa_crean_cuentas: 'Las invitaciones de las empresas crean cuentas' },
+};
+const GRUPO_VALOR = { clasificacion_sugerida: 'clasificacion', estado_anterior: 'estado', estado_nuevo: 'estado' };
+/** Datos que se guardan como 0/1. */
+const DETALLE_SI_NO = new Set(['sii', 'canarias_ceuta_melilla', 'ocr', 'propio', 'propia', 'tls', 'puede_emitir']);
+const RESUMEN_CONSULTA = {
+  coinciden: 'coinciden', solo_aeat: 'solo en la AEAT', solo_local: 'solo en la aplicación', distintos: 'distintos',
+  conciliables: 'conciliables', revisar: 'a revisar',
+};
+
+/**
+ * Valor de un dato del detalle de actividad, legible: Sí/No, rol, entorno, códigos con su texto, resúmenes en palabras y
+ * fechas en hora peninsular. `o` es el detalle completo (p. ej. el valor de un ajuste depende de cuál sea).
+ */
+function valorDetalle(k, x, o = {}) {
+  if (typeof x === 'boolean') return x ? 'Sí' : 'No';
+  if ((DETALLE_SI_NO.has(k) || (k === 'valor' && VALORES_DETALLE.clave[o.clave])) && (x === 0 || x === 1 || x === '0' || x === '1')) {
+    return Number(x) ? 'Sí' : 'No';
+  }
+  if (k === 'claves' && Array.isArray(x)) {
+    // «CÓDIGO:campo» de cada punto confirmado: se muestra el dato al que se refiere
+    return [...new Set(x.map((c) => etiquetaCampo(String(c).includes(':') ? String(c).split(':').slice(1).join(':') : String(c))))].join(', ');
+  }
+  if (Array.isArray(x)) return x.map((y) => valorDetalle(k, y, o)).join(', ');
+  if (k === 'verificacion_pdf' && typeof x === 'object') {
+    const mal = Object.entries(x).filter(([, ok]) => ok === false).map(([c]) => ETIQUETAS_VERIFICACION[c] || humanizar(c));
+    return mal.length ? `no supera: ${mal.join(', ')}` : 'todas las comprobaciones correctas';
+  }
+  if (k === 'resumen' && typeof x === 'object') {
+    return Object.entries(x).map(([c, n]) => `${c === 'solo_aeat' ? `solo en ${servicioDetalle(o).donde}` : (RESUMEN_CONSULTA[c] || humanizar(c).toLowerCase())} ${n}`).join(', ');
+  }
+  if (typeof x === 'object') {
+    return Object.entries(x).filter(([, y]) => y !== null && y !== undefined && y !== '')
+      .map(([c, y]) => `${etiquetaDetalle(c, o)}: ${valorDetalle(c, y, o)}`).join(', ');
+  }
+  if (k === 'rol' && ROLES_TEXTO[x]) return ROLES_TEXTO[x];
+  if (k === 'motivo' && x === 'conciliacion_aeat') return `Conciliación con la consulta ${o.entorno === 'simulador' ? 'al simulador local' : 'a la AEAT'}`;
+  if (k === 'motivo' && x === 'sin_registros_posteriores') return `${servicioDetalle(o).Donde} ya no muestra registros posteriores al último local`;
+  if (k === 'modo' && o.servicio === 'consulta' && typeof x === 'string') {
+    const m = MODOS_CONSULTA_SIMULADOR.find(([c]) => c === x);
+    if (m) return m[1];
+  }
+  if (k === 'copia' && typeof x === 'string') {
+    // Carpeta de una copia: «copia_AAAAMMDDTHHMMSS» (hora peninsular, la de la instalación)
+    const m = /^copia_(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/.exec(x);
+    if (m) return `copia del ${fmtHoraPeninsular(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}`)}`;
+  }
+  if (/^fecha/.test(k) && typeof x === 'string' && /^\d{2}-\d{2}-\d{4}$/.test(x)) return x.replace(/-/g, '/');   // fecha en el formato de la AEAT (solo en datos de fecha: un número de factura puede tener esa forma)
+  if (k === 'entorno' && ENTORNOS[x]) return ENTORNOS[x].corto;
+  const mapa = VALORES_DETALLE[GRUPO_VALOR[k] || k];
+  if (mapa && typeof x === 'string' && Object.prototype.hasOwnProperty.call(mapa, x)) return mapa[x];
+  if (k === 'evidencia' && typeof x === 'string') {
+    // Carpeta de la respuesta de la AEAT guardada en el servidor: «…/consultas/AAAAMMDDTHHMMSS-xxxx» (hora UTC)
+    const m = /consultas\/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})-([0-9a-f]+)$/.exec(x);
+    if (m) return `respuesta de la consulta guardada el ${fmtFechaHora(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`)} (ref. ${m[7]})`;
+  }
+  if (typeof x === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(x)) return fmtHoraPeninsular(x);   // sin huso
+  if (typeof x === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(x)) return fmtFechaHora(x);
+  return String(x);
+}
+
+/** Una fecha y hora sin huso que el servidor guarda ya en hora peninsular (p. ej. el minuto de un error): se muestra tal
+ * cual, sin convertirla desde la zona del navegador. */
+function fmtHoraPeninsular(v) {
+  const d = new Date(`${String(v).slice(0, 16)}:00Z`);
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short', timeZone: 'UTC' });
+}
+
+/** Servicio al que se refiere un detalle de actividad (el simulador local o la AEAT), por su entorno o su servicio. */
+function servicioDetalle(o = {}) {
+  if (o.entorno) return nombresServicio(o.entorno);
+  return nombresServicio(typeof o.servicio === 'string' && o.servicio.includes('simulador') ? 'simulador' : 'produccion');
+}
+
+/** Etiqueta de un dato del detalle de actividad; las que nombran la AEAT dicen el servicio consultado de verdad. */
+function etiquetaDetalle(k, o = {}) {
+  if (k === 'estado_aeat') return `Estado en ${servicioDetalle(o).donde}`;
+  if (k === 'ultimo_registro_aeat') return `Último registro en ${servicioDetalle(o).donde}`;
+  return ETIQUETAS_DETALLE[k] || humanizar(k);
+}
+
 function detalleActividad(v) {
   const o = parseJSON(v);
   if (o && typeof o === 'object' && !Array.isArray(o)) {
-    return Object.entries(o).map(([k, x]) => `${humanizar(k)}: ${typeof x === 'object' && x !== null ? JSON.stringify(x) : x}`).join(' · ');
+    return Object.entries(o).filter(([, x]) => x !== null && x !== undefined && x !== '' && !(Array.isArray(x) && !x.length))
+      .map(([k, x]) => `${etiquetaDetalle(k, o)}: ${valorDetalle(k, x, o)}`).join(' · ');
   }
   return v === null || v === undefined ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
 }
+
+const objetoActividad = (o) => OBJETOS_ACTIVIDAD[o] || humanizar(o);
 
 async function paginaActividad(ctx) {
   titulo('Actividad');
@@ -3619,7 +3828,7 @@ async function paginaActividad(ctx) {
   const usuarioDe = (e) => e.usuario_nombre || e.usuario_email || (e.usuario && typeof e.usuario === 'object' ? e.usuario.nombre || e.usuario.email : e.usuario) || (e.usuario_id ? `Usuario ${e.usuario_id}` : 'Sistema');
   function pintar() {
     const t = filtro.value.trim().toLowerCase();
-    const lista = t ? eventos.filter((e) => [e.accion, usuarioDe(e), e.objeto, detalleActividad(e.detalle)].join(' ').toLowerCase().includes(t)) : eventos;
+    const lista = t ? eventos.filter((e) => [e.accion, usuarioDe(e), e.objeto && objetoActividad(e.objeto), detalleActividad(e.detalle)].join(' ').toLowerCase().includes(t)) : eventos;
     vaciar(cont).append(h('p', { class: 'muted', 'aria-live': 'polite' }, `${lista.length} de ${eventos.length} evento(s)`), tabla([
       { titulo: 'Fecha', celda: (e) => fmtFechaHora(e.en) },
       { titulo: 'Usuario', celda: (e) => usuarioDe(e) },
@@ -3627,8 +3836,8 @@ async function paginaActividad(ctx) {
       {
         titulo: 'Objeto',
         celda: (e) => (e.objeto && e.objeto_id && rutaObjeto[e.objeto]
-          ? enlace(`${humanizar(e.objeto)} #${e.objeto_id}`, `#${rutaObjeto[e.objeto]}${enc(e.objeto_id)}`)
-          : [e.objeto ? humanizar(e.objeto) : '—', e.objeto_id ? ` #${e.objeto_id}` : '']),
+          ? enlace(`${objetoActividad(e.objeto)} #${e.objeto_id}`, `#${rutaObjeto[e.objeto]}${enc(e.objeto_id)}`)
+          : [e.objeto ? objetoActividad(e.objeto) : '—', e.objeto_id ? ` #${e.objeto_id}` : '']),
       },
       { titulo: 'Detalle', celda: (e) => h('span', { class: 'valor-largo' }, detalleActividad(e.detalle) || '—') },
     ], lista.slice(0, 1000), { vacio: 'No hay actividad registrada.', leyenda: 'Registro de actividad' }));
@@ -3704,7 +3913,7 @@ async function paginaDeclaracion(ctx) {
         ['Formalizada por', decl.formalizada_por || '—'],
         ['Formalizada el', decl.formalizada_en ? fmtFechaHora(decl.formalizada_en) : '—'],
       ]),
-      formalizada ? null : alerta('warn', 'La declaración responsable debe formalizarla el productor del sistema antes de usarlo en producción. '
+      formalizada ? null : alerta('warn', 'La declaración responsable debe formalizarla el productor del sistema (el operador de la plataforma) antes de usarlo en producción. '
         + 'Este texto es un borrador sin validez hasta su formalización.')),
     tarjeta('Texto de la declaración',
       contenido === null || contenido === undefined ? h('p', { class: 'vacio' }, 'No hay texto disponible.')
@@ -3745,3 +3954,1711 @@ async function iniciar() {
 }
 
 iniciar();
+
+// --- multiusuario ---
+/* ======================================================================================
+ * Plataforma multiusuario: registro, invitaciones, cuenta propia, alta de empresas y
+ * panel del operador de la plataforma (productor del sistema). Ningún secreto (contraseñas,
+ * tokens) se guarda en el navegador: el enlace de una invitación se muestra una sola vez.
+ * ====================================================================================== */
+
+const ROLES_TEXTO = { admin: 'Administrador', emisor: 'Emisor', lector: 'Lector' };
+const ESTADO_INVITACION = {
+  pendiente: ['Pendiente', 'info'], usada: ['Usada', 'ok'], caducada: ['Caducada', 'neutral'], revocada: ['Anulada', 'neutral'],
+};
+const ORIGEN_ALTA = {
+  instalacion: 'Instalación', registro: 'Registro', invitacion: 'Invitación', alta_operador: 'Alta por el operador',
+  version_anterior: 'Versión anterior',
+};
+
+/** Primera pantalla tras entrar: la empresa elegida o, sin empresas, el alta de una (o el panel, para el operador). */
+function rutaInicioMU() {
+  if (app.empresaId) return '/importar';
+  return esSuperadmin() ? '/plataforma' : '/empresa-nueva';
+}
+
+function enlacesCuentaMU() {
+  return [
+    esSuperadmin() ? enlace('Plataforma', '#/plataforma', { tipo: 'enlace', pequeno: true }) : null,
+    enlace('Nueva empresa', '#/empresa-nueva', { tipo: 'enlace', pequeno: true }),
+    enlace('Mi cuenta', '#/cuenta', { tipo: 'enlace', pequeno: true }),
+  ];
+}
+
+function vistaSinEmpresaMU() {
+  return [
+    cabeceraPagina('Todavía no tiene ninguna empresa'),
+    tarjeta(null,
+      h('p', null, 'Para empezar, dé de alta la empresa (obligado tributario) cuyas facturas va a expedir. Quedará como su administrador.'),
+      h('p', null, 'Si su empresa ya usa la aplicación, pida a uno de sus administradores que le invite.'),
+      h('div', { class: 'acciones' },
+        enlace('Dar de alta una empresa', '#/empresa-nueva', { tipo: 'primario' }),
+        esSuperadmin() ? enlace('Panel de la plataforma', '#/plataforma', { tipo: 'secundario' }) : null)),
+  ];
+}
+
+function pieLoginMU() {
+  if (app.estado && app.estado.registro_abierto) {
+    return h('p', { class: 'ayuda' }, '¿No tiene cuenta? ', h('a', { href: '#/registro' }, 'Cree una cuenta'), '.');
+  }
+  return h('p', { class: 'ayuda' }, '¿No tiene cuenta? Pida una invitación al operador de la plataforma o al administrador de su empresa.');
+}
+
+function campoRegistroAbiertoMU() {
+  const chk = h('input', { type: 'checkbox', id: uid('chk') });
+  const nodo = h('fieldset', null, h('legend', null, 'Plataforma'),
+    h('div', { class: 'radio-opcion' }, chk,
+      h('label', { for: chk.id },
+        h('span', { class: 'radio-titulo' }, 'Permitir que otras personas creen su propia cuenta'),
+        h('span', { class: 'radio-desc' }, 'Cada persona gestionará sus propias empresas, sin acceso a las de los demás. '
+          + 'Si no lo marca, solo podrá entrar quien reciba una invitación. Puede cambiarlo después en el panel de la plataforma.'))));
+  return { nodo, valor: () => chk.checked };
+}
+
+/** Formulario de cambio de la contraseña propia (también para sustituir una contraseña temporal). */
+function formClaveMU({ temporal = false, alCambiar }) {
+  const actual = entrada({ type: 'password', required: true, autocomplete: 'current-password' });
+  const nueva = entrada({ type: 'password', required: true, minlength: 10, maxlength: 256, autocomplete: 'new-password' });
+  const nueva2 = entrada({ type: 'password', required: true, minlength: 10, maxlength: 256, autocomplete: 'new-password' });
+  const error = h('div', { 'aria-live': 'assertive' });
+  const enviar = h('button', { type: 'submit', class: 'btn btn-primario' }, 'Cambiar la contraseña');
+  const form = h('form', { class: 'form' },
+    campo(temporal ? 'Contraseña temporal' : 'Contraseña actual', actual),
+    campo('Nueva contraseña', nueva, { ayuda: 'Al menos 10 caracteres. Al cambiarla se cierran sus demás sesiones abiertas.' }),
+    campo('Repita la nueva contraseña', nueva2),
+    error,
+    h('div', { class: 'acciones' }, enviar));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    vaciar(error);
+    if (nueva.value !== nueva2.value) { error.append(alerta('danger', 'Las contraseñas nuevas no coinciden.')); nueva2.focus(); return; }
+    if (nueva.value.length < 10) { error.append(alerta('danger', 'La contraseña debe tener al menos 10 caracteres.')); nueva.focus(); return; }
+    await conEspera(enviar, async () => {
+      try {
+        await api('/yo/clave', { metodo: 'PUT', json: { clave_actual: actual.value, clave_nueva: nueva.value } });
+        actual.value = ''; nueva.value = ''; nueva2.value = '';
+        await alCambiar();
+      } catch (err) {
+        actual.value = '';
+        if (err.estado !== 401) error.append(alerta('danger', err.message));
+      }
+    }, 'Guardando…');
+  });
+  return form;
+}
+
+const TEXTO_CUENTA_VERSION_ANTERIOR = 'Su cuenta procede de la versión anterior de la aplicación, en la que la contraseña '
+  + 'la fijaba el operador o el administrador de su empresa al darle de alta y no podía cambiarse.';
+
+async function paginaCambiarClave(ctx) {
+  titulo('Cambiar la contraseña');
+  // Cuenta de la versión anterior que aún conserva la contraseña de entonces (no una temporal fijada después por el operador)
+  const heredada = Boolean(app.usuario && app.usuario.alta_origen === 'version_anterior' && !app.usuario.clave_restablecida_en);
+  const form = formClaveMU({
+    temporal: !heredada,
+    alCambiar: async () => {
+      aplicarSesion(await api('/yo'));
+      notificar('Contraseña cambiada.', 'ok');
+      irA(rutaInicioMU());
+    },
+  });
+  montar(ctx, marcoPublico(
+    h('h1', null, 'Elija una contraseña nueva'),
+    heredada
+      ? alerta('warn', TEXTO_CUENTA_VERSION_ANTERIOR + ' Otra persona puede conocerla: para continuar, elija una nueva que '
+        + 'solo conozca usted.')
+      : alerta('warn', 'Su contraseña actual es temporal (la fijó el operador de la plataforma o se creó junto con su cuenta). '
+        + 'Para continuar, sustitúyala por una que solo conozca usted.'),
+    form,
+    h('div', { class: 'acciones' }, boton('Cerrar sesión', cerrarSesion, { tipo: 'enlace', pequeno: true }))));
+}
+
+async function paginaCuenta(ctx) {
+  titulo('Mi cuenta');
+  const yo = await api('/yo');
+  if (!ctx.vigente()) return;
+  sincronizarEmpresas(yo);   // la cabecera muestra las mismas empresas que esta pantalla
+  const u = yo.usuario || {};
+  const empresas = comoLista(yo.empresas);
+  montar(ctx,
+    cabeceraPagina('Mi cuenta'),
+    tarjeta('Datos de la cuenta', kv([
+      ['Nombre', u.nombre || '—'],
+      ['Correo electrónico', u.email || '—'],
+      ['Operador de la plataforma', u.superadmin ? 'Sí' : 'No'],
+      ['Último restablecimiento de la contraseña por el operador', u.clave_restablecida_en ? fmtFechaHora(u.clave_restablecida_en) : 'Nunca'],
+    ]), u.clave_restablecida_en ? h('p', { class: 'ayuda' }, 'Si no lo pidió usted, cambie su contraseña y avise a los administradores '
+      + 'de sus empresas: queda anotado también en la actividad de cada una.') : null,
+    u.alta_origen === 'version_anterior' ? h('p', { class: 'ayuda' }, TEXTO_CUENTA_VERSION_ANTERIOR + ' Por eso, tras la '
+      + 'actualización, se le pidió elegir una contraseña nueva que solo conozca usted.') : null),
+    tarjeta('Empresas a las que tiene acceso',
+      tabla([
+        { titulo: 'Razón social', celda: (e) => e.razon_social },
+        { titulo: 'NIF', celda: (e) => h('span', { class: 'mono' }, e.nif) },
+        { titulo: 'Rol', celda: (e) => ROLES_TEXTO[e.rol] || e.rol },
+        { titulo: 'Acciones', celda: (e) => botonQuitarMiembroMU(e, { id: u.id, email: u.email }, () => enrutar({ forzar: true })) },
+      ], empresas, { vacio: 'Todavía no tiene acceso a ninguna empresa.', leyenda: 'Empresas' }),
+      h('div', { class: 'acciones' }, enlace('Dar de alta una empresa', '#/empresa-nueva', { tipo: 'secundario' }))),
+    tarjeta('Cambiar la contraseña', formClaveMU({
+      alCambiar: async () => notificar('Contraseña cambiada. Sus demás sesiones se han cerrado.', 'ok'),
+    })));
+}
+
+async function paginaEmpresaNueva(ctx) {
+  titulo('Nueva empresa');
+  const nif = entrada({ required: true, maxlength: 20, class: 'mono mayus', spellcheck: 'false', autocomplete: 'off' });
+  const razon = entrada({ required: true, maxlength: 120, autocomplete: 'organization' });
+  const dom = h('textarea', { rows: 2, maxlength: 300, required: true });
+  const error = h('div', { 'aria-live': 'assertive' });
+  const enviar = h('button', { type: 'submit', class: 'btn btn-primario' }, 'Dar de alta la empresa');
+  const form = h('form', { class: 'form' },
+    h('div', { class: 'fila-campos' }, campo('NIF', nif), campo('Razón social', razon)),
+    campo('Domicilio fiscal', dom),
+    error,
+    h('div', { class: 'acciones' }, enviar));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    vaciar(error);
+    await conEspera(enviar, async () => {
+      try {
+        const nueva = await api('/empresas', {
+          metodo: 'POST', json: { nif: nif.value.trim().toUpperCase(), razon_social: razon.value.trim(), domicilio: dom.value.trim() },
+        });
+        if (nueva && nueva.id) guardarLS(LS_EMPRESA, String(nueva.id));
+        aplicarSesion(await api('/yo'));
+        notificar('Empresa dada de alta. Complete su configuración.', 'ok');
+        irA('/configuracion/empresa');
+      } catch (err) { if (err.estado !== 401) error.append(alerta('danger', err.message)); }
+    }, 'Creando…');
+  });
+  montar(ctx,
+    cabeceraPagina('Dar de alta una empresa'),
+    tarjeta(null,
+      h('p', null, 'Usted quedará como administrador de la empresa y podrá invitar a otras personas. Nadie más verá sus documentos ni sus facturas.'),
+      h('p', { class: 'ayuda' }, 'Cada empresa (NIF) solo puede darse de alta una vez en la aplicación: si ya lo está, pida a uno de sus administradores que le invite.'),
+      form));
+  nif.focus();
+}
+
+async function paginaRegistro(ctx) {
+  titulo('Crear una cuenta');
+  const token = ctx.query.get('invitacion') || '';
+  let inv = null;
+  if (token) {
+    try {
+      inv = await api('/invitaciones/consulta', { metodo: 'POST', json: { token }, sinRedireccion: true });
+    } catch (err) {
+      inv = { valida: false, error: err.message };
+    }
+    if (!ctx.vigente()) return;
+  }
+  const textoInv = inv && inv.valida
+    ? (inv.empresa ? `Le han invitado a «${inv.empresa}» con el rol de ${(ROLES_TEXTO[inv.rol] || inv.rol || '').toLowerCase()}.`
+      : 'Ha recibido una invitación para crear su cuenta en la plataforma.')
+    : null;
+  const irLogin = enlace('Iniciar sesión', '#/login', {
+    tipo: 'secundario',
+    onclick: () => { app.volverA = token ? `/registro?invitacion=${enc(token)}` : null; },
+  });
+  if (token && (!inv || !inv.valida)) {
+    montar(ctx, marcoPublico(h('h1', null, 'Invitación no válida'),
+      alerta('warn', inv && inv.error ? inv.error : 'El enlace de invitación no es válido: puede haber caducado, haberse usado ya o haberse anulado. Pida uno nuevo.'),
+      h('div', { class: 'acciones' }, app.usuario ? enlace('Ir a la aplicación', `#${rutaInicioMU()}`, { tipo: 'secundario' }) : irLogin)));
+    return;
+  }
+  // Con la sesión iniciada: la invitación a una empresa se acepta con esta cuenta
+  if (app.usuario) {
+    if (!inv || !inv.empresa) {
+      montar(ctx, marcoPublico(h('h1', null, 'Ya tiene una cuenta'),
+        h('p', null, `Ha iniciado sesión como ${app.usuario.email}.`),
+        h('div', { class: 'acciones' }, enlace('Ir a la aplicación', `#${rutaInicioMU()}`, { tipo: 'primario' }))));
+      return;
+    }
+    const aceptar = boton('Aceptar la invitación', async () => {
+      await conEspera(aceptar, async () => {
+        try {
+          const r = await api('/invitaciones/aceptar', { metodo: 'POST', json: { token } });
+          if (r && r.empresa_id) guardarLS(LS_EMPRESA, String(r.empresa_id));
+          aplicarSesion(await api('/yo'));
+          notificar(`Ya tiene acceso a ${inv.empresa}.`, 'ok');
+          irA('/importar');
+        } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+      }, 'Aceptando…');
+    }, { tipo: 'primario' });
+    montar(ctx, marcoPublico(h('h1', null, 'Invitación'),
+      alerta('info', textoInv),
+      h('p', null, `Ha iniciado sesión como ${app.usuario.email}. Solo puede aceptarla la cuenta del correo al que se dirigió`
+        + `${inv.email ? ` (${inv.email})` : ''}.`),
+      h('div', { class: 'acciones' }, aceptar, enlace('Ahora no', `#${rutaInicioMU()}`, { tipo: 'secundario' }))));
+    return;
+  }
+  if (inv && inv.valida && inv.crea_cuenta === false) {
+    montar(ctx, marcoPublico(h('h1', null, 'Invitación para una cuenta existente'),
+      alerta('info', textoInv),
+      alerta('warn', 'El registro de nuevas cuentas está cerrado: esta invitación solo puede aceptarla quien ya tenga una cuenta. '
+        + 'Inicie sesión y acéptela. Si aún no tiene cuenta, pida al operador de la plataforma una invitación para crearla.'),
+      h('div', { class: 'acciones' }, irLogin)));
+    return;
+  }
+  if (!token && !(app.estado && app.estado.registro_abierto)) {
+    montar(ctx, marcoPublico(h('h1', null, 'Registro cerrado'),
+      alerta('info', 'En esta plataforma solo pueden crear su cuenta las personas invitadas. Pida una invitación al operador de la '
+        + 'plataforma o al administrador de su empresa.'),
+      h('div', { class: 'acciones' }, irLogin)));
+    return;
+  }
+  const nombre = entrada({ required: true, maxlength: 120, autocomplete: 'name' });
+  const email = entrada({ type: 'email', required: true, maxlength: 200, autocomplete: 'username', value: (inv && inv.email) || '', readOnly: !!(inv && inv.email) });
+  const clave = entrada({ type: 'password', required: true, minlength: 10, maxlength: 256, autocomplete: 'new-password' });
+  const clave2 = entrada({ type: 'password', required: true, minlength: 10, maxlength: 256, autocomplete: 'new-password' });
+  const error = h('div', { 'aria-live': 'assertive' });
+  const enviar = h('button', { type: 'submit', class: 'btn btn-primario' }, 'Crear la cuenta');
+  const form = h('form', { class: 'form' },
+    campo('Nombre y apellidos', nombre),
+    campo('Correo electrónico', email, { ayuda: inv && inv.email ? 'La invitación es para este correo.' : 'Será su usuario para entrar.' }),
+    campo('Contraseña', clave, { ayuda: 'Al menos 10 caracteres.' }),
+    campo('Repita la contraseña', clave2),
+    error,
+    h('div', { class: 'acciones' }, enviar));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    vaciar(error);
+    if (clave.value !== clave2.value) { error.append(alerta('danger', 'Las contraseñas no coinciden.')); clave2.focus(); return; }
+    if (clave.value.length < 10) { error.append(alerta('danger', 'La contraseña debe tener al menos 10 caracteres.')); clave.focus(); return; }
+    await conEspera(enviar, async () => {
+      try {
+        const r = await api('/registro', {
+          metodo: 'POST', sinRedireccion: true,
+          json: { email: email.value.trim(), nombre: nombre.value.trim(), clave: clave.value, invitacion: token || undefined },
+        });
+        clave.value = ''; clave2.value = '';
+        aplicarSesion(r);
+        notificar('Cuenta creada.', 'ok');
+        irA(rutaInicioMU());
+      } catch (err) {
+        clave.value = ''; clave2.value = '';
+        error.append(alerta('danger', err.message));
+      }
+    }, 'Creando…');
+  });
+  montar(ctx, marcoPublico(
+    h('h1', null, 'Crear una cuenta'),
+    textoInv ? alerta('info', textoInv) : h('p', null, 'Con su cuenta podrá dar de alta sus empresas y expedir sus facturas. Nadie más verá sus datos salvo las personas que usted invite.'),
+    form,
+    h('p', { class: 'ayuda' }, '¿Ya tiene una cuenta? ', irLogin)));
+  nombre.focus();
+}
+
+/** Enlace de una invitación recién creada: se muestra una sola vez (el servidor solo guarda su resumen). */
+function cajaEnlaceMU(inv) {
+  const url = `${window.location.origin}${inv.enlace}`;
+  const campoUrl = entrada({ value: url, readOnly: true, class: 'mono', 'aria-label': 'Enlace de la invitación', spellcheck: 'false' });
+  const copiar = boton('Copiar el enlace', async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      notificar('Enlace copiado.', 'ok');
+    } catch {
+      campoUrl.select();
+      notificar('Enlace seleccionado: cópielo con Ctrl+C.', 'info');
+    }
+  }, { pequeno: true });
+  return alerta('ok',
+    h('p', null, h('strong', null, 'Invitación creada. '),
+      `Envíe este enlace a ${inv.email || 'la persona invitada'} por un canal de confianza. Es de un solo uso, caduca el `
+      + `${fmtFechaHora(inv.expira_en)} y no volverá a mostrarse.`),
+    campoUrl,
+    inv.crea_cuenta === false ? h('p', { class: 'ayuda' }, 'El registro está cerrado: este enlace solo sirve a quien ya tenga '
+      + 'cuenta en la plataforma. Si la persona aún no la tiene, necesitará además una invitación del operador de la plataforma.') : null,
+    h('div', { class: 'acciones' }, copiar));
+}
+
+function tablaInvitacionesMU(invs, recargar) {
+  return tabla([
+    { titulo: 'Correo', celda: (i) => i.email || h('span', { class: 'muted' }, 'cualquiera') },
+    { titulo: 'Rol', celda: (i) => (i.rol ? ROLES_TEXTO[i.rol] || i.rol : '—') },
+    { titulo: 'Creada', celda: (i) => fmtFechaHora(i.creada_en) },
+    { titulo: 'Caduca', celda: (i) => fmtFechaHora(i.expira_en) },
+    { titulo: 'Estado', celda: (i) => pillDe(ESTADO_INVITACION, i.estado) },
+    {
+      titulo: 'Acciones',
+      celda: (i) => (i.estado === 'pendiente' ? boton('Anular', async (ev) => {
+        const btn = ev.currentTarget;
+        const ok = await confirmar({ titulo: 'Anular la invitación', texto: 'El enlace dejará de valer. ¿Desea anularla?', textoBoton: 'Anular', peligro: true });
+        if (!ok) return;
+        await conEspera(btn, async () => {
+          try {
+            await api(`/invitaciones/${enc(i.id)}`, { metodo: 'DELETE' });
+            notificar('Invitación anulada.', 'ok');
+            recargar();
+          } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+        });
+      }, { pequeno: true }) : '—'),
+    },
+  ], invs, { vacio: 'No hay invitaciones.', leyenda: 'Invitaciones' });
+}
+
+/** Paso «Usuarios y empresas» de la configuración de una empresa. */
+function pasoUsuariosMU(emp, recargar) {
+  const dis = !esAdmin();
+  const listas = h('div', null, dis ? alerta('info', 'Solo un administrador de la empresa puede ver y gestionar quién tiene acceso.') : cargando());
+  const cargarListas = async () => {
+    if (dis) return;
+    const [rM, rI] = await Promise.allSettled([api(`/empresas/${enc(emp.id)}/miembros`), api(`/empresas/${enc(emp.id)}/invitaciones`)]);
+    vaciar(listas);
+    if (rM.status === 'fulfilled') {
+      listas.append(h('h3', null, 'Personas con acceso'), tabla([
+        { titulo: 'Nombre', celda: (m) => m.nombre || '—' },
+        { titulo: 'Correo', celda: (m) => m.email },
+        { titulo: 'Rol', celda: (m) => ROLES_TEXTO[m.rol] || m.rol },
+        { titulo: 'Relación', celda: (m) => (RELACIONES.find(([k]) => k === m.relacion) || [null, m.relacion || '—'])[1] },
+        { titulo: 'Declaración de autorización', celda: (m) => (m.declaracion_autorizacion_en ? fmtFechaHora(m.declaracion_autorizacion_en) : pill('Pendiente', 'warn')) },
+        { titulo: 'Cuenta', celda: (m) => (m.activo ? pill('Activa', 'ok') : pill('Desactivada', 'danger')) },
+        { titulo: 'Acciones', celda: (m) => botonQuitarMiembroMU(emp, m, cargarListas) },
+      ], comoLista(rM.value), { vacio: 'No hay miembros.', leyenda: 'Miembros' }));
+    } else listas.append(cajaError(rM.reason));
+    if (rI.status === 'fulfilled') {
+      listas.append(h('h3', null, 'Invitaciones'), tablaInvitacionesMU(comoLista(rI.value), cargarListas));
+    }
+  };
+  cargarListas();
+
+  const email = entrada({ type: 'email', required: true, autocomplete: 'off', maxlength: 200, disabled: dis });
+  const relacion = selector(RELACIONES, 'empleado_autorizado', { disabled: dis });
+  const resultado = h('div', { 'aria-live': 'polite' });
+  const enviar = h('button', { type: 'submit', class: 'btn btn-primario', disabled: dis }, 'Invitar');
+  const form = h('form', { class: 'form' },
+    campo('Correo electrónico', email, { ayuda: 'Si ya es miembro, se actualizan su rol y su relación (un administrador que deja de serlo pierde sus invitaciones pendientes). Si no, se crea una invitación de un solo uso.' }),
+    grupoRadios('rol_invitado', 'Rol en la empresa', ROLES, 'emisor'),
+    campo('Relación con la empresa', relacion),
+    resultado,
+    h('div', { class: 'acciones' }, enviar));
+  if (dis) form.querySelectorAll('input').forEach((x) => { x.disabled = true; });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    vaciar(resultado);
+    await conEspera(enviar, async () => {
+      try {
+        const r = await api(`/empresas/${enc(emp.id)}/miembros`, {
+          metodo: 'POST', json: { email: email.value.trim(), rol: valorRadio(form, 'rol_invitado'), relacion: relacion.value },
+        });
+        if (r && r.accion === 'invitacion' && r.invitacion) resultado.append(cajaEnlaceMU(r.invitacion));
+        else notificar(`Rol de ${email.value.trim()} actualizado.`, 'ok');
+        email.value = '';
+        cargarListas();
+      } catch (err) { if (err.estado !== 401) resultado.append(alerta('danger', err.message)); }
+    }, 'Guardando…');
+  });
+  return [
+    tarjeta(`Quién tiene acceso a ${emp.razon_social || 'esta empresa'}`, listas),
+    tarjeta('Invitar a una persona',
+      h('p', null, 'La persona invitada crea su cuenta (o entra con la que ya tiene) desde el enlace y elige su propia contraseña: '
+        + 'nadie más la conoce. Hasta que acepte, no tiene acceso a la empresa.'),
+      dis ? alerta('info', 'Solo un administrador puede invitar.') : null,
+      form),
+    tarjeta('Otras empresas',
+      h('p', null, 'Puede gestionar la facturación de varias empresas: quedará como administrador de cada empresa que dé de alta.'),
+      h('div', { class: 'acciones' }, enlace('Dar de alta otra empresa', '#/empresa-nueva', { tipo: 'secundario' }))),
+  ];
+}
+
+/* ---------- Panel del operador de la plataforma ---------- */
+
+function dialogoClaveTemporalMU(u, alTerminar) {
+  const c1 = entrada({ type: 'password', required: true, minlength: 10, maxlength: 256, autocomplete: 'new-password' });
+  const c2 = entrada({ type: 'password', required: true, minlength: 10, maxlength: 256, autocomplete: 'new-password' });
+  const error = h('p', { class: 'error-campo', role: 'alert' });
+  const guardar = async () => {
+    error.textContent = '';
+    if (c1.value.length < 10) { error.textContent = 'Al menos 10 caracteres.'; c1.focus(); return; }
+    if (c1.value !== c2.value) { error.textContent = 'Las contraseñas no coinciden.'; c2.focus(); return; }
+    try {
+      await api(`/plataforma/usuarios/${enc(u.id)}/clave-temporal`, { metodo: 'POST', json: { clave: c1.value } });
+      c1.value = ''; c2.value = '';
+      dlg.close();
+      notificar(`Contraseña temporal fijada para ${u.email}. Deberá cambiarla al entrar.`, 'ok');
+      alTerminar();
+    } catch (err) { if (err.estado !== 401) error.textContent = err.message; }
+  };
+  const form = h('form', { class: 'form', onsubmit: (e) => { e.preventDefault(); guardar(); } },
+    h('p', null, `Se cerrarán las sesiones abiertas de ${u.email} y, al entrar con esta contraseña, tendrá que elegir una nueva. `
+      + 'Comuníquesela por un canal de confianza; la aplicación no la muestra ni la guarda en claro.'),
+    alerta('warn', 'Quien conozca esta contraseña podrá entrar como esa persona y en sus empresas. Úsela solo a petición suya: '
+      + 'el restablecimiento queda anotado en la actividad de cada una de sus empresas y se le muestra en «Mi cuenta».'),
+    campo('Contraseña temporal', c1), campo('Repítala', c2), error);
+  const dlg = dialogo({
+    titulo: 'Fijar una contraseña temporal', contenido: form,
+    acciones: [boton('Cancelar', () => dlg.close()), boton('Fijar contraseña', guardar, { tipo: 'peligro' })],
+  });
+  c1.focus();
+}
+
+function tarjetaUsuariosMU(usuarios, recargar) {
+  const filtro = entrada({ type: 'search', placeholder: 'Nombre o correo…' });
+  const cont = h('div');
+  const yoId = app.usuario && app.usuario.id;
+  const estadoDe = (u) => [
+    u.activo ? pill('Activa', 'ok') : pill('Desactivada', 'danger'),
+    u.superadmin ? pill('Operador', 'info') : null,
+    u.bloqueado ? pill('Bloqueada temporalmente', 'warn') : null,
+    u.cambiar_clave ? pill('Debe cambiar la contraseña', 'warn') : null,
+  ];
+  function pintar() {
+    const t = filtro.value.trim().toLowerCase();
+    const lista = t ? usuarios.filter((u) => `${u.nombre} ${u.email}`.toLowerCase().includes(t)) : usuarios;
+    vaciar(cont).append(tabla([
+      { titulo: 'Nombre', celda: (u) => u.nombre || '—' },
+      { titulo: 'Correo', celda: (u) => u.email },
+      { titulo: 'Alta', celda: (u) => [fmtDia(u.creado_en), h('span', { class: 'muted bloque' }, ORIGEN_ALTA[u.alta_origen] || '')] },
+      { titulo: 'Empresas', clase: 'num', celda: (u) => String(u.empresas ?? 0) },
+      { titulo: 'Estado', celda: estadoDe },
+      {
+        titulo: 'Acciones',
+        celda: (u) => (u.id === yoId ? h('span', { class: 'muted' }, 'Su cuenta') : h('div', { class: 'acciones' },
+          boton(u.activo ? 'Desactivar' : 'Activar', async (ev) => {
+            const btn = ev.currentTarget;
+            if (u.activo) {
+              const ok = await confirmar({
+                titulo: 'Desactivar la cuenta', texto: `${u.email} no podrá entrar y se cerrarán sus sesiones. Sus empresas y facturas no se modifican.`,
+                textoBoton: 'Desactivar', peligro: true,
+              });
+              if (!ok) return;
+            }
+            await conEspera(btn, async () => {
+              try {
+                await api(`/plataforma/usuarios/${enc(u.id)}`, { metodo: 'PUT', json: { activo: !u.activo } });
+                notificar(u.activo ? 'Cuenta desactivada.' : 'Cuenta activada.', 'ok');
+                recargar();
+              } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+            });
+          }, { pequeno: true, tipo: u.activo ? 'peligro' : 'secundario' }),
+          boton('Contraseña temporal', () => dialogoClaveTemporalMU(u, recargar), { pequeno: true }))),
+      },
+    ], lista, { vacio: 'No hay usuarios que coincidan.', leyenda: 'Usuarios de la plataforma' }));
+  }
+  filtro.addEventListener('input', pintar);
+  pintar();
+  return tarjeta('Usuarios',
+    h('p', { class: 'ayuda' }, 'Se muestra cuántas empresas tiene cada persona, no cuáles ni su contenido.'),
+    h('div', { class: 'filtros' }, campo('Buscar', filtro)), cont);
+}
+
+function tarjetaRegistroMU(p, recargar) {
+  const abierto = !!(p.ajustes && p.ajustes.registro_abierto);
+  const btn = boton(abierto ? 'Cerrar el registro' : 'Abrir el registro', async () => {
+    const ok = await confirmar({
+      titulo: abierto ? 'Cerrar el registro' : 'Abrir el registro',
+      texto: abierto ? 'Solo podrán crear su cuenta las personas invitadas. Las cuentas existentes no se ven afectadas.'
+        : 'Cualquier persona que llegue a la aplicación podrá crear su cuenta y dar de alta sus empresas. ¿Desea abrirlo?',
+      textoBoton: abierto ? 'Cerrar el registro' : 'Abrir el registro', peligro: !abierto,
+    });
+    if (!ok) return;
+    await conEspera(btn, async () => {
+      try {
+        await api('/plataforma/ajustes', { metodo: 'PUT', json: { registro_abierto: !abierto } });
+        app.estado.registro_abierto = !abierto;
+        notificar(abierto ? 'Registro cerrado.' : 'Registro abierto.', 'ok');
+        recargar();
+      } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+    });
+  }, { tipo: abierto ? 'secundario' : 'primario' });
+  return tarjeta('Registro de cuentas',
+    abierto ? alerta('warn', h('strong', null, 'Registro abierto: '), 'cualquiera puede crear una cuenta (con límites por dirección y por hora).')
+      : alerta('ok', h('strong', null, 'Registro cerrado: '), 'solo pueden crear su cuenta las personas invitadas.'),
+    h('div', { class: 'acciones' }, btn),
+    abierto ? null : ajusteInvitacionesEmpresaMU(p, recargar));
+}
+
+// --- multiusuario (revisión) ---
+/** Con el registro cerrado: ¿pueden las invitaciones de los administradores de empresas crear cuentas nuevas? */
+function ajusteInvitacionesEmpresaMU(p, recargar) {
+  const activo = !!(p.ajustes && p.ajustes.invitaciones_empresa_crean_cuentas);
+  const btn = boton(activo ? 'No permitirlo' : 'Permitirlo', async () => {
+    const ok = await confirmar({
+      titulo: activo ? 'Solo cuentas existentes' : 'Permitir cuentas nuevas por invitación de empresa',
+      texto: activo ? 'Las invitaciones de los administradores de empresas solo podrá aceptarlas quien ya tenga cuenta.'
+        : 'Cualquier usuario que dé de alta una empresa podrá crear cuentas nuevas invitando a otros correos (con cupos diarios). ¿Desea permitirlo?',
+      textoBoton: activo ? 'No permitirlo' : 'Permitirlo', peligro: !activo,
+    });
+    if (!ok) return;
+    await conEspera(btn, async () => {
+      try {
+        await api('/plataforma/ajustes', { metodo: 'PUT', json: { invitaciones_empresa_crean_cuentas: !activo } });
+        notificar('Ajuste guardado.', 'ok');
+        recargar();
+      } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+    });
+  }, { tipo: 'secundario', pequeno: true });
+  const c = p.cupos || {};
+  return [
+    h('h3', null, 'Invitaciones de las empresas'),
+    h('p', null, activo
+      ? 'Permitido: las invitaciones de los administradores de empresas también crean cuentas nuevas.'
+      : 'Solo cuentas existentes: las invitaciones de los administradores de empresas no crean cuentas nuevas (las suyas, como operador, sí).'),
+    h('p', { class: 'ayuda' }, `Cupos de los usuarios: ${c.invitaciones_pendientes_empresa ?? '—'} invitaciones pendientes por empresa, `
+      + `${c.invitaciones_dia_usuario ?? '—'} invitaciones y ${c.empresas_dia_usuario ?? '—'} altas de empresas por persona y día.`),
+    h('div', { class: 'acciones' }, btn),
+  ];
+}
+
+/** Quitar a una persona de la empresa (administradores) o salir de ella (la propia persona). */
+function botonQuitarMiembroMU(emp, m, recargar) {
+  const propio = app.usuario && String(m.id) === String(app.usuario.id);
+  if (!propio && !(String(emp.id) === String(app.empresaId) ? esAdmin() : emp.rol === 'admin')) return '—';
+  const nombreEmp = emp.razon_social || 'esta empresa';
+  return boton(propio ? 'Salir' : 'Quitar', async (ev) => {
+    const btn = ev.currentTarget;
+    const ok = await confirmar({
+      titulo: propio ? 'Salir de la empresa' : 'Quitar el acceso',
+      texto: propio ? `Dejará de tener acceso a ${nombreEmp}. Para volver, un administrador tendrá que invitarle.`
+        : `${m.email} dejará de tener acceso a ${nombreEmp} y se anularán sus invitaciones pendientes. Su cuenta y lo que expidió no se borran.`,
+      textoBoton: propio ? 'Salir' : 'Quitar', peligro: true,
+    });
+    if (!ok) return;
+    await conEspera(btn, async () => {
+      try {
+        await api(`/empresas/${enc(emp.id)}/miembros/${enc(m.id)}`, { metodo: 'DELETE' });
+        notificar(propio ? `Ha salido de ${nombreEmp}.` : 'Acceso quitado.', 'ok');
+        if (propio) { aplicarSesion(await api('/yo')); irA(rutaInicioMU()); return; }
+        recargar();
+      } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+    });
+  }, { pequeno: true, tipo: 'peligro' });
+}
+
+function tarjetaInvitacionesPlataformaMU(invs, recargar) {
+  const email = entrada({ type: 'email', maxlength: 200, autocomplete: 'off' });
+  const dias = entrada({ type: 'number', min: 1, max: 30, step: 1, value: '7' });
+  const resultado = h('div', { 'aria-live': 'polite' });
+  const enviar = h('button', { type: 'submit', class: 'btn btn-secundario' }, 'Crear invitación');
+  const form = h('form', { class: 'form' },
+    h('div', { class: 'fila-campos' },
+      campo('Correo (opcional)', email, { ayuda: 'Si lo indica, solo ese correo podrá usarla.' }),
+      campo('Validez (días)', dias)),
+    resultado,
+    h('div', { class: 'acciones' }, enviar));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    vaciar(resultado);
+    await conEspera(enviar, async () => {
+      try {
+        const inv = await api('/plataforma/invitaciones', { metodo: 'POST', json: { email: email.value.trim() || null, dias: Number(dias.value) || 7 } });
+        email.value = '';
+        vaciar(resultado).append(cajaEnlaceMU(inv));
+      } catch (err) { if (err.estado !== 401) resultado.append(alerta('danger', err.message)); }
+    }, 'Creando…');
+  });
+  return tarjeta('Invitaciones de la plataforma',
+    h('p', null, 'Permiten crear una cuenta aunque el registro esté cerrado. No dan acceso a ninguna empresa: '
+      + 'las invitaciones a una empresa las crean sus administradores.'),
+    form,
+    h('h3', null, 'Últimas invitaciones'),
+    tablaInvitacionesMU(invs, recargar));
+}
+
+function tarjetaSimuladorMU(sim, recargar) {
+  const nombreModo = (lista, k) => (lista.find(([x]) => x === k) || [null, k])[1];
+  const nif = entrada({ maxlength: 20, class: 'mono', required: true, autocomplete: 'off', placeholder: 'NIF de la empresa' });
+  const veces = entrada({ type: 'number', min: 1, max: 20, step: 1, value: '1' });
+  const enviar = h('button', { type: 'submit', class: 'btn btn-secundario' }, 'Aplicar modo');
+  const form = h('form', { class: 'form' },
+    campo('Empresa (NIF)', nif),
+    grupoRadios('modo_sim_plataforma', 'Comportamiento del simulador en los próximos envíos de esa empresa', MODOS_SIMULADOR, 'normal'),
+    h('div', { class: 'fila-entorno' }, campo('Número de envíos afectados', veces)),
+    h('div', { class: 'acciones' }, enviar));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await conEspera(enviar, async () => {
+      try {
+        const m = valorRadio(form, 'modo_sim_plataforma');
+        await api('/simulador/modo', { metodo: 'POST', json: { nif: nif.value.trim(), modo: m, veces: Math.max(1, Math.min(20, Number(veces.value) || 1)) } });
+        notificar(`Simulador: modo «${nombreModo(MODOS_SIMULADOR, m)}» para la empresa ${nif.value.trim()}.`, 'ok');
+        recargar();
+      } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+    });
+  });
+  const pendientes = comoLista(sim && sim.empresas);
+  return tarjeta('Simulador local (no es la AEAT)',
+    h('p', { class: 'ayuda' }, 'El modo de fallo es de cada empresa: solo lo consumen los envíos (o las consultas) de la empresa indicada, '
+      + 'y los modos de representación, solo los que llevan representante. Nunca afecta a otra empresa ni a la AEAT. '
+      + 'Los administradores de cada empresa también pueden fijarlo para la suya en la pantalla Remisión; esos modos no se listan aquí.'),
+    tabla([
+      { titulo: 'Empresa (NIF)', celda: (x) => h('span', { class: 'mono' }, x.nif) },
+      { titulo: 'Servicio', celda: (x) => (x.servicio === 'consulta' ? 'Consulta' : 'Remisión') },
+      { titulo: 'Modo', celda: (x) => nombreModo(x.servicio === 'consulta' ? MODOS_CONSULTA_SIMULADOR : MODOS_SIMULADOR, x.modo) },
+      { titulo: 'Quedan', clase: 'num', celda: (x) => String(x.veces ?? '—') },
+    ], pendientes, { vacio: 'No hay ningún modo de fallo pendiente fijado desde este panel.', leyenda: 'Modos de fallo pendientes fijados desde este panel' }),
+    form);
+}
+
+function tarjetaVerificacionNifMU() {
+  const nif = entrada({ required: true, maxlength: 20, class: 'mono mayus', spellcheck: 'false', autocomplete: 'off' });
+  const nota = entrada({ maxlength: 200, autocomplete: 'off' });
+  const resultado = h('div', { 'aria-live': 'polite' });
+  const motivos = {
+    operador: 'verificado por el operador', alta_por_operador: 'la dio de alta el operador',
+    version_anterior: 'empresa de la versión anterior, dada de alta por el operador',
+  };
+  const mostrar = (r) => vaciar(resultado).append(kv([
+    ['Empresa', `${r.razon_social} · NIF ${r.nif}`],
+    ['NIF verificado', r.verificado
+      ? `Sí: ${motivos[r.motivo] || 'verificado'} (${fmtFechaHora(r.verificado_en)})` : 'No'],
+  ]));
+  const pedir = (btn, metodo, verificado) => conEspera(btn, async () => {
+    vaciar(resultado);
+    const valor = nif.value.trim().toUpperCase();
+    if (!valor) { resultado.append(alerta('danger', 'Indique el NIF de la empresa.')); nif.focus(); return; }
+    try {
+      const r = metodo === 'GET'
+        ? await api(`/plataforma/empresas/verificacion-nif?nif=${enc(valor)}`)
+        : await api('/plataforma/empresas/verificacion-nif', {
+          metodo: 'POST', json: { nif: valor, verificado, nota: nota.value.trim() || null },
+        });
+      mostrar(r);
+      if (metodo !== 'GET') notificar(verificado ? 'NIF marcado como verificado.' : 'Verificación retirada.', 'ok');
+    } catch (err) { if (err.estado !== 401) resultado.append(alerta('danger', err.message)); }
+  });
+  const consultar = boton('Consultar', () => pedir(consultar, 'GET'));
+  const marcar = boton('Marcar como verificado', () => pedir(marcar, 'POST', true), { tipo: 'primario' });
+  const retirar = boton('Retirar la verificación', () => pedir(retirar, 'POST', false), { tipo: 'peligro' });
+  return tarjeta('Verificación del NIF de las empresas',
+    h('p', null, 'Cualquier usuario puede dar de alta una empresa con un NIF libre y declarar que un tercero (por ejemplo, '
+      + 'una gestoría) presenta en su nombre; la aplicación no puede comprobarlo. Por eso, el primer envío a la AEAT (pruebas o '
+      + 'producción) con el certificado de un tercero exige que usted verifique el NIF de la empresa. No hace falta si la empresa '
+      + 'usa su propio certificado, ni para las empresas que da de alta usted.'),
+    alerta('warn', 'Márquelo solo después de comprobar, con documentación, que quien lo pide actúa por esa empresa. Queda anotado en '
+      + 'la actividad de la plataforma y en la de la empresa.'),
+    h('div', { class: 'form' },
+      h('div', { class: 'fila-campos' }, campo('NIF de la empresa', nif),
+        campo('Nota (opcional)', nota, { ayuda: 'Por ejemplo, qué documentación ha comprobado.' })),
+      resultado,
+      h('div', { class: 'acciones' }, consultar, marcar, retirar)));
+}
+
+const ACCIONES_ERROR_MU = new Set(['error.interno', 'remision.error', 'diario.error']);
+// Lo que cualquier cuenta anota por sí misma (entrar, cambiar su contraseña, registrarse): tabla aparte, para que no
+// desplace la auditoría del operador (contraseñas temporales, bajas, ajustes, verificaciones de NIF…)
+const ACCIONES_CUENTAS_MU = new Set(['sesion.inicio', 'usuario.clave_cambiada', 'usuario.registro']);
+
+function tablaActividadPlataformaMU(eventos, leyenda, vacio) {
+  return tabla([
+    { titulo: 'Fecha', celda: (e) => fmtFechaHora(e.en) },
+    { titulo: 'Usuario', celda: (e) => e.usuario || 'Sistema' },
+    { titulo: 'Acción', celda: (e) => h('code', null, e.accion || '—') },
+    { titulo: 'Detalle', celda: (e) => h('span', { class: 'valor-largo' }, detalleActividad(e.detalle) || '—') },
+  ], eventos.slice(0, 100), { vacio, leyenda });
+}
+
+function tarjetaActividadPlataformaMU(eventos) {
+  const lista = comoLista(eventos);
+  return tarjeta('Actividad de la plataforma',
+    h('p', { class: 'ayuda' }, 'Ajustes, invitaciones, contraseñas temporales, bajas, verificaciones de NIF y avisos de la plataforma; de los errores técnicos, solo su tipo. La actividad de cada empresa solo la ven sus miembros.'),
+    tablaActividadPlataformaMU(lista.filter((e) => !ACCIONES_ERROR_MU.has(e.accion) && !ACCIONES_CUENTAS_MU.has(e.accion)),
+      'Actividad de la plataforma', 'No hay actividad registrada.'),
+    h('h3', null, 'Entradas y altas de las cuentas'),
+    h('p', { class: 'ayuda' }, 'Inicios de sesión, cambios de la propia contraseña y altas de cuentas. Se muestran aparte: '
+      + 'los que haga cualquier cuenta no desplazan la actividad anterior.'),
+    tablaActividadPlataformaMU(lista.filter((e) => ACCIONES_CUENTAS_MU.has(e.accion)), 'Entradas y altas de las cuentas',
+      'No hay entradas registradas.'),
+    h('h3', null, 'Errores técnicos'),
+    h('p', { class: 'ayuda' }, 'Solo la ruta y el tipo de error, agrupados por minuto («veces»; cada minuto aparece cuando ha '
+      + 'terminado). Se muestran aparte: los que '
+      + 'provoque cualquiera, también sin sesión, no desplazan la actividad anterior.'),
+    tablaActividadPlataformaMU(lista.filter((e) => ACCIONES_ERROR_MU.has(e.accion)), 'Errores técnicos',
+      'No hay errores técnicos registrados.'));
+}
+
+async function paginaPlataforma(ctx) {
+  titulo('Plataforma');
+  if (!esSuperadmin()) {
+    montar(ctx, cabeceraPagina('Plataforma'), alerta('warn', 'Solo el operador de la plataforma puede ver esta página.'));
+    return;
+  }
+  const [p, usuarios, invs, act] = await Promise.all([
+    api('/plataforma'), api('/plataforma/usuarios'), api('/plataforma/invitaciones'), api('/plataforma/actividad'),
+  ]);
+  if (!ctx.vigente()) return;
+  const recargar = () => enrutar({ forzar: true });
+  const t = p.totales || {};
+  montar(ctx,
+    cabeceraPagina('Panel de la plataforma', {
+      meta: [h('span', null, `${t.usuarios ?? 0} usuarios (${t.usuarios_activos ?? 0} activos) · ${t.empresas ?? 0} empresas`)],
+    }),
+    alerta('info', 'Como operador de la plataforma (productor del sistema) gestiona las cuentas, el registro, las invitaciones, '
+      + 'el productor y el simulador. Por ser operador no tiene acceso a los documentos ni a las facturas de ninguna empresa: solo a '
+      + 'las de las que sea miembro. Una contraseña temporal permite entrar como esa persona; por eso queda anotada en la actividad '
+      + 'de cada una de sus empresas.'),
+    tarjetaRegistroMU(p, recargar),
+    tarjetaInvitacionesPlataformaMU(comoLista(invs), recargar),
+    tarjetaUsuariosMU(comoLista(usuarios), recargar),
+    pasoProductor({ productor: p.productor }, recargar),
+    tarjetaVerificacionNifMU(),
+    tarjetaSimuladorMU(p.simulador, recargar),
+    tarjetaActividadPlataformaMU(act));
+}
+
+// --- certificados-representacion ---
+/* ======================================================================================
+ * Certificados: «Mis certificados» (carga única por usuario y asignación a empresas que
+ * administra), certificado en uso por empresa y entorno, representante y legitimación.
+ * Ni el archivo ni la contraseña vuelven nunca del servidor.
+ * ====================================================================================== */
+
+const ENTORNOS_CERT_C = ['pruebas', 'produccion', 'simulador'];
+const METODOS_LEGITIMACION_C = [
+  ['apoderamiento_aeat', 'Apoderamiento inscrito en el Registro de apoderamientos de la AEAT'],
+  ['colaborador_social', 'Colaborador social (acuerdo de colaboración social con la AEAT)'],
+];
+
+function titularCertC(c) {
+  const t = (c && (c.titular || (c.legitimacion && c.legitimacion.titular))) || {};
+  return h('span', null, t.nombre || '—', t.nif ? h('span', { class: 'mono muted bloque' }, `NIF ${t.nif}`) : null);
+}
+
+function origenCertC(c) {
+  if (!c || c.origen !== 'mis_certificados') return pill('De la empresa', 'neutral');
+  return h('span', null, pill('De «Mis certificados»', 'info'),
+    c.propietario ? h('span', { class: 'muted bloque' }, c.es_mio ? 'Suyo' : `De ${c.propietario.nombre || 'otro usuario'}`) : null);
+}
+
+function papelCertC(leg) {
+  if (!leg) return h('span', { class: 'muted' }, '—');
+  if (leg.propio) return pill('Propio de la empresa', 'ok', 'El certificado identifica a la empresa: los envíos no llevan representante.');
+  if (leg.representante) {
+    return h('span', null, pill('De representante', 'info', 'Certificado de un tercero legitimado: los envíos llevan Cabecera/Representante.'),
+      h('span', { class: 'muted bloque' }, `Representante: ${leg.representante.nombre} (NIF ${leg.representante.nif})`));
+  }
+  return pill('De un tercero sin legitimación', 'danger');
+}
+
+function vigenciaC(c) {
+  const ahora = new Date().toISOString();
+  const vig = c.vigente !== undefined ? c.vigente : (c.valido_desde <= ahora && ahora <= c.valido_hasta);
+  return h('span', null, vig ? pill('Vigente', 'ok') : pill('No vigente', 'danger'), h('span', { class: 'muted bloque' }, `Hasta ${fmtDia(c.valido_hasta)}`));
+}
+
+/** Página «Mis certificados»: certificados del usuario, empresas donde se usan, asignación, usos y eliminación. */
+async function paginaMisCertificados(ctx) {
+  titulo('Mis certificados');
+  const lista = comoLista(await api('/yo/certificados'), 'certificados');
+  if (!ctx.vigente()) return;
+  const recargar = () => enrutar({ forzar: true });
+  const archivo = h('input', { type: 'file', accept: '.p12,.pfx,application/x-pkcs12', required: true });
+  const clave = entrada({ type: 'password', required: true, autocomplete: 'off' });
+  const alias = entrada({ maxlength: 80, placeholder: 'p. ej. Sello de la gestoría' });
+  const subirBtn = h('button', { type: 'submit', class: 'btn btn-primario' }, 'Cargar en «Mis certificados»');
+  const resultado = h('div', { 'aria-live': 'polite' });
+  const form = h('form', { class: 'form' },
+    campo('Archivo del certificado (.p12 o .pfx)', archivo),
+    h('div', { class: 'fila-campos' },
+      campo('Contraseña del certificado', clave, { ayuda: 'Se usa para abrir el archivo. Se guarda cifrada en el servidor y nunca se vuelve a mostrar.' }),
+      campo('Nombre para reconocerlo (opcional)', alias)),
+    h('div', { class: 'acciones' }, subirBtn), resultado);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    vaciar(resultado);
+    if (!archivo.files || !archivo.files[0]) { notificar('Seleccione el archivo del certificado.', 'danger'); return; }
+    const fd = new FormData();
+    fd.append('archivo', archivo.files[0], archivo.files[0].name);
+    fd.append('clave', clave.value);
+    fd.append('alias', alias.value.trim());
+    clave.value = '';
+    await conEspera(subirBtn, async () => {
+      try {
+        const r = await api('/yo/certificados', { metodo: 'POST', form: fd });
+        archivo.value = '';
+        notificar(`Certificado de ${(r.titular && r.titular.nombre) || 'titular sin nombre'} cargado en «Mis certificados».`, 'ok');
+        recargar();
+      } catch (err) { if (err.estado !== 401) resultado.append(alerta('danger', err.message)); }
+    }, 'Cargando…');
+  });
+  const administradas = app.empresas.filter((x) => x.rol === 'admin');
+  const listado = tabla([
+    { titulo: 'Certificado', celda: (c) => [h('strong', null, c.alias || (c.titular && c.titular.nombre) || 'Certificado'), h('span', { class: 'muted bloque' }, TIPOS_CERTIFICADO[c.tipo] || c.tipo || '—')] },
+    { titulo: 'Titular', celda: titularCertC },
+    { titulo: 'Validez', celda: vigenciaC },
+    {
+      titulo: 'Empresas donde se usa',
+      celda: (c) => (c.requiere_recarga
+        ? alerta('warn', 'Vuelva a cargar este mismo archivo: se cargó después de la copia de seguridad restaurada y el servidor no lo conserva. Sus asignaciones se mantienen.')
+        : (c.asignaciones.length ? h('ul', { class: 'lista-simple' }, c.asignaciones.map((a) => h('li', null,
+          `${a.empresa.razon_social} · ${a.empresa.nif} `, badgeEntorno(a.entorno), ' ',
+          a.ok ? (a.propio ? pill('Propio', 'ok') : pill('Representante', 'info')) : pill('No utilizable', 'danger', a.detalle),
+          a.ok ? null : h('span', { class: 'muted bloque' }, a.detalle),
+          boton('Retirar', () => retirarAsignacionC(c, a, recargar), { tipo: 'enlace', pequeno: true }))))
+          : h('span', { class: 'muted' }, 'Sin asignar'))),
+    },
+    {
+      titulo: 'Acciones',
+      celda: (c) => h('div', { class: 'acciones' },
+        boton('Asignar a una empresa', () => asignarDialogoC(c, administradas, recargar), { pequeno: true, disabled: c.requiere_recarga || !c.vigente }),
+        boton('Ver usos', () => usosDialogoC(c), { pequeno: true }),
+        boton('Eliminar', () => eliminarCertificadoC(c, recargar), { tipo: 'peligro', pequeno: true })),
+    },
+  ], lista, { vacio: 'Todavía no ha cargado ningún certificado.', leyenda: 'Mis certificados' });
+  montar(ctx,
+    cabeceraPagina('Mis certificados', { meta: [h('span', null, 'Cárguelos una vez y úselos en las empresas que administra.')] }),
+    tarjeta('Cómo funciona',
+      h('ul', { class: 'lista-simple' },
+        h('li', null, 'Solo usted ve, asigna, retira y elimina sus certificados. Los administradores de cada empresa ven cuál se usa, pero no pueden descargarlo ni usarlo en otra empresa.'),
+        h('li', null, 'Si el certificado es de la propia empresa (sello, persona jurídica o su representante legal) es «propio»: los envíos no llevan representante.'),
+        h('li', null, 'Si es de un tercero (por ejemplo, de su gestoría), la empresa debe declarar en Configuración → Certificados el apoderamiento en la AEAT o la colaboración social de ese titular. Entonces cada envío lleva Cabecera/Representante y la AEAT comprueba el apoderamiento al recibirlo (error 4112 si no consta).'),
+        h('li', null, 'Si deja de ser administrador de una empresa, su certificado deja de usarse en ella. Cada uso queda registrado («Ver usos»).'))),
+    tarjeta('Cargar un certificado', form),
+    tarjeta('Mis certificados', listado));
+}
+
+function asignarDialogoC(cert, administradas, recargar) {
+  if (!administradas.length) {
+    notificar('Solo puede asignar sus certificados a empresas que administra, y no administra ninguna.', 'warn');
+    return;
+  }
+  const selEmp = selector(administradas.map((x) => [x.id, `${x.razon_social} · ${x.nif}`]), app.empresaId);
+  const selEnt = selector(ENTORNOS_CERT_C.map((k) => [k, ENTORNOS[k].corto]), app.entorno === 'produccion' ? 'produccion' : 'pruebas');
+  const error = h('p', { class: 'error-campo', role: 'alert' });
+  const ok = boton('Asignar', async () => {
+    await conEspera(ok, async () => {
+      try {
+        const r = await api(`/empresas/${enc(selEmp.value)}/certificados/asignar`, { metodo: 'POST', json: { certificado_id: cert.id, entorno: selEnt.value } });
+        dlg.close();
+        const leg = (r && r.legitimacion) || {};
+        notificar(leg.ok ? 'Certificado asignado y listo para usarse.' : `Certificado asignado. ${leg.detalle || ''}`, leg.ok ? 'ok' : 'warn');
+        recargar();
+      } catch (err) { error.textContent = err.message; }
+    }, 'Asignando…');
+  }, { tipo: 'primario' });
+  const dlg = dialogo({
+    titulo: 'Asignar a una empresa',
+    contenido: [
+      h('p', null, `Certificado de ${(cert.titular && cert.titular.nombre) || '—'} (NIF ${(cert.titular && cert.titular.nif) || '—'}). Pasará a ser el que usa la empresa en ese entorno.`),
+      campo('Empresa (de las que administra)', selEmp),
+      campo('Entorno', selEnt, { ayuda: 'En el simulador local no hay conexión con la AEAT: solo sirve para probar la representación (Cabecera/Representante).' }),
+      error],
+    acciones: [boton('Cancelar', () => dlg.close()), ok],
+  });
+}
+
+async function retirarAsignacionC(cert, a, recargar) {
+  const ok = await confirmar({
+    titulo: 'Retirar el certificado de la empresa',
+    texto: `${a.empresa.razon_social} dejará de usar este certificado en ${ENTORNOS[a.entorno] ? ENTORNOS[a.entorno].corto : a.entorno}. Los registros pendientes no se enviarán hasta que la empresa elija otro.`,
+    textoBoton: 'Retirar',
+  });
+  if (!ok) return;
+  try {
+    await api(`/yo/certificados/${enc(cert.id)}/asignaciones/${enc(a.asignacion_id)}`, { metodo: 'DELETE' });
+    notificar('Asignación retirada.', 'ok');
+    recargar();
+  } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+}
+
+async function eliminarCertificadoC(cert, recargar) {
+  const n = (cert.asignaciones || []).length;
+  const ok = await confirmar({
+    titulo: 'Eliminar el certificado',
+    texto: `Se borrará del servidor el archivo cifrado${n ? ` y dejará de usarse en ${n} asignación(es)` : ''}. Esta acción no se puede deshacer: para volver a usarlo tendrá que cargarlo de nuevo.`,
+    textoBoton: 'Eliminar', peligro: true,
+  });
+  if (!ok) return;
+  try {
+    await api(`/yo/certificados/${enc(cert.id)}`, { metodo: 'DELETE' });
+    notificar('Certificado eliminado.', 'ok');
+    recargar();
+  } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+}
+
+async function usosDialogoC(cert) {
+  const cont = h('div', null, cargando());
+  const dlg = dialogo({ titulo: 'Usos del certificado', contenido: cont, acciones: [boton('Cerrar', () => dlg.close())] });
+  try {
+    const usos = comoLista(await api(`/yo/certificados/${enc(cert.id)}/usos`));
+    const texto = {
+      'certificado.uso': 'Envío', 'certificado.asignado': 'Asignado', 'certificado.asignacion_retirada': 'Asignación retirada',
+      'certificado_usuario.cargado': 'Cargado', 'certificado_usuario.recargado': 'Cargado de nuevo',
+    };
+    const que = (u) => {
+      if (u.accion === 'certificado.uso') {
+        try { if (JSON.parse(u.detalle || '{}').operacion === 'consulta') return 'Consulta a la AEAT'; } catch (e) { /* detalle no JSON */ }
+      }
+      return texto[u.accion] || humanizar(u.accion);
+    };
+    vaciar(cont).append(tabla([
+      { titulo: 'Fecha', celda: (u) => fmtFechaHora(u.en) },
+      { titulo: 'Empresa', celda: (u) => (u.empresa_razon ? `${u.empresa_razon} · ${u.empresa_nif}` : '—') },
+      { titulo: 'Qué', celda: que },
+      { titulo: 'Detalle', celda: (u) => h('span', { class: 'valor-largo' }, detalleActividad(u.detalle) || '—') },
+    ], usos, { vacio: 'Todavía no se ha usado.', leyenda: 'Usos del certificado' }));
+  } catch (err) { vaciar(cont).append(cajaError(err)); }
+}
+
+/** Configuración → Certificados: qué certificado se usará en cada entorno, de dónde viene y en calidad de qué. */
+function tarjetaCertificadoEnUsoC(certs, recargar) {
+  const cont = h('div', null, cargando());
+  const eid = app.empresaId;
+  api(`/empresas/${enc(eid)}/certificados/seleccion`).then((sel) => {
+    if (String(eid) !== String(app.empresaId)) return;
+    vaciar(cont);
+    for (const ent of ENTORNOS_CERT_C) {
+      const c = sel && sel[ent];
+      const inactivos = (certs || []).filter((x) => x.origen === 'empresa' && x.entorno === ent && !x.en_uso && x.legitimacion && x.legitimacion.vigente);
+      if (!c && ent === 'simulador') continue;
+      const noUtilizable = c && c.legitimacion && c.legitimacion.utilizable === false;
+      cont.append(h('div', { class: 'card-seccion' },
+        h('h3', null, badgeEntorno(ent)),
+        c ? kv([
+          ['Origen', origenCertC(c)],
+          ['Titular', titularCertC(c)],
+          ['Validez', vigenciaC(c)],
+          ['Actúa como', papelCertC(c.legitimacion)],
+          ['Estado', resumenLegitimacion(c.legitimacion)],
+        ]) : h('p', { class: 'muted' }, ent === 'simulador' ? '' : 'Sin certificado: cargue uno para la empresa o asigne uno de «Mis certificados».'),
+        ent === 'simulador' && noUtilizable ? alerta('info', 'Mientras no pueda usarse, el simulador envía sin certificado (como la propia empresa, sin representante).') : null,
+        c && c.origen === 'mis_certificados' && esAdmin() ? h('div', { class: 'acciones' },
+          boton('Dejar de usarlo en esta empresa', () => dejarDeUsarC(eid, c, ent, recargar), { pequeno: true, tipo: noUtilizable ? 'primario' : undefined })) : null,
+        inactivos.length && esAdmin() ? h('div', { class: 'acciones' }, h('span', { class: 'muted' }, 'Volver a usar uno cargado para la empresa:'),
+          inactivos.map((x) => boton(`${(x.titular && x.titular.nombre) || x.titular_nif || 'Certificado'} (hasta ${fmtDia(x.valido_hasta)})`, async (ev) => {
+            await conEspera(ev.currentTarget, async () => {
+              try {
+                await api(`/empresas/${enc(eid)}/certificados/${enc(x.id)}/activar`, { metodo: 'POST', json: {} });
+                notificar('Certificado de la empresa de nuevo en uso.', 'ok');
+                recargar();
+              } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+            });
+          }, { pequeno: true }))) : null));
+    }
+  }).catch((err) => { vaciar(cont).append(cajaError(err)); });
+  return tarjeta('Certificado que se usará',
+    h('p', null, 'Cada entorno usa un solo certificado: el cargado para la empresa o uno de «Mis certificados» de un administrador. '
+      + 'Si es de un tercero, los envíos llevan Cabecera/Representante y hace falta una legitimación declarada para su titular.'),
+    cont);
+}
+
+/** Un administrador de la empresa retira la asignación de «Mis certificados» en uso (también si es de otro usuario). */
+async function dejarDeUsarC(eid, c, ent, recargar) {
+  const de = c.es_mio ? 'su certificado' : `el certificado de ${(c.propietario && c.propietario.nombre) || 'otro usuario'}`;
+  const ok = await confirmar({
+    titulo: 'Dejar de usar el certificado',
+    texto: `La empresa dejará de usar ${de} en ${ENTORNOS[ent] ? ENTORNOS[ent].corto : ent}. El certificado sigue siendo de su propietario (lo verá en «Ver usos»). `
+      + (ent === 'simulador' ? 'El simulador enviará sin certificado.' : 'Los registros pendientes no se enviarán hasta elegir otro certificado.'),
+    textoBoton: 'Dejar de usar',
+  });
+  if (!ok) return;
+  try {
+    await api(`/empresas/${enc(eid)}/certificados/asignaciones/${enc(c.asignacion_id)}`, { metodo: 'DELETE' });
+    notificar('La empresa ya no usa ese certificado.', 'ok');
+    recargar();
+  } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+}
+
+/** Configuración → Certificados: usar uno de «Mis certificados» en esta empresa. */
+function tarjetaMisCertificadosEmpresaC(recargar) {
+  const dis = !esAdmin();
+  const selCert = selector([['', 'Cargando…']], '', { disabled: true });
+  const selEnt = selector(ENTORNOS_CERT_C.map((k) => [k, ENTORNOS[k].corto]), app.entorno === 'produccion' ? 'produccion' : 'pruebas', { disabled: dis });
+  const enviar = h('button', { type: 'submit', class: 'btn btn-secundario', disabled: true }, 'Usar en esta empresa');
+  const resultado = h('div', { 'aria-live': 'polite' });
+  api('/yo/certificados').then((r) => {
+    const mios = comoLista(r, 'certificados').filter((c) => c.vigente && !c.requiere_recarga);
+    vaciar(selCert).append(...(mios.length
+      ? mios.map((c) => h('option', { value: c.id }, `${c.alias || (c.titular && c.titular.nombre) || 'Certificado'} · NIF ${(c.titular && c.titular.nif) || '—'}`))
+      : [h('option', { value: '' }, 'No tiene certificados vigentes en «Mis certificados»')]));
+    selCert.disabled = dis || !mios.length;
+    enviar.disabled = dis || !mios.length;
+  }).catch(() => { vaciar(selCert).append(h('option', { value: '' }, '(no se pudieron cargar)')); });
+  const form = h('form', { class: 'form' },
+    h('div', { class: 'fila-campos' }, campo('Certificado', selCert), campo('Entorno', selEnt)),
+    h('div', { class: 'acciones' }, enviar, enlace('Gestionar «Mis certificados»', '#/mis-certificados', { tipo: 'enlace' })), resultado);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    vaciar(resultado);
+    if (!selCert.value) return;
+    await conEspera(enviar, async () => {
+      try {
+        const r = await api(`/empresas/${enc(app.empresaId)}/certificados/asignar`, { metodo: 'POST', json: { certificado_id: Number(selCert.value), entorno: selEnt.value } });
+        notificar('Certificado asignado.', 'ok');
+        resultado.append(alerta(r.legitimacion && r.legitimacion.ok ? 'ok' : 'warn', papelCertC(r.legitimacion), ' ', (r.legitimacion && r.legitimacion.detalle) || ''));
+        window.setTimeout(recargar, 1200);
+      } catch (err) { if (err.estado !== 401) resultado.append(alerta('danger', err.message)); }
+    }, 'Asignando…');
+  });
+  return tarjeta('Usar uno de «Mis certificados»',
+    h('p', null, 'Si ya cargó su certificado (o el de su gestoría) en «Mis certificados», puede usarlo aquí sin volver a subirlo. Solo usted podrá retirarlo.'),
+    dis ? alerta('info', 'Solo un administrador de la empresa puede elegir el certificado.') : null, form);
+}
+
+/** Configuración → Certificados: legitimación de un tercero, por titular del certificado, con evidencia. */
+function tarjetaLegitimacionC(recargar) {
+  const dis = !esAdmin();
+  const eid = app.empresaId;
+  const metodo = selector(METODOS_LEGITIMACION_C, 'apoderamiento_aeat', { disabled: dis });
+  const nif = entrada({ maxlength: 20, class: 'mono', spellcheck: 'false', required: true, disabled: dis });
+  const nombre = entrada({ maxlength: 120, required: true, disabled: dis });
+  const evidencia = selector([['', 'Cargando documentos…']], '', { disabled: true });
+  const notas = h('textarea', { rows: 2, maxlength: 500, disabled: dis });
+  const enviar = h('button', { type: 'submit', class: 'btn btn-secundario', disabled: dis }, 'Declarar legitimación');
+  const resultado = h('div', { 'aria-live': 'polite' });
+  const listado = h('div', null, cargando());
+  api(`/empresas/${enc(eid)}/documentos`).then((docs) => {
+    const lista = comoLista(docs, 'documentos');
+    vaciar(evidencia).append(h('option', { value: '' }, lista.length ? '(elija el documento)' : '(no hay documentos importados)'),
+      ...lista.map((d) => h('option', { value: d.id }, `${d.nombre_archivo || `Documento ${d.id}`} · ${fmtFechaHora(d.subido_en)}`)));
+    evidencia.disabled = dis;
+  }).catch(() => { vaciar(evidencia).append(h('option', { value: '' }, '(no se pudieron cargar los documentos)')); });
+  // Propone el titular del certificado de un tercero que esté en uso
+  api(`/empresas/${enc(eid)}/certificados/seleccion`).then((sel) => {
+    const tercero = ENTORNOS_CERT_C.map((k) => sel && sel[k]).find((c) => c && c.legitimacion && c.legitimacion.requiere_legitimacion);
+    if (tercero && !nif.value) {
+      nif.value = (tercero.legitimacion.titular && tercero.legitimacion.titular.nif) || '';
+      nombre.value = (tercero.legitimacion.titular && tercero.legitimacion.titular.nombre) || '';
+    }
+  }).catch(() => { /* sin propuesta */ });
+  const pintarLista = () => api(`/empresas/${enc(eid)}/legitimaciones`).then((r) => {
+    vaciar(listado).append(tabla([
+      { titulo: 'Titular', celda: (l) => [l.titular_nombre || '—', h('span', { class: 'mono muted bloque' }, l.titular_nif ? `NIF ${l.titular_nif}` : 'sin titular (no cuenta)')] },
+      { titulo: 'Método', celda: (l) => ({ apoderamiento_aeat: 'Apoderamiento en la AEAT', colaborador_social: 'Colaboración social' })[l.metodo] || humanizar(l.metodo) },
+      { titulo: 'Evidencia', celda: (l) => l.evidencia || h('span', { class: 'muted' }, 'sin documento (no cuenta)') },
+      { titulo: 'Declarada', celda: (l) => `${fmtFechaHora(l.declarado_en)}${l.declarado_por ? ` · ${l.declarado_por}` : ''}` },
+      {
+        titulo: 'Estado',
+        celda: (l) => (l.revocada_en ? pill(`Revocada ${fmtDia(l.revocada_en)}`, 'neutral')
+          : [pill('Vigente', 'ok'), dis ? null : boton('Revocar', async (ev) => {
+            const ok = await confirmar({ titulo: 'Revocar la legitimación', texto: `El certificado de ${l.titular_nombre || l.titular_nif} dejará de poder usarse para esta empresa.`, textoBoton: 'Revocar', peligro: true });
+            if (!ok) return;
+            try {
+              await api(`/empresas/${enc(eid)}/legitimaciones/${enc(l.id)}`, { metodo: 'DELETE' });
+              notificar('Legitimación revocada.', 'ok');
+              recargar();
+            } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+          }, { tipo: 'enlace', pequeno: true })]),
+      },
+    ], comoLista(r), { vacio: 'No hay legitimaciones declaradas.', leyenda: 'Legitimaciones' }));
+  }).catch((err) => { vaciar(listado).append(cajaError(err)); });
+  pintarLista();
+  const form = h('form', { class: 'form' },
+    campo('Método', metodo),
+    h('div', { class: 'fila-campos' },
+      campo('NIF del titular del certificado', nif, { ayuda: 'Quien presenta: la entidad en los sellos y certificados de representante de persona jurídica; la persona en los de persona física.' }),
+      campo('Nombre o razón social del titular', nombre, { ayuda: 'Irá en Cabecera/Representante de cada envío.' })),
+    campo('Documento que lo acredita', evidencia, { ayuda: 'Importe antes el PDF del apoderamiento o del acuerdo en «Documentos» (clasifíquelo como «Desconocido / no procesar»).' }),
+    campo('Notas (opcional)', notas),
+    h('div', { class: 'acciones' }, enviar), resultado);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    vaciar(resultado);
+    await conEspera(enviar, async () => {
+      try {
+        await api(`/empresas/${enc(eid)}/legitimacion`, {
+          metodo: 'POST',
+          json: {
+            metodo: metodo.value, titular_nif: nif.value.trim(), titular_nombre: nombre.value.trim(),
+            evidencia_documento_id: evidencia.value ? Number(evidencia.value) : null, notas: notas.value.trim(),
+          },
+        });
+        notificar('Legitimación declarada. La AEAT la comprobará en cada envío.', 'ok');
+        recargar();
+      } catch (err) { if (err.estado !== 401) resultado.append(alerta('danger', err.message)); }
+    }, 'Guardando…');
+  });
+  return tarjeta('Legitimación de un tercero (representante)',
+    h('p', null, 'Si el certificado no es de la empresa ni de su representante legal (por ejemplo, el de su gestoría), solo puede usarse si su titular '
+      + 'está apoderado ante la AEAT o es colaborador social. Declárelo para ese titular aportando la evidencia: los envíos llevarán Cabecera/Representante.'),
+    form, h('h3', null, 'Legitimaciones declaradas'), listado);
+}
+
+// --- exentas ---
+/* ======================================================================================
+ * Operaciones exentas (E1–E6) en el desglose del borrador
+ * Cada fila del desglose es sujeta a IVA (S1, con tipo y cuota) o exenta (causa E1–E6, solo la base). La validación del
+ * servidor (borradores.validar) pide confirmar la causa y exige la mención legal que se imprime en la factura.
+ * ====================================================================================== */
+
+const CAUSAS_EXENCION_UI = {
+  E1: { nombre: 'art. 20 Ley 37/1992 (operaciones interiores: alquiler de vivienda, enseñanza, sanidad, seguros, servicios financieros…)', clave: '01', mencion: 'Operación exenta de IVA (art. 20 Ley 37/1992)' },
+  E2: { nombre: 'art. 21 (exportaciones)', clave: '02', mencion: 'Operación exenta de IVA (art. 21 Ley 37/1992)' },
+  E3: { nombre: 'art. 22 (operaciones asimiladas a las exportaciones)', clave: '02', mencion: 'Operación exenta de IVA (art. 22 Ley 37/1992)' },
+  E4: { nombre: 'arts. 23 y 24 (zonas francas, depósitos y regímenes aduaneros o fiscales)', clave: '01', mencion: 'Operación exenta de IVA (arts. 23 y 24 Ley 37/1992)' },
+  E5: { nombre: 'art. 25 (entregas intracomunitarias): no soportada, exige un destinatario extranjero', clave: '01', mencion: 'Operación exenta de IVA (art. 25 Ley 37/1992)' },
+  E6: { nombre: 'otras causas', clave: '01', mencion: 'Operación exenta de IVA' },
+};
+const COLUMNAS_DESGLOSE_EXENTA = { calificacion: 'calificación', operacion_exenta: 'causa de exención', motivo_exencion: 'mención de la exención' };
+const AYUDA_DESGLOSE_EXENTAS = 'Cada fila es sujeta a IVA (S1, régimen general, tipos del 21 %, 10 % o 4 %) o exenta (causa E1–E6: solo la base, sin tipo ni cuota). '
+  + 'La mención de las exentas se imprime en la factura (art. 6.1.j RD 1619/2012): cite el precepto (p. ej. «art. 20.Uno.23º Ley 37/1992») o indique que la operación está exenta. '
+  + 'La inversión del sujeto pasivo, las operaciones no sujetas y el recargo de equivalencia no están soportados.';
+
+function claseFilaDesglose(f) {
+  if (!f || typeof f !== 'object') return 'S1';
+  if (f.operacion_exenta) return 'exenta';
+  if (f.calificacion) return String(f.calificacion);
+  const vacio = (v) => v === null || v === undefined || v === '';
+  return vacio(f.tipo_iva) && vacio(f.cuota) ? 'sin_calificar' : 'S1';
+}
+
+/** Tipo y cuota de una base exenta: no se editan (la fila no lleva IVA). Devuelve null para las demás celdas. */
+function celdaSinIvaDesglose(f, col) {
+  if (!['tipo_iva', 'cuota'].includes(col) || claseFilaDesglose(f) !== 'exenta') return null;
+  return h('td', { class: 'num muted', title: 'Base exenta: sin tipo ni cuota de IVA' }, 'Exenta');
+}
+
+/** Calificación de la fila: sujeta (S1) o exenta con su causa; en las exentas, además, la mención legal (editable). */
+function celdaCalificacionDesglose(f, i, ctx) {
+  const clase = claseFilaDesglose(f);
+  const valor = clase === 'exenta' ? `E:${f.operacion_exenta}` : (clase === 'sin_calificar' ? '' : clase);
+  const opciones = [['', '— Elija: sujeta a IVA o exenta —'], ['S1', 'Sujeta a IVA (S1, régimen general)']];
+  for (const [k, v] of Object.entries(CAUSAS_EXENCION_UI)) opciones.push([`E:${k}`, `Exenta — ${k}: ${v.nombre}`]);
+  if (!opciones.some(([v]) => v === valor)) opciones.push([valor, `${valor.replace(/^E:/, '')} (no soportada)`]);
+  const sel = selector(opciones, valor, { 'aria-label': `Fila ${i + 1} del desglose: sujeta o exenta`, disabled: !ctx.editable, class: 'sel-calificacion' });
+  sel.addEventListener('change', () => {
+    const elegido = sel.value;
+    sel.value = valor;   // el cambio se aplica al guardarlo (se pide el motivo); si se cancela, queda como estaba
+    const lista = ctx.lista();
+    const fila = { ...(lista[i] && typeof lista[i] === 'object' ? lista[i] : {}) };
+    let texto;
+    if (elegido === 'S1') {
+      Object.assign(fila, { calificacion: 'S1', operacion_exenta: null, motivo_exencion: null, clave_regimen: '01', impuesto: '01' });
+      texto = `Fila ${i + 1} del desglose: sujeta a IVA`;
+    } else if (elegido.startsWith('E:') && CAUSAS_EXENCION_UI[elegido.slice(2)]) {
+      const causa = elegido.slice(2);
+      const info = CAUSAS_EXENCION_UI[causa];
+      Object.assign(fila, { calificacion: null, operacion_exenta: causa, tipo_iva: null, cuota: null, clave_regimen: info.clave,
+        impuesto: '01', motivo_exencion: info.mencion });
+      texto = `Fila ${i + 1} del desglose: exenta (${causa})`;
+    } else return;
+    lista[i] = fila;
+    ctx.cambiar(lista, texto);
+  });
+  const info = clase === 'exenta' ? CAUSAS_EXENCION_UI[f.operacion_exenta] : null;
+  let nota;
+  if (clase === 'exenta') {
+    const clave = f.clave_regimen || (info ? info.clave : '01');
+    nota = h('span', { class: 'muted bloque' }, `Exenta · clave de régimen ${clave}${clave === '02' ? ' (exportación)' : ''}`);
+  } else if (clase === 'sin_calificar') {
+    nota = h('span', { class: 'muted bloque' }, 'Sin IVA: elija la causa de exención o, si está sujeta, indique el tipo y la cuota.');
+  } else {
+    nota = h('span', { class: 'muted bloque' }, `${clase} · ${f.clave_regimen || '01'}${clase === 'S1' ? ' · sujeta, régimen general' : ''}`);
+  }
+  if (clase !== 'exenta') return h('td', { class: 'celda-calificacion' }, sel, nota);
+  // La mención se edita como las demás celdas: cambio pendiente con motivo y queda en el historial
+  const td = ctx.celda(`desglose.${i}.motivo_exencion`, 'area', `Fila ${i + 1}: mención de la exención`, ctx.cambios);
+  const area = td.querySelector('textarea');
+  if (area) area.maxLength = 500;
+  td.classList.add('celda-calificacion');
+  td.prepend(sel, nota, h('span', { class: 'muted bloque' }, 'Mención en la factura:'));
+  return td;
+}
+
+// --- series-consulta ---
+/* ======================================================================================
+ * Series con ceros de relleno ({n:3}) y consulta a la AEAT (ConsultaFactuSistemaFacturacion)
+ * ====================================================================================== */
+
+const AYUDA_PATRON = '{n} = número correlativo; {n:3} = número con ceros de relleno hasta 3 cifras (también {nnn}); '
+  + '{aa} = año con 2 cifras; {aaaa} = año con 4 cifras. Ejemplos: {n}/{aa} → 166/26; {n:3}/A{aa} → 042/A26; '
+  + 'A{n:3}/{aa} → A057/26; PRB-{n} → PRB-1.';
+const RE_MARCADOR_PATRON = /\{(n(?::(\d{1,2}))?|n{2,12}|aa|aaaa)\}/g;
+const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+const ESTADO_AEAT = {
+  Correcto: ['Correcto', 'ok'],
+  AceptadoConErrores: ['Aceptado con errores', 'warn'],
+  Anulado: ['Anulado', 'danger'],
+};
+const MODOS_CONSULTA_SIMULADOR = [
+  ['normal', 'Normal', 'Devuelve los registros que tiene el simulador, paginados.'],
+  ['sin_respuesta', 'Sin respuesta', 'Procesa la consulta pero no responde (tiempo agotado).'],
+  ['caido', 'Servicio caído', 'No acepta la conexión.'],
+  ['error_500', 'Error 500', 'Responde con un error interno del servidor (HTTP 500).'],
+  ['fault_servidor', 'Fallo del servicio (SOAP Server)', 'Responde con un SOAP Fault de servidor.'],
+  ['rechazo', 'Rechazo de la consulta', 'Responde con un SOAP Fault de cliente (4140: sin apoderamiento para consultar).'],
+  ['respuesta_invalida', 'Respuesta fuera de esquema', 'Responde sin IndicadorPaginacion: se muestra con un aviso y no permite conciliar.'],
+  ['solo_como_representante', 'Tercero sin apoderamiento',
+    'Rechaza con 4140 la consulta de un tercero sin IndicadorRepresentante; la aplicación la repite con el indicador y el resultado es parcial.'],
+];
+
+/** Número que corresponde a un patrón ({n}, {n:3}, {nnn}, {aa}, {aaaa}); mismo criterio que series.formatear. */
+function formatearPatron(patron, numero, anio) {
+  return String(patron || '').replace(RE_MARCADOR_PATRON, (m, g, w) => {
+    if (g === 'aaaa') return String(anio).padStart(4, '0');
+    if (g === 'aa') return String(anio % 100).padStart(2, '0');
+    const ancho = w ? Number(w) : (g.length > 1 ? g.length : 0);
+    return ancho ? String(numero).padStart(ancho, '0') : String(numero);
+  });
+}
+
+/** Exactamente un marcador de número. */
+function patronValido(patron) {
+  const marcas = String(patron || '').match(/\{(n(?::\d{1,2})?|n{2,12})\}/g);
+  return !!marcas && marcas.length === 1;
+}
+
+/** Patrón, siguiente número y año propuestos (enlace desde un borrador: #/configuracion/series?patron=…&siguiente=…&anio=…). */
+function parametrosAltaSerie() {
+  const { query } = analizarHash();
+  const patron = query.get('patron');
+  const siguiente = query.get('siguiente');
+  const anio = query.get('anio');
+  return {
+    patron: patron && patronValido(patron) ? patron.slice(0, 60) : null,
+    siguiente: siguiente && /^\d{1,12}$/.test(siguiente) && Number(siguiente) >= 1 ? siguiente : null,
+    anio: anio && /^\d{4}$/.test(anio) ? anio : null,
+  };
+}
+
+/** En el borrador: sin serie confirmada, se muestra el patrón propuesto a partir del número detectado. */
+function avisoSinSerie(prop) {
+  const texto = 'No se ha identificado una serie confirmada para este número. ';
+  if (!prop || !prop.patron) return h('p', { class: 'muted' }, texto, h('a', { href: '#/configuracion/series' }, 'Configurar series'));
+  const qs = new URLSearchParams({ patron: prop.patron, siguiente: String(prop.numero || 1) });
+  if (prop.anio) qs.set('anio', String(prop.anio));
+  return h('p', { class: 'muted' }, texto, 'Patrón propuesto: ', h('code', null, prop.patron),
+    prop.ancho ? ` (número con ${prop.ancho} cifras y ceros de relleno)` : '', '. ',
+    h('a', { href: `#/configuracion/series?${qs}` }, 'Crear la serie con este patrón'));
+}
+
+/**
+ * Reanudar la cadena desde el último registro que tiene la AEAT (tras perder la base de datos y el diario y restaurar una
+ * copia antigua). El servidor vuelve a consultar y solo acepta si el último registro sigue siendo el revisado (huella).
+ */
+function dialogoReanudarCadena(r, alTerminar) {
+  const c = r.cadena_atrasada;
+  const sv = nombresServicio(r.entorno);
+  const serv = sv.donde;
+  const chk = h('input', { type: 'checkbox', id: uid('chk') });
+  const error = h('div', { 'aria-live': 'assertive' });
+  const hacer = boton('Reanudar la cadena', reanudar, { tipo: 'peligro', disabled: true });
+  chk.addEventListener('change', () => { hacer.disabled = !chk.checked; });
+  async function reanudar() {
+    vaciar(error);
+    await conEspera(hacer, async () => {
+      try {
+        const res = await api(`/empresas/${enc(app.empresaId)}/consulta/reanudar-cadena`,
+          { metodo: 'POST', json: { entorno: r.entorno, huella: c.huella, confirmo: true } });
+        dlg.close();
+        notificar(res.reanudada
+          ? `Cadena reanudada: el próximo registro se encadenará a ${res.ancla ? res.ancla.num_serie : c.num_serie}.`
+          : (res.mensaje || 'No había nada que reanudar.'), 'ok');
+        if (alTerminar) alTerminar(res);
+      } catch (err) { if (err.estado !== 401) error.append(alerta('danger', err.message)); }
+    }, 'Reanudando…');
+  }
+  const dlg = dialogo({
+    titulo: `Reanudar la cadena desde el último registro ${sv.de}`,
+    contenido: [
+      h('p', null, `Se volverá a consultar ${serv} (todos los meses desde el del último registro local hasta el actual y los de las `
+        + 'facturas anteriores, por si se anuló o subsanó alguna) y, si su último registro de esta instalación sigue siendo este, el próximo '
+        + 'registro que se genere (expedición, anulación o subsanación) lo usará como registro anterior.'),
+      kv([
+        ['Factura', h('span', { class: 'mono' }, `${c.num_serie} · ${fmtFecha(c.fecha_expedicion)}`)],
+        ['Generado', h('span', { class: 'mono' }, c.fecha_hora_huso)],
+        ['Huella', h('span', { class: 'mono valor-largo' }, c.huella)],
+      ]),
+      alerta('warn', `Avance también el contador de las series cuyos números ya constan en ${serv}. Si estos registros no son de esta `
+        + 'instalación (p. ej. de otro programa de facturación de la empresa), no reanude la cadena: consulte con el responsable del sistema.'),
+      h('div', { class: 'casilla casilla-destacada' }, chk,
+        h('label', { for: chk.id }, `He revisado el último registro ${sv.de} y confirmo que la cadena de esta instalación debe continuar desde él.`)),
+      error,
+    ],
+    acciones: [boton('Cancelar', () => dlg.close()), hacer],
+  });
+}
+
+/** Números que se saltan (lista completa o, si son muchos, los primeros y los últimos). */
+function listaSaltados(sal) {
+  const lista = comoLista(sal.lista);
+  const mitad = Math.ceil(lista.length / 2);
+  const items = sal.completa ? lista : [...lista.slice(0, mitad), null, ...lista.slice(mitad)];
+  const cab = sal.cantidad === 1 ? h('p', null, 'Se salta 1 número:')
+    : h('p', null, `Se saltan ${sal.cantidad} números, del `, h('code', null, sal.primero), ' al ', h('code', null, sal.ultimo), ':');
+  return [cab, h('ul', { class: 'lista-simple' }, items.map((t) => h('li', null, t === null ? '…' : h('code', null, t))))];
+}
+
+/**
+ * Avanzar el contador de una serie más allá de números ya usados fuera de esta instalación (p. ej. tras perder la base de
+ * datos y el diario, la consulta a la AEAT los muestra «solo en la AEAT»). Antes se revisa qué números se saltan; el
+ * contador nunca retrocede. Solo administradores; queda en la actividad de la empresa y en el diario de recuperación.
+ */
+function dialogoAvanceContador(serie, { anio, siguiente, meses, servicio } = {}, alTerminar) {
+  const conAnio = /\{(aa|aaaa)\}/.test(String(serie.patron || ''));
+  const anioIn = entrada({ type: 'number', min: 2000, max: 2100, step: 1, required: true, value: String(anio || anioMesHoy().anio) });
+  const sigIn = entrada({ type: 'number', min: 1, max: 999999999999, step: 1, required: true, value: siguiente ? String(siguiente) : '' });
+  const motivo = entrada({ maxlength: 200, placeholder: 'p. ej. números usados en la AEAT tras perder la base de datos' });
+  const vista = h('div', { 'aria-live': 'polite' });
+  const error = h('div', { 'aria-live': 'assertive' });
+  const chk = h('input', { type: 'checkbox', id: uid('chk'), disabled: true });
+  const chkTexto = h('label', { for: chk.id }, 'Confirmo que los números que se saltan ya están usados fuera de esta aplicación y que no se expedirán con ella.');
+  let previa = null;
+  const revisar = h('button', { type: 'submit', class: 'btn btn-secundario btn-pequeno' }, 'Revisar los números que se saltan');
+  const avanzar = boton('Avanzar el contador', hacer, { tipo: 'peligro', disabled: true });
+  const invalidar = () => { previa = null; chk.checked = false; chk.disabled = true; avanzar.disabled = true; vaciar(vista); };
+  anioIn.addEventListener('input', invalidar);
+  sigIn.addEventListener('input', invalidar);
+  chk.addEventListener('change', () => { avanzar.disabled = !(chk.checked && previa); });
+
+  async function ver() {
+    invalidar();
+    vaciar(error);
+    const a = anioIn.value.trim();
+    const n = sigIn.value.trim();
+    if (conAnio && !/^\d{4}$/.test(a)) { error.append(alerta('danger', 'Indique el año del contador con 4 cifras.')); anioIn.focus(); return; }
+    if (n && !/^\d{1,12}$/.test(n)) { error.append(alerta('danger', 'Indique el nuevo siguiente número (solo cifras).')); sigIn.focus(); return; }
+    const q = new URLSearchParams();
+    if (conAnio) q.set('anio', a);
+    if (n) q.set('siguiente', n);
+    await conEspera(revisar, async () => {
+      try {
+        const r = await api(`/series/${enc(serie.id)}/avance?${q}`);
+        if (r.aviso_cadena) vista.append(alerta('warn', h('strong', null, 'Avanzar el contador no reanuda la cadena. '), r.aviso_cadena));
+        const filas = [
+          ['Contador actual', h('code', null, r.actual_texto)],
+          ['Último número expedido aquí', r.ultimo_expedido_texto ? h('code', null, r.ultimo_expedido_texto) : 'Ninguno'],
+        ];
+        if (r.saltados) filas.push(['Siguiente número tras avanzar', h('code', null, r.siguiente_texto)]);
+        vista.append(kv(filas));
+        if (!r.saltados) return;
+        vista.append(...listaSaltados(r.saltados));
+        previa = r;
+        chk.disabled = false;
+        chkTexto.textContent = r.saltados.cantidad === 1
+          ? `Confirmo que el número ${r.saltados.primero} ya está usado fuera de esta aplicación (p. ej. consta en la AEAT) y que no se expedirá con ella.`
+          : `Confirmo que los números ${r.saltados.primero} a ${r.saltados.ultimo} ya están usados fuera de esta aplicación (p. ej. constan en la AEAT) y que no se expedirán con ella.`;
+      } catch (err) { if (err.estado !== 401) error.append(alerta('danger', err.message)); }
+    }, 'Revisando…');
+  }
+
+  async function hacer() {
+    vaciar(error);
+    if (!previa || !chk.checked) { error.append(alerta('danger', 'Revise los números que se saltan y marque la confirmación.')); return; }
+    await conEspera(avanzar, async () => {
+      try {
+        const cuerpo = { actual: previa.actual, siguiente: previa.siguiente, confirmo: true };
+        if (conAnio) cuerpo.anio = previa.anio;
+        if (motivo.value.trim()) cuerpo.motivo = motivo.value.trim();
+        const r = await api(`/series/${enc(serie.id)}/avanzar`, { metodo: 'POST', json: cuerpo });
+        dlg.close();
+        notificar(`Contador de la serie ${serie.codigo} avanzado: el siguiente número es ${r.siguiente_texto}.`, 'ok');
+        if (alTerminar) alTerminar(r);
+      } catch (err) { if (err.estado !== 401) error.append(alerta('danger', err.message)); }
+    }, 'Avanzando…');
+  }
+
+  const datos = [['Patrón', h('code', null, serie.patron)]];
+  if (serie.entorno) datos.push(['Entorno', badgeEntorno(serie.entorno)]);
+  const lista = comoLista(meses);
+  // Desde la consulta: la propuesta solo cubre los meses comprobados (del consultado al actual), no todo lo que tiene la AEAT
+  const avisoMeses = lista.length
+    ? alerta('info', h('strong', null, `Meses comprobados: ${lista.join(', ')}. `),
+      `Número propuesto: el mayor número de esta serie que ${servicio || 'la AEAT'} tiene en ${lista.length === 1 ? 'ese mes' : 'esos meses'} + 1. `
+      + 'Los meses anteriores al consultado no se han mirado.')
+    : null;
+  const form = h('form', { class: 'form', onsubmit: (e) => { e.preventDefault(); ver(); } },
+    h('div', { class: 'fila-campos' },
+      conAnio ? campo('Año del contador', anioIn) : null,
+      campo('Nuevo siguiente número', sigIn, { ayuda: 'El primer número que se expedirá después: el mayor número de esta serie y año ya '
+        + 'usado fuera de esta aplicación + 1. Compruébelo en la consulta a la AEAT del mes completo, que mira también los meses siguientes '
+        + 'hasta el actual.' })),
+    campo('Motivo (opcional)', motivo),
+    h('div', { class: 'acciones' }, revisar));
+  const dlg = dialogo({
+    titulo: `Avanzar el contador de la serie ${serie.codigo}`,
+    contenido: [
+      h('p', null, 'Úselo solo si hay números de esta serie ya usados fuera de esta instalación: por ejemplo, tras perder la base de datos '
+        + 'y el diario, la consulta a la AEAT muestra números que aquí no constan.'),
+      alerta('warn', h('strong', null, 'No se puede deshacer. '), 'El contador solo avanza: los números que se saltan no podrán expedirse '
+        + 'con esta aplicación. El cambio queda en el registro de actividad y en el diario de recuperación.'),
+      kv(datos),
+      avisoMeses,
+      form,
+      vista,
+      h('div', { class: 'casilla casilla-destacada' }, chk, chkTexto),
+      error,
+    ],
+    acciones: [boton('Cancelar', () => dlg.close()), avanzar],
+  });
+  ver();
+}
+
+function filaFactura(x) {
+  return x.factura_id ? enlace(x.num_serie || `#${x.factura_id}`, `#/factura/${enc(x.factura_id)}`, { class: 'mono' })
+    : h('span', { class: 'mono' }, x.num_serie || '—');
+}
+
+function huellas(x, corto = 'AEAT') {
+  const loc = x.huella_local ? abreviar(x.huella_local) : '—';
+  const aeat = x.huella_aeat ? abreviar(x.huella_aeat) : '—';
+  if (x.huella_local && x.huella_aeat && x.huella_local === x.huella_aeat) return h('span', { class: 'mono', title: x.huella_local }, `${loc} (iguales)`);
+  return [h('span', { class: 'mono bloque', title: x.huella_local || '' }, `Local: ${loc}`),
+    h('span', { class: 'mono bloque', title: x.huella_aeat || '' }, `${corto}: ${aeat}`)];
+}
+
+/** Nombres del servicio consultado en la pantalla de consulta: el simulador local nunca se presenta como la AEAT. */
+function nombresServicio(entorno) {
+  const sim = entorno === 'simulador';
+  return {
+    donde: sim ? 'el simulador local' : 'la AEAT', de: sim ? 'del simulador local' : 'de la AEAT',
+    Donde: sim ? 'El simulador local' : 'La AEAT', corto: sim ? 'Simulador' : 'AEAT', estado: sim ? 'Estado en el simulador' : 'Estado AEAT',
+  };
+}
+
+function notaConsulta(x) {
+  return [x.revisar ? pill('Revisar', 'warn') : null, x.revisar ? ' ' : null,
+    h('span', { class: 'valor-largo' }, x.motivo || x.nota || '—')];
+}
+
+async function paginaConsultaAeat(ctx) {
+  titulo('Consulta a la AEAT');
+  const eid = app.empresaId;
+  const q = ctx.query;
+  const hoy = anioMesHoy();
+  const habilitados = entornosHabilitados();
+  let entorno = habilitados.includes(q.get('entorno')) ? q.get('entorno') : (habilitados.includes(app.entorno) ? app.entorno : 'simulador');
+  const selEnt = selector(habilitados.map((k) => [k, ENTORNOS[k].corto]), entorno);
+  const ejercicio = entrada({ type: 'number', min: 2000, max: 2100, step: 1, required: true,
+    value: /^\d{4}$/.test(q.get('ejercicio') || '') ? q.get('ejercicio') : String(hoy.anio) });
+  const mesIni = /^(0[1-9]|1[0-2])$/.test(q.get('periodo') || '') ? q.get('periodo') : String(hoy.mes).padStart(2, '0');
+  const periodo = selector(MESES.map((m, i) => [String(i + 1).padStart(2, '0'), `${String(i + 1).padStart(2, '0')} · ${m}`]), mesIni);
+  const numSerie = entrada({ maxlength: 60, class: 'mono', placeholder: 'Opcional: una sola factura', value: q.get('num_serie') || '' });
+  const badge = h('span', null, badgeEntorno(entorno, true));
+  const resultado = h('div', { 'aria-live': 'polite' });
+  const simulador = h('div');
+  const puede = puedeEmitirRol();
+  const btn = h('button', { type: 'submit', class: 'btn btn-primario', disabled: !puede }, 'Consultar');
+  const form = h('form', { class: 'form' },
+    h('div', { class: 'fila-campos' },
+      campo('Entorno', selEnt), campo('Ejercicio', ejercicio), campo('Periodo (mes de expedición)', periodo),
+      campo('Número de factura', numSerie)),
+    h('div', { class: 'acciones' }, btn),
+    puede ? null : alerta('info', 'Solo un usuario emisor o administrador puede consultar a la AEAT.'));
+
+  async function consultar() {
+    vaciar(resultado).append(cargando('Consultando…'));
+    const cuerpo = { entorno, ejercicio: ejercicio.value.trim(), periodo: periodo.value };
+    if (numSerie.value.trim()) cuerpo.num_serie = numSerie.value.trim();
+    fijarQuery({ entorno, ejercicio: cuerpo.ejercicio, periodo: cuerpo.periodo, num_serie: cuerpo.num_serie || '' });
+    try {
+      const r = await api(`/empresas/${enc(eid)}/consulta`, { metodo: 'POST', json: cuerpo });
+      if (!ctx.vigente()) return;
+      pintar(r);
+    } catch (err) {
+      if (ctx.vigente() && err.estado !== 401) vaciar(resultado).append(cajaError(err));
+    }
+  }
+
+  function pintar(r) {
+    const res = r.resumen || {};
+    const stat = (etq, valor, extra) => h('div', { class: 'stat' }, h('span', { class: 'stat-etq' }, etq), h('span', { class: 'stat-valor' }, String(valor ?? 0)), extra || null);
+    const esSim = r.entorno === 'simulador';
+    const sv = nombresServicio(r.entorno);
+    const huellasSv = (x) => huellas(x, sv.corto);
+    const nodos = [
+      tarjeta('Resultado',
+        h('div', { class: 'stats' },
+          stat('Coinciden', res.coinciden),
+          stat('Estado o huella distintos', res.distintos, res.conciliables ? h('span', { class: 'muted' }, `${res.conciliables} conciliable(s)`) : null),
+          stat(`Solo en ${sv.donde}`, res.solo_aeat),
+          stat('Solo en local', res.solo_local)),
+        kv([
+          ['Consultado', `${esSim ? 'Simulador local (no es la AEAT)' : ENTORNOS[r.entorno].corto} · ${fmtFechaHora(r.consultado_en)}`
+            + (r.parcial ? ' · resultado parcial (IndicadorRepresentante)' : '')],
+          ['Periodo', `${r.periodo}/${r.ejercicio}${r.num_serie ? ` · factura ${r.num_serie}` : ''}`],
+          ['Registros devueltos', `${r.registros_aeat ?? 0} en ${r.paginas ?? 1} página(s)`],
+          ['Evidencia', h('span', { class: 'mono valor-largo' }, r.evidencia || '—')],
+        ]),
+        comoLista(r.avisos).map((a) => alerta('warn', String(a))),
+        res.revisar ? alerta('warn', `${res.revisar} elemento(s) requieren revisión manual. La consulta no cambia nada por sí misma.`)
+          : alerta('ok', 'No hay nada que requiera revisión manual.')),
+      tarjetaCadena(r),
+      tarjetaDistintos(r),
+      tarjeta(`Solo en ${sv.donde}`, h('p', { class: 'ayuda' }, `Registros que ${sv.donde} tiene y no constan en esta instalación (p. ej. expedidos con otro sistema o perdidos en un desastre). `
+        + 'Sus números ya están usados: si son de una serie de esta instalación cuyo contador no ha llegado a ellos, un administrador puede avanzar el contador para no volver a expedirlos '
+        + '(solo desde una consulta del mes completo: el número propuesto tiene en cuenta también los meses siguientes, hasta el actual).'),
+        tabla([
+          { titulo: 'Número', celda: (x) => h('span', { class: 'mono' }, x.num_serie) },
+          { titulo: 'Fecha', celda: (x) => fmtFecha(x.fecha_expedicion) },
+          { titulo: sv.estado, celda: (x) => pillDe(ESTADO_AEAT, x.estado_aeat) },
+          { titulo: 'Importe', clase: 'num', celda: (x) => fmtImporte(x.importe_total_aeat) },
+          { titulo: 'Huella', celda: (x) => h('span', { class: 'mono', title: x.huella_aeat || '' }, abreviar(x.huella_aeat) || '—') },
+          { titulo: 'Presentado', celda: (x) => fmtFechaHora(x.timestamp_presentacion) },
+          {
+            titulo: 'Nota',
+            // Solo con una consulta del mes completo (sin «Número de factura») y no parcial: el servidor comprueba además los
+            // meses siguientes del ejercicio hasta el actual y dice cuáles
+            celda: (x) => [...notaConsulta(x), x.siguiente_propuesto && x.serie_id && esAdmin() && !r.num_serie && !r.parcial
+              ? h('span', { class: 'bloque' }, boton(`Avanzar el contador de la serie ${x.serie_codigo}…`, () => dialogoAvanceContador(
+                { id: x.serie_id, codigo: x.serie_codigo, patron: x.serie_patron, entorno: r.entorno },
+                { anio: x.anio_contador, siguiente: x.siguiente_propuesto, meses: x.meses_comprobados, servicio: r.servicio },
+                () => consultar()), { pequeno: true }))
+              : null],
+          },
+        ], comoLista(r.solo_aeat), { vacio: 'Ninguno.', leyenda: `Solo en ${sv.donde}` })),
+      tarjeta('Solo en local', h('p', { class: 'ayuda' }, r.parcial
+        ? `Registros de esta instalación que la respuesta parcial ${sv.de} no devuelve (puede que consten igualmente).`
+        : `Registros de esta instalación que ${sv.donde} no devuelve.`),
+        tabla([
+          { titulo: 'Factura', celda: filaFactura },
+          { titulo: 'Fecha', celda: (x) => fmtFecha(x.fecha_expedicion) },
+          { titulo: 'Estado local', celda: (x) => pillDe(ESTADO_ENVIO, x.estado_local) },
+          { titulo: 'Nota', celda: notaConsulta },
+        ], comoLista(r.solo_local), { vacio: 'Ninguno.', leyenda: 'Solo en local' })),
+      tarjeta('Coinciden',
+        tabla([
+          { titulo: 'Factura', celda: filaFactura },
+          { titulo: 'Fecha', celda: (x) => fmtFecha(x.fecha_expedicion) },
+          { titulo: 'Estado local', celda: (x) => pillDe(ESTADO_ENVIO, x.estado_local) },
+          { titulo: sv.estado, celda: (x) => pillDe(ESTADO_AEAT, x.estado_aeat) },
+          { titulo: 'Huella', celda: huellasSv },
+          { titulo: 'Nota', celda: (x) => (x.nota ? h('span', { class: 'valor-largo muted' }, x.nota) : '—') },
+        ], comoLista(r.coinciden), { vacio: 'Ninguno.', leyenda: 'Coinciden' })),
+    ];
+    anadir(vaciar(resultado), nodos);
+  }
+
+  /** Cadena atrasada respecto a la AEAT (tras restaurar una copia sin el diario) y cadena ya reanudada. */
+  function tarjetaCadena(r) {
+    const c = r.cadena_atrasada;
+    const est = r.estado_cadena;
+    if (!c && !(est && est.estado === 'anclada')) return null;
+    if (!c) {
+      return tarjeta('Cadena de registros', alerta('ok', 'La cadena se ha reanudado desde el registro ', h('code', null, est.num_serie),
+        ` del ${fmtFecha(est.fecha_expedicion)} ${nombresServicio(r.entorno).de}: el próximo registro se encadenará a él.`));
+    }
+    const sv = nombresServicio(r.entorno);
+    // Sin un último registro seguro (cadena_ambigua) o con una anulación que la consulta no deja ver, el servidor no la reanuda
+    const sinReanudar = c.ambigua || comoLista(r.codigos_aviso).includes('anulacion_sin_huella');
+    return tarjeta('Cadena de registros atrasada',
+      alerta('danger', h('strong', null, 'No se pueden expedir, anular ni subsanar facturas en este entorno. '),
+        `${sv.Donde} tiene ${c.registros_posteriores} registro(s) de esta instalación posteriores al último `
+        + 'registro local: probablemente se generaron después de la copia restaurada y se perdieron con la base de datos y el diario. '
+        + `El siguiente registro debe encadenarse al último que tiene ${sv.donde}, no al de la copia.`),
+      kv([
+        [c.ambigua ? `Registro más reciente en ${sv.donde}` : `Último registro en ${sv.donde}`, h('span', { class: 'mono' }, `${c.num_serie} · ${fmtFecha(c.fecha_expedicion)}`)],
+        ['Generado', h('span', { class: 'mono' }, c.fecha_hora_huso)],
+        ['Huella', h('span', { class: 'mono valor-largo' }, c.huella)],
+        ['Último registro local', c.cabeza_local ? h('span', { class: 'mono' }, `${c.cabeza_local.num_serie} · ${c.cabeza_local.fecha_hora_huso}`) : 'Ninguno'],
+        c.ambigua ? ['Candidatos a último', h('ul', { class: 'lista-motivos' }, comoLista(c.candidatos).map((x) => h('li', { class: 'mono' },
+          `${x.num_serie} · ${fmtFecha(x.fecha_expedicion)} · ${x.fecha_hora_huso || 'sin fecha y hora'}`)))] : null,
+      ].filter(Boolean)),
+      sinReanudar
+        ? alerta('warn', `La cadena no puede reanudarse desde la consulta: ${c.ambigua
+          ? `la respuesta ${sv.de} no permite saber cuál de los registros candidatos es el último`
+          : `${sv.donde} muestra una factura anulada con la huella de su registro de alta`} (vea los avisos). No expida, anule ni `
+          + 'subsane facturas en este entorno y aclárelo con el operador de la plataforma.')
+        : esAdmin()
+          ? h('div', { class: 'acciones' }, boton(`Reanudar la cadena desde el último registro ${sv.de}…`, () => dialogoReanudarCadena(r, consultar), { tipo: 'peligro' }))
+          : alerta('info', 'Solo un administrador puede reanudar la cadena.'));
+  }
+
+  function tarjetaDistintos(r) {
+    const filas = comoLista(r.distintos);
+    const sel = new Set();
+    const admin = esAdmin();
+    const conciliables = filas.filter((x) => x.conciliable);
+    const sv = nombresServicio(r.entorno);
+    const btnConc = boton('Conciliar los seleccionados', () => conciliar(btnConc), { tipo: 'primario', disabled: true });
+    const actualizar = () => { btnConc.disabled = !sel.size; btnConc.textContent = sel.size ? `Conciliar los seleccionados (${sel.size})` : 'Conciliar los seleccionados'; };
+    const cols = [];
+    if (admin && conciliables.length) {
+      cols.push({
+        titulo: h('span', { class: 'sr-only' }, 'Seleccionar'), clase: 'col-chk',
+        celda: (x) => {
+          if (!x.conciliable) return '';
+          const chk = h('input', { type: 'checkbox', 'aria-label': `Conciliar la factura ${x.num_serie}` });
+          chk.addEventListener('change', () => { if (chk.checked) sel.add(x.registro_id); else sel.delete(x.registro_id); actualizar(); });
+          return chk;
+        },
+      });
+    }
+    cols.push(
+      { titulo: 'Factura', celda: filaFactura },
+      { titulo: 'Fecha', celda: (x) => fmtFecha(x.fecha_expedicion) },
+      { titulo: 'Estado local', celda: (x) => pillDe(ESTADO_ENVIO, x.estado_local) },
+      { titulo: sv.estado, celda: (x) => pillDe(ESTADO_AEAT, x.estado_aeat) },
+      { titulo: 'Huella', celda: (x) => huellas(x, sv.corto) },
+      { titulo: 'Motivo', celda: (x) => [x.conciliable ? pill(`Conciliable → ${x.estado_propuesto_texto || 'aceptado'}`, 'info') : null, x.conciliable ? ' ' : null, ...notaConsulta(x)] },
+    );
+
+    async function conciliar(b) {
+      const elegidas = filas.filter((x) => sel.has(x.registro_id));
+      const ok = await confirmar({
+        titulo: r.entorno === 'simulador' ? 'Conciliar con el simulador local' : 'Conciliar con la AEAT',
+        contenido: [
+          h('p', null, `Se marcarán como aceptados estos registros, que ${sv.donde} ya tiene con la misma huella. Antes de cambiar nada `
+            + `se vuelve a consultar ${r.entorno === 'simulador' ? 'al simulador local' : 'a la AEAT'} y se comprueba cada uno; los que no cumplan se dejan como están.`),
+          h('ul', { class: 'lista-simple' }, elegidas.map((x) => h('li', null, h('span', { class: 'mono' }, x.num_serie), ` · ${x.estado_local_texto || x.estado_local} → ${x.estado_propuesto_texto || 'Registro aceptado'}`))),
+          h('p', { class: 'ayuda' }, 'El cambio queda en el registro de actividad y en el diario de recuperación. No se reenvía nada.'),
+        ],
+        textoBoton: 'Conciliar',
+      });
+      if (!ok) return;
+      await conEspera(b, async () => {
+        try {
+          const res = await api(`/empresas/${enc(eid)}/consulta/conciliar`, { metodo: 'POST', json: { entorno: r.entorno, registro_ids: [...sel], confirmo: true } });
+          const nc = comoLista(res.no_conciliados);
+          notificar(`${comoLista(res.conciliados).length} registro(s) conciliado(s)${nc.length ? `; ${nc.length} sin conciliar` : ''}.`, nc.length ? 'warn' : 'ok');
+          refrescarAvisos(true);   // la conciliación puede cerrar la incidencia de comunicación
+          if (nc.length) {
+            dialogo({
+              titulo: 'Registros no conciliados',
+              contenido: h('ul', { class: 'lista-simple' }, nc.map((x) => h('li', null, h('span', { class: 'mono' }, x.num_serie || `#${x.registro_id}`), `: ${x.motivo}`))),
+              acciones: [boton('Cerrar', (ev) => ev.currentTarget.closest('dialog').close())],
+            });
+          }
+          await consultar();
+        } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+      }, 'Conciliando…');
+    }
+
+    return tarjeta('Estado o huella distintos',
+      h('p', { class: 'ayuda' }, 'Facturas que están en los dos lados con diferencias. Solo se ofrece corregir automáticamente el caso seguro: '
+        + `un registro local sin respuesta definitiva (o rechazado por duplicado, 3000) que ${sv.donde} ya tiene con la misma huella. `
+        + 'El resto requiere revisión manual.'),
+      tabla(cols, filas, { vacio: 'Ninguna.', leyenda: 'Estado o huella distintos' }),
+      conciliables.length ? (admin ? h('div', { class: 'acciones' }, btnConc)
+        : alerta('info', 'Solo un administrador puede conciliar los registros.')) : null);
+  }
+
+  function pintarSimulador() {
+    vaciar(simulador);
+    if (entorno !== 'simulador' || !esAdmin()) return;
+    const veces = entrada({ type: 'number', min: 1, max: 20, step: 1, value: '1' });
+    const formSim = h('form', { class: 'form' },
+      grupoRadios('modo_consulta', 'Comportamiento del simulador en las próximas consultas', MODOS_CONSULTA_SIMULADOR, 'normal'),
+      h('div', { class: 'fila-entorno' }, campo('Número de consultas afectadas', veces)),
+      h('div', { class: 'acciones' }, h('button', { type: 'submit', class: 'btn btn-secundario' }, 'Aplicar modo')));
+    formSim.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const modo = valorRadio(formSim, 'modo_consulta');
+      await conEspera(formSim.querySelector('button[type="submit"]'), async () => {
+        try {
+          await api(`/empresas/${enc(eid)}/simulador/modo`, { metodo: 'POST', json: { modo, servicio: 'consulta', veces: Math.max(1, Math.min(20, Number(veces.value) || 1)) } });
+          notificar(`Simulador (consulta): modo «${(MODOS_CONSULTA_SIMULADOR.find(([k]) => k === modo) || [null, modo])[1]}» para esta empresa.`, 'ok');
+        } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+      });
+    });
+    simulador.append(h('section', { class: 'card card-simulador' },
+      h('h2', { class: 'card-titulo' }, 'Simulación local de la consulta — no es la AEAT'),
+      h('p', null, 'Permite probar cómo responde la aplicación ante fallos del servicio de consulta. Solo afecta a las consultas de esta empresa al simulador local.'),
+      formSim));
+  }
+
+  selEnt.addEventListener('change', () => {
+    entorno = selEnt.value;
+    badge.replaceChildren(badgeEntorno(entorno, true));
+    vaciar(resultado);
+    pintarSimulador();
+  });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!/^\d{4}$/.test(ejercicio.value.trim())) { notificar('Indique el ejercicio con 4 cifras.', 'danger'); ejercicio.focus(); return; }
+    await conEspera(btn, consultar, 'Consultando…');
+  });
+  pintarSimulador();
+  montar(ctx,
+    cabeceraPagina('Consulta a la AEAT', { meta: [badge] }),
+    tarjeta(null,
+      h('p', null, 'Consulta los registros de facturación que la AEAT tiene de esta empresa en un mes y los compara con los de esta '
+        + 'instalación: coinciden, solo en la AEAT, solo en local, o con estado o huella distintos.'),
+      h('p', { class: 'ayuda' }, 'La consulta usa el mismo certificado y las mismas comprobaciones que la remisión. No modifica nada: '
+        + 'solo un administrador puede conciliar, con confirmación, los registros sin respuesta (o rechazados por duplicado) que la AEAT '
+        + 'ya tiene con la misma huella. Útil para confirmar envíos sin respuesta y, tras restaurar una copia, para comprobar qué consta en la AEAT.'),
+      form),
+    resultado,
+    simulador);
+  // Nunca se consulta al cargar la página (ni al recargarla): solo con el botón «Consultar».
+}

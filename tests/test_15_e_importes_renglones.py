@@ -215,7 +215,9 @@ def test_factura_sin_iva_base_igual_al_total_y_bloqueo_claro():
                              parrafo=["Arrendamiento de la vivienda de la Calle Imaginaria, nº 7, de",
                                       "Villaficticia, correspondiente al mes de octubre de 2026."]))
     assert (d["base_imponible"], d["cuota_total"], d["importe_total"]) == ("745.20", "0.00", "745.20")
-    assert d["desglose"] == [] and ext["cuota_iva"]["metodo"] == "calculado"
+    # sin mención de exención: se propone una base sin IVA y sin causa, para que el usuario la elija (o corrija el IVA)
+    assert d["desglose"] == [borradores.fila_exenta("745.20")] and ext["cuota_iva"]["metodo"] == "calculado"
+    assert borradores.clase_fila(d["desglose"][0]) == "sin_calificar"
     assert ext["cuota_iva"]["confianza"] < borradores.UMBRAL_CONFIANZA
     assert len(d["lineas"]) == 1 and d["lineas"][0]["importe"] == "745.20"
     assert d["lineas"][0]["concepto"].startswith("Arrendamiento de la vivienda")

@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import sqlite3
 from datetime import datetime
 from decimal import Decimal
 
@@ -62,9 +63,22 @@ def campos_cambiados(con, borrador_id: int) -> set[str]:
     return {r["campo"] for r in db.filas(con, "SELECT campo FROM cambios_borrador WHERE borrador_id=?", (borrador_id,))}
 
 
-def sistema_informatico(con, empresa_id: int) -> xmlgen.SistemaInformatico:
+def obligados_del_usuario(con, empresa_id: int, usuario_id: int | None) -> int:
+    """Obligados tributarios que gestiona el usuario del SaaS que genera el registro (FAQ desarrolladores n.º 4: en
+    SaaS, IndicadorMultiplesOT se calcula por usuario, no por plataforma): las empresas de las que es miembro. Sin
+    usuario, las que gestionan los miembros de la empresa."""
+    if usuario_id is not None:
+        n = db.fila(con, "SELECT COUNT(DISTINCT empresa_id) n FROM miembros WHERE usuario_id=?",
+                    (usuario_id,))["n"]
+    else:
+        n = db.fila(con, """SELECT COUNT(DISTINCT m2.empresa_id) n FROM miembros m1 JOIN miembros m2 ON m2.usuario_id=m1.usuario_id
+                            WHERE m1.empresa_id=?""", (empresa_id,))["n"]
+    return max(n, 1)
+
+
+def sistema_informatico(con, empresa_id: int, usuario_id: int | None = None) -> xmlgen.SistemaInformatico:
     p = produccion.productor(con) or {}
-    n_empresas = db.fila(con, "SELECT COUNT(*) n FROM empresas")["n"]
+    n_empresas = obligados_del_usuario(con, empresa_id, usuario_id)
     emp = db.fila(con, "SELECT nif, razon_social FROM empresas WHERE id=?", (empresa_id,))
     return xmlgen.SistemaInformatico(
         nombre_razon=(p.get("nombre") or emp["razon_social"])[:120],
@@ -107,8 +121,20 @@ def validar_borrador(con, borrador: dict, entorno: str) -> tuple[list[dict], dic
     if serie and not serie["anio_correcto"]:
         inc.append({"nivel": "bloqueo", "campo": "num_serie", "codigo": "ANIO_SERIE",
                     "mensaje": f"El año del número ({serie['anio_detectado']}) no es el de expedición ({hoy.year})."})
+    if serie is None and isinstance(ns, str) and ns.strip():
+        # serie con ceros de relleno ({n:3}): el número sin el ancho de la serie no la identifica; se indica cómo escribirlo
+        fmt = series.formato_esperado(con, empresa["id"], entorno, ns, hoy.year, "rectificativa" if es_rect else "ordinaria")
+        if fmt:
+            inc.append({"nivel": "aviso", "campo": "num_serie", "codigo": "SERIE_FORMATO",
+                        "mensaje": f"La serie «{fmt['codigo']}» ({fmt['patron']}) escribe este número como «{fmt['esperado']}»: "
+                                   "corrija el número de factura si corresponde a esa serie."})
     if es_rect and not datos.get("rectificativa"):
         inc.append({"nivel": "bloqueo", "campo": "rectificativa", "codigo": "RECT_DATOS", "mensaje": "Faltan datos de la rectificación."})
+    est = estado_cadena_aeat(con, empresa["id"], entorno)
+    if est and est["estado"] == "atrasada":
+        from .consulta import mensaje_cadena_atrasada
+        inc.append({"nivel": "bloqueo", "campo": "num_serie", "codigo": "CADENA_ATRASADA",
+                    "mensaje": mensaje_cadena_atrasada(est, entorno)})
     if es_rect:
         orig = db.fila(con, "SELECT entorno, estado, num_serie FROM facturas WHERE id=?", (borrador["rectifica_factura_id"],))
         if orig["entorno"] != entorno:
@@ -135,12 +161,21 @@ def datos_aprobados(borrador: dict, empresa: dict, entorno: str, fecha_exp: str,
         if d.get(k) is not None:
             d[k] = fmt_xml(d[k])
     for x in d.get("desglose") or []:
+        if borradores.es_exenta(x):
+            # base exenta: sin tipo ni cuota; la clave de régimen se deriva de la causa (02 para E2 y E3)
+            x.update(tipo_iva=None, cuota=None, calificacion=None, base=fmt_xml(x["base"]), impuesto="01",
+                     clave_regimen=borradores.clave_regimen_exenta(x["operacion_exenta"]),
+                     motivo_exencion=borradores.normalizar_mencion(x["motivo_exencion"]))
+            continue
         x["tipo_iva"] = fmt_xml(x["tipo_iva"])
         x["base"] = fmt_xml(x["base"])
         x["cuota"] = fmt_xml(x["cuota"])
-        x.setdefault("calificacion", "S1")
+        if not x.get("calificacion"):
+            x["calificacion"] = "S1"
         x.setdefault("clave_regimen", "01")
         x.setdefault("impuesto", "01")
+        for k in ("operacion_exenta", "motivo_exencion"):
+            x.pop(k, None)   # una fila sujeta no lleva datos de exención (p. ej. restos de un cambio de criterio)
     if not d.get("total_a_pagar"):
         d["total_a_pagar"] = d["importe_total"]
     d["numeracion"] = {"serie_id": serie["id"], "serie_codigo": serie["codigo"], "patron": serie["patron"],
@@ -153,6 +188,12 @@ def datos_aprobados(borrador: dict, empresa: dict, entorno: str, fecha_exp: str,
 
 
 # --- Registros -----------------------------------------------------------------------------------
+def estado_cadena_aeat(con, empresa_id: int, entorno: str) -> dict | None:
+    """Cadena «atrasada» respecto a la AEAT (no se generan registros) o «anclada» a su último registro (el siguiente
+    registro lo usa como anterior). Ver consulta.reanudar_cadena."""
+    return db.fila(con, "SELECT * FROM cadenas_aeat WHERE empresa_id=? AND entorno=?", (empresa_id, entorno))
+
+
 def _cadena(con, empresa_id: int, entorno: str, inst_id: int) -> dict:
     c = db.fila(con, "SELECT * FROM cadenas WHERE empresa_id=? AND entorno=? AND instalacion_id=?", (empresa_id, entorno, inst_id))
     if not c:
@@ -162,15 +203,29 @@ def _cadena(con, empresa_id: int, entorno: str, inst_id: int) -> dict:
     return c
 
 
-def _marca_temporal(cad: dict) -> str:
+def _marca_temporal(cad: dict, ancla: dict | None = None) -> str:
     ahora = db.ahora()
     if cad.get("ultima_fecha_hora") and ahora < datetime.fromisoformat(cad["ultima_fecha_hora"]):
         raise ErrorEmision("El reloj del sistema es anterior al último registro generado. Revise la hora del servidor.")
+    if ancla:
+        # Registro de la AEAT desde el que se reanudó la cadena (FechaHoraHusoGenRegistro tal como la devolvió la consulta;
+        # sin huso se entiende hora peninsular). El nuevo registro no puede ser anterior a él.
+        try:
+            t_ancla = datetime.fromisoformat(ancla["fecha_hora_huso"])
+        except (TypeError, ValueError) as e:
+            raise ErrorEmision("La fecha y hora del registro de la AEAT desde el que se reanudó la cadena no es válida: "
+                               "vuelva a reanudar la cadena desde la consulta.") from e
+        if t_ancla.tzinfo is None:
+            t_ancla = t_ancla.replace(tzinfo=db.TZ)
+        if ahora.replace(microsecond=0) < t_ancla:
+            raise ErrorEmision("El reloj del sistema es anterior al último registro que tiene la AEAT, desde el que se reanudó "
+                               "la cadena. Revise la hora del servidor.")
     return hmod.fecha_hora_huso(ahora)
 
 
 def _insertar_registro(con, *, empresa: dict, entorno: str, factura_id: int, tipo: str, el, cadena_txt: str,
-                       huella: str, huella_ant: str, fh: str, inst: dict, cad: dict, campos: dict) -> int:
+                       huella: str, huella_ant: str, fh: str, inst: dict, cad: dict, campos: dict,
+                       ancla: dict | None = None) -> int:
     cab = {"nombre": empresa["razon_social"], "nif": nifmod.normalizar(empresa["nif"])}
     xml_txt = xmlgen.a_texto(el)
     errores = esquemas_xsd.validar(xmlgen.mensaje_remision(cab, [xml_txt]))
@@ -180,36 +235,53 @@ def _insertar_registro(con, *, empresa: dict, entorno: str, factura_id: int, tip
     ahora = db.ahora_iso()
     cf = db.fila(con, "SELECT incidencia_desde FROM control_flujo WHERE empresa_id=? AND entorno=?", (empresa["id"], entorno))
     incidencia = 1 if cf and cf["incidencia_desde"] else 0
+    ancla_txt = canonico({k: ancla[k] for k in ("id_emisor", "num_serie", "fecha_expedicion", "fecha_hora_huso", "huella")}) \
+        if ancla else None
     cur = con.execute("""INSERT INTO registros (empresa_id, entorno, instalacion_id, secuencia, factura_id, tipo, subsanacion,
         rechazo_previo, sin_registro_previo, registro_corregido_id, id_emisor, num_serie, fecha_expedicion, tipo_factura,
         cuota_total, importe_total, huella_anterior, fecha_hora_huso, huella, cadena_huella, xml, xml_sha256,
-        estado_envio, incidencia, siguiente_intento_en, creado_en, actualizado_en)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pendiente',?,?,?,?)""",
+        estado_envio, incidencia, siguiente_intento_en, creado_en, actualizado_en, ancla_aeat)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pendiente',?,?,?,?,?)""",
                       (empresa["id"], entorno, inst["id"], sec, factura_id, tipo, campos.get("subsanacion"),
                        campos.get("rechazo_previo"), campos.get("sin_registro_previo"), campos.get("registro_corregido_id"),
                        campos["id_emisor"], campos["num_serie"], campos["fecha_expedicion"], campos.get("tipo_factura"),
                        campos.get("cuota_total"), campos.get("importe_total"), huella_ant or None, fh, huella, cadena_txt,
-                       xml_txt, sha256_txt(xml_txt), incidencia, db.utc_iso(), ahora, db.utc_iso()))
+                       xml_txt, sha256_txt(xml_txt), incidencia, db.utc_iso(), ahora, db.utc_iso(), ancla_txt))
     rid = cur.lastrowid
+    if ancla:
+        # El ancla se ha usado: la cadena local continúa desde este registro
+        con.execute("DELETE FROM cadenas_aeat WHERE empresa_id=? AND entorno=? AND estado='anclada' AND huella=?",
+                    (empresa["id"], entorno, ancla["huella"]))
+        db.actividad(con, "cadena.ancla_usada", empresa_id=empresa["id"], objeto="registro", objeto_id=rid,
+                     detalle={"entorno": entorno, "ancla": {k: ancla[k] for k in ("num_serie", "fecha_expedicion", "huella")}})
     con.execute("UPDATE cadenas SET ultimo_registro_id=?, secuencia=?, ultima_fecha_hora=? WHERE empresa_id=? AND entorno=? AND instalacion_id=?",
                 (rid, sec, fh, empresa["id"], entorno, inst["id"]))
     return rid
 
 
-def _anterior(con, cad: dict) -> tuple[dict | None, str]:
+def _anterior(con, cad: dict, entorno: str) -> tuple[dict | None, str, dict | None]:
+    """Registro anterior de la cadena: el último registro local o, si la cadena se reanudó desde la AEAT, el último
+    registro que tiene la AEAT (ancla). Con la cadena atrasada respecto a la AEAT no se genera ningún registro."""
+    est = estado_cadena_aeat(con, cad["empresa_id"], entorno)
+    if est and est["estado"] == "atrasada":
+        from .consulta import mensaje_cadena_atrasada
+        raise ErrorEmision(mensaje_cadena_atrasada(est, entorno))
+    if est and est["estado"] == "anclada":
+        return ({"id_emisor": est["id_emisor"], "num_serie": est["num_serie"], "fecha_expedicion": est["fecha_expedicion"],
+                 "huella": est["huella"]}, est["huella"], est)
     prev = db.fila(con, "SELECT * FROM registros WHERE id=?", (cad["ultimo_registro_id"],)) if cad.get("ultimo_registro_id") else None
     if prev:
         return {"id_emisor": prev["id_emisor"], "num_serie": prev["num_serie"],
-                "fecha_expedicion": prev["fecha_expedicion"], "huella": prev["huella"]}, prev["huella"]
-    return None, ""
+                "fecha_expedicion": prev["fecha_expedicion"], "huella": prev["huella"]}, prev["huella"], None
+    return None, "", None
 
 
 def crear_registro_alta(con, empresa: dict, entorno: str, factura: dict, datos: dict, *, subsanacion=None,
-                        rechazo_previo=None, registro_corregido_id=None) -> int:
+                        rechazo_previo=None, registro_corregido_id=None, usuario_id: int | None = None) -> int:
     inst = instalacion(con, empresa["id"])
     cad = _cadena(con, empresa["id"], entorno, inst["id"])
-    enc, huella_ant = _anterior(con, cad)
-    fh = _marca_temporal(cad)
+    enc, huella_ant, ancla = _anterior(con, cad, entorno)
+    fh = _marca_temporal(cad, ancla)
     fecha = hmod.fecha_aeat(datos["fecha_expedicion"])
     campos = {"id_emisor": datos["emisor"]["nif"], "num_serie": datos["num_serie"], "fecha_expedicion": fecha,
               "tipo_factura": datos["tipo_factura"], "cuota_total": fmt_xml(datos["cuota_total"]),
@@ -224,10 +296,11 @@ def crear_registro_alta(con, empresa: dict, entorno: str, factura: dict, datos: 
         id_emisor=campos["id_emisor"], nombre_razon_emisor=datos["emisor"]["nombre"][:120], num_serie=campos["num_serie"],
         fecha_expedicion=fecha, tipo_factura=campos["tipo_factura"],
         descripcion_operacion=datos["descripcion_operacion"][:500],
-        desglose=[{"impuesto": x["impuesto"], "clave_regimen": x["clave_regimen"], "calificacion": x["calificacion"],
-                   "tipo_impositivo": x["tipo_iva"], "base": x["base"], "cuota": x["cuota"]} for x in datos["desglose"]],
+        desglose=[{"impuesto": x["impuesto"], "clave_regimen": x["clave_regimen"], "calificacion": x.get("calificacion"),
+                   "operacion_exenta": x.get("operacion_exenta"), "tipo_impositivo": x.get("tipo_iva"), "base": x["base"],
+                   "cuota": x.get("cuota")} for x in datos["desglose"]],
         cuota_total=campos["cuota_total"], importe_total=campos["importe_total"], fecha_hora_huso=fh, huella=h,
-        encadenamiento=enc, sistema=sistema_informatico(con, empresa["id"]),
+        encadenamiento=enc, sistema=sistema_informatico(con, empresa["id"], usuario_id),
         destinatarios=[{"nombre": datos["destinatario"]["nombre"][:120], "nif": datos["destinatario"]["nif"]}],
         fecha_operacion=hmod.fecha_aeat(datos["fecha_operacion"]) if datos.get("fecha_operacion") else None,
         tipo_rectificativa=rect.get("tipo_rectificativa"),
@@ -237,14 +310,15 @@ def crear_registro_alta(con, empresa: dict, entorno: str, factura: dict, datos: 
     )
     return _insertar_registro(con, empresa=empresa, entorno=entorno, factura_id=factura["id"], tipo="alta",
                               el=xmlgen.registro_alta(alta), cadena_txt=cadena_txt, huella=h, huella_ant=huella_ant,
-                              fh=fh, inst=inst, cad=cad, campos=campos)
+                              fh=fh, inst=inst, cad=cad, campos=campos, ancla=ancla)
 
 
-def crear_registro_anulacion(con, empresa: dict, entorno: str, factura: dict, *, rechazo_previo=None, sin_registro_previo=None) -> int:
+def crear_registro_anulacion(con, empresa: dict, entorno: str, factura: dict, *, rechazo_previo=None, sin_registro_previo=None,
+                             usuario_id: int | None = None) -> int:
     inst = instalacion(con, empresa["id"])
     cad = _cadena(con, empresa["id"], entorno, inst["id"])
-    enc, huella_ant = _anterior(con, cad)
-    fh = _marca_temporal(cad)
+    enc, huella_ant, ancla = _anterior(con, cad, entorno)
+    fh = _marca_temporal(cad, ancla)
     fecha = hmod.fecha_aeat(factura["fecha_expedicion"])
     campos = {"id_emisor": factura["emisor_nif"], "num_serie": factura["num_serie"], "fecha_expedicion": fecha,
               "rechazo_previo": rechazo_previo, "sin_registro_previo": sin_registro_previo}
@@ -252,18 +326,39 @@ def crear_registro_anulacion(con, empresa: dict, entorno: str, factura: dict, *,
                                        huella_anterior=huella_ant, fecha_hora_huso=fh)
     h = hmod.sha256_mayus(cadena_txt)
     an = xmlgen.DatosAnulacion(id_emisor=campos["id_emisor"], num_serie=campos["num_serie"], fecha_expedicion=fecha,
-                               fecha_hora_huso=fh, huella=h, encadenamiento=enc, sistema=sistema_informatico(con, empresa["id"]),
+                               fecha_hora_huso=fh, huella=h, encadenamiento=enc,
+                               sistema=sistema_informatico(con, empresa["id"], usuario_id),
                                rechazo_previo=rechazo_previo, sin_registro_previo=sin_registro_previo)
     return _insertar_registro(con, empresa=empresa, entorno=entorno, factura_id=factura["id"], tipo="anulacion",
                               el=xmlgen.registro_anulacion(an), cadena_txt=cadena_txt, huella=h, huella_ant=huella_ant,
-                              fh=fh, inst=inst, cad=cad, campos=campos)
+                              fh=fh, inst=inst, cad=cad, campos=campos, ancla=ancla)
 
 
 # --- Expedición -------------------------------------------------------------------------------------
+def clave_guardada(empresa_id: int, clave: str) -> str:
+    """La clave de idempotencia es de cada empresa: se guarda precedida del identificador de la empresa. La columna sigue
+    siendo UNIQUE en toda la plataforma, pero la misma clave usada por otra empresa ni choca ni revela nada."""
+    return f"{empresa_id}:{clave}"
+
+
+def _factura_por_clave(con, empresa_id: int, clave: str, borrador_id: int | None = None) -> dict | None:
+    """Factura de ESTA empresa con esa clave (o de ese borrador). Las facturas anteriores guardan la clave tal cual:
+    también cuentan, pero solo dentro de su empresa."""
+    sql = "SELECT id, borrador_id, entorno FROM facturas WHERE (empresa_id=? AND clave_idempotencia IN (?, ?))"
+    p: list = [empresa_id, clave_guardada(empresa_id, clave), clave]
+    if borrador_id is not None:
+        sql += " OR borrador_id=?"
+        p.append(borrador_id)
+    return db.fila(con, sql, p)
+
+
 def emitir(con, *, borrador_id: int, usuario_id: int, entorno: str, clave_idempotencia: str) -> int:
     if not clave_idempotencia or len(clave_idempotencia) > 100:
         raise ErrorEmision("Falta la clave de idempotencia")
-    previa = db.fila(con, "SELECT id, borrador_id, entorno FROM facturas WHERE clave_idempotencia=?", (clave_idempotencia,))
+    b = db.fila(con, "SELECT * FROM borradores WHERE id=?", (borrador_id,))
+    if not b:
+        raise ErrorEmision("Borrador inexistente")
+    previa = _factura_por_clave(con, b["empresa_id"], clave_idempotencia)
     if previa:
         if previa["borrador_id"] != borrador_id:
             raise ErrorEmision("La clave de idempotencia ya se usó para otro borrador")
@@ -271,9 +366,6 @@ def emitir(con, *, borrador_id: int, usuario_id: int, entorno: str, clave_idempo
             raise ErrorEmision(f"Este borrador ya se expidió en el entorno «{previa['entorno']}»")
         _asegurar_diario(con, previa["id"])
         return previa["id"]
-    b = db.fila(con, "SELECT * FROM borradores WHERE id=?", (borrador_id,))
-    if not b:
-        raise ErrorEmision("Borrador inexistente")
     if b.get("factura_id"):
         ya = db.fila(con, "SELECT entorno FROM facturas WHERE id=?", (b["factura_id"],))
         if ya and ya["entorno"] != entorno:
@@ -310,8 +402,7 @@ def emitir(con, *, borrador_id: int, usuario_id: int, entorno: str, clave_idempo
     datos["pdf"] = {"estrategia": info_pdf["estrategia"], "motivo": info_pdf.get("motivo"), "qr": info_pdf.get("qr")}
     canon = canonico(datos)
     with db.transaccion(con):
-        previa = db.fila(con, "SELECT id, entorno, borrador_id FROM facturas WHERE clave_idempotencia=? OR borrador_id=?",
-                         (clave_idempotencia, borrador_id))
+        previa = _factura_por_clave(con, empresa["id"], clave_idempotencia, borrador_id)
         if previa:
             if previa["borrador_id"] != borrador_id:
                 raise ErrorEmision("La clave de idempotencia ya se usó para otro borrador")
@@ -333,18 +424,23 @@ def emitir(con, *, borrador_id: int, usuario_id: int, entorno: str, clave_idempo
         if dup:
             raise ErrorEmision(f"Ya existe la factura {dup[0]['num_serie']}")
         ruta_pdf = f"empresa_{empresa['id']}/{entorno}/facturas/{sha256_txt(canon)[:16]}.pdf"
-        cur = con.execute("""INSERT INTO facturas (empresa_id, entorno, borrador_id, documento_id, clave_idempotencia, serie_id,
-            numero, num_serie, fecha_expedicion, tipo_factura, emisor_nif, destinatario_nif, destinatario_nombre, cuota_total,
-            importe_total, datos, datos_sha256, url_qr, pdf_ruta, pdf_sha256, pdf_estrategia, estado, rectifica_factura_id,
-            creada_por, creada_en) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'emitida',?,?,?)""",
-                          (empresa["id"], entorno, borrador_id, b.get("documento_id"), clave_idempotencia, serie["id"],
-                           serie["numero_detectado"], datos["num_serie"], fecha_exp, datos["tipo_factura"], datos["emisor"]["nif"],
-                           datos["destinatario"]["nif"], datos["destinatario"]["nombre"], datos["cuota_total"],
-                           datos["importe_total"], canon, sha256_txt(canon), url, ruta_pdf, almacen.sha256(pdf),
-                           info_pdf["estrategia"], b.get("rectifica_factura_id"), usuario_id, db.ahora_iso()))
+        try:
+            cur = con.execute("""INSERT INTO facturas (empresa_id, entorno, borrador_id, documento_id, clave_idempotencia, serie_id,
+                numero, num_serie, fecha_expedicion, tipo_factura, emisor_nif, destinatario_nif, destinatario_nombre, cuota_total,
+                importe_total, datos, datos_sha256, url_qr, pdf_ruta, pdf_sha256, pdf_estrategia, estado, rectifica_factura_id,
+                creada_por, creada_en) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'emitida',?,?,?)""",
+                              (empresa["id"], entorno, borrador_id, b.get("documento_id"),
+                               clave_guardada(empresa["id"], clave_idempotencia), serie["id"],
+                               serie["numero_detectado"], datos["num_serie"], fecha_exp, datos["tipo_factura"], datos["emisor"]["nif"],
+                               datos["destinatario"]["nif"], datos["destinatario"]["nombre"], datos["cuota_total"],
+                               datos["importe_total"], canon, sha256_txt(canon), url, ruta_pdf, almacen.sha256(pdf),
+                               info_pdf["estrategia"], b.get("rectifica_factura_id"), usuario_id, db.ahora_iso()))
+        except sqlite3.IntegrityError:
+            # Solo posible si una factura antigua de otra empresa guardó tal cual una clave con esta misma forma
+            raise ErrorEmision("No se puede usar esta clave de idempotencia: genere otra y vuelva a intentarlo")
         fid = cur.lastrowid
         factura = db.fila(con, "SELECT * FROM facturas WHERE id=?", (fid,))
-        rid = crear_registro_alta(con, empresa, entorno, factura, datos)
+        rid = crear_registro_alta(con, empresa, entorno, factura, datos, usuario_id=usuario_id)
         series.consumir(con, serie_tx)
         con.execute("UPDATE borradores SET estado='emitido', factura_id=?, actualizado_en=? WHERE id=?", (fid, db.ahora_iso(), borrador_id))
         if b.get("rectifica_factura_id"):
@@ -435,7 +531,8 @@ def anular(con, *, factura_id: int, usuario_id: int, motivo: str) -> int:
         # anulación anterior rechazada -> RechazoPrevio=S (ambos pueden coincidir).
         sin_previo = None if existe_en_aeat(con, factura_id) else "S"
         rechazo = "S" if ult_an and ult_an["estado_envio"] == "rechazado" else None
-        rid = crear_registro_anulacion(con, empresa, f["entorno"], f, rechazo_previo=rechazo, sin_registro_previo=sin_previo)
+        rid = crear_registro_anulacion(con, empresa, f["entorno"], f, rechazo_previo=rechazo, sin_registro_previo=sin_previo,
+                                       usuario_id=usuario_id)
         cambios = {factura_id: "anulada"}
         con.execute("UPDATE facturas SET estado='anulada' WHERE id=?", (factura_id,))
         if f.get("rectifica_factura_id"):
@@ -478,7 +575,7 @@ def subsanar(con, *, registro_id: int, usuario_id: int, motivo: str) -> int:
         else:
             rechazo = None
         rid = crear_registro_alta(con, empresa, f["entorno"], f, datos, subsanacion="S", rechazo_previo=rechazo,
-                                  registro_corregido_id=registro_id)
+                                  registro_corregido_id=registro_id, usuario_id=usuario_id)
         db.actividad(con, "registro.subsanacion", usuario_id=usuario_id, empresa_id=empresa["id"], objeto="registro",
                      objeto_id=rid, detalle={"motivo": motivo, "corrige": registro_id})
     diario.anotar_registro(con, rid)
@@ -500,7 +597,9 @@ def borrador_rectificativa(con, *, factura_id: int, usuario_id: int, tipo: str, 
         "tipo_factura": tipo, "descripcion_operacion": f"Rectificación de la factura {f['num_serie']}: {motivo}"[:500],
         "lineas": [{"concepto": f"Rectificación de la factura {f['num_serie']}", "cantidad": None, "unidad": None,
                     "precio": None, "importe": None}],
-        "desglose": [{"tipo_iva": x["tipo_iva"], "base": "0.00", "cuota": "0.00", "calificacion": "S1",
+        "desglose": [borradores.fila_exenta("0.00", x["operacion_exenta"], x.get("motivo_exencion"))
+                     if borradores.es_exenta(x) else
+                     {"tipo_iva": x["tipo_iva"], "base": "0.00", "cuota": "0.00", "calificacion": "S1",
                       "clave_regimen": "01", "impuesto": "01"} for x in d["desglose"]],
         "base_imponible": "0.00", "cuota_total": "0.00", "importe_total": "0.00", "retencion": None, "total_a_pagar": "0.00",
         "observaciones": f"Motivo de la rectificación: {motivo}", "indicios": [], "confirmaciones": [],

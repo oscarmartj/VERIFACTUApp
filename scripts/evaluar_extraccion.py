@@ -83,9 +83,20 @@ def evaluar_documento(pdf: Path, esp: dict) -> dict:
         else:
             comp("retencion", not (d.get("retencion") or {}).get("importe"))
     if esp.get("desglose"):
-        got = sorted((dec(x.get("tipo_iva")), dec(x.get("base")), dec(x.get("cuota"))) for x in d.get("desglose") or [])
-        exp = sorted((dec(x["tipo_iva"]), dec(x["base"]), dec(x["cuota"])) for x in esp["desglose"])
-        comp("desglose", got == exp)
+        # filas sujetas del desglose esperado: {tipo_iva, base, cuota}; filas sin IVA (las bases exentas o sin calificar que
+        # propone el borrador, borradores._proponer_exencion, sin tipo ni cuota): {operacion_exenta: "E1"… o null si
+        # queda sin calificar, base}. El campo falla si las filas sujetas no coinciden o si el borrador propone una fila
+        # sin IVA que el desglose esperado no tiene (o al revés). Un desglose esperado vacío no se compara (como antes)
+        filas = d.get("desglose") or []
+        sin_iva = [x for x in filas if borradores.clase_fila(x) in ("exenta", "sin_calificar")]
+        sujetas = [x for x in filas if borradores.clase_fila(x) not in ("exenta", "sin_calificar")]
+        got = sorted((dec(x.get("tipo_iva")), dec(x.get("base")), dec(x.get("cuota"))) for x in sujetas)
+        exp = sorted((dec(x["tipo_iva"]), dec(x["base"]), dec(x["cuota"])) for x in esp["desglose"]
+                     if "operacion_exenta" not in x)
+        got_ex = sorted(((x.get("operacion_exenta") or None, dec(x.get("base"))) for x in sin_iva), key=str)
+        exp_ex = sorted(((x.get("operacion_exenta") or None, dec(x.get("base"))) for x in esp["desglose"]
+                         if "operacion_exenta" in x), key=str)
+        comp("desglose", got == exp and got_ex == exp_ex)
     if esp.get("lineas"):
         got = d.get("lineas") or []
         imps_got = sorted(dec(x.get("importe")) for x in got if x.get("importe") is not None)

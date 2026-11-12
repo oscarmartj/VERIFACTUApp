@@ -4,7 +4,7 @@
 
 Según el art. 13 del Reglamento (RD 1007/2023) y las FAQ de la AEAT, es productor quien desarrolla el sistema, **también si lo desarrolla para su propio uso** o integra componentes de código abierto. Este sistema se ha construido por encargo del usuario con asistencia de una herramienta de IA, que **no puede asumir esa condición**.
 
-**Pendiente de decisión del responsable:** designar a la persona o entidad que asume la condición de productor y su mantenimiento (previsiblemente la propia empresa usuaria, como desarrollo para uso interno, o la persona o entidad que lo mantenga y distribuya). Hasta entonces:
+**Pendiente de decisión del responsable:** designar a la persona o entidad que asume la condición de productor del sistema y su mantenimiento. En la plataforma multiusuario es su **operador** (quien la instala, la mantiene y la pone a disposición de los usuarios); solo el operador lo identifica y confirma (Configuración → «Productor del sistema» o panel «Plataforma»), y para los administradores de las empresas no es una tarea pendiente suya. Hasta entonces:
 
 - la tabla `productor` queda sin confirmar y **producción y pruebas AEAT están bloqueadas** (requisito «Productor del sistema identificado y confirmado»);
 - en el simulador local, el bloque `SistemaInformatico` usa provisionalmente la razón social y el NIF de la empresa emisora.
@@ -19,7 +19,7 @@ Datos del productor que deben aportarse: nombre o razón social, NIF (o identifi
 | Código identificador (`IdSistemaInformatico`) | FV |
 | Versión | 0.1.0 |
 | Modalidad | Exclusivamente VERI*FACTU (`TipoUsoPosibleSoloVerifactu = S`) |
-| Multiobligado | Sí (`TipoUsoPosibleMultiOT = S`); `IndicadorMultiplesOT` = S si la instalación tiene más de una empresa |
+| Multiobligado | Sí (`TipoUsoPosibleMultiOT = S`); `IndicadorMultiplesOT` = S si el usuario que genera el registro gestiona más de una empresa (en SaaS se calcula por usuario, FAQ desarrolladores n.º 4; no cuentan las empresas de otros usuarios de la plataforma) |
 | Número de instalación | Generado al instalar (`INST-xxxxxxxx`), único por despliegue |
 
 ## Componentes de terceros (todos de código abierto y locales; ninguno remite datos a terceros)

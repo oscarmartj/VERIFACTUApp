@@ -675,3 +675,11 @@ body.vista-publica .contenido { display: flex; justify-content: center; }
   .split { display: block; }
   .col-visor { position: static; max-height: none; overflow: visible; }
 }
+
+/* --- certificados-representacion --- */
+.card-seccion + .card-seccion { border-top: 1px solid var(--borde); margin-top: 12px; padding-top: 4px; }
+.card-seccion h3 { margin-top: 8px; }
+
+/* --- exentas: calificación de cada fila del desglose (sujeta / exenta con su causa y mención) --- */
+.tabla-editable .celda-calificacion { min-width: 220px; }
+.tabla-editable .sel-calificacion { width: 100%; max-width: 320px; min-height: 32px; font-size: 0.85rem; margin-bottom: 2px; }

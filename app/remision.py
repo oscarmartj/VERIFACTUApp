@@ -106,18 +106,32 @@ def _post(url: str, sobre: bytes, cp: str, kp: str) -> tuple[int, bytes]:
     return r.status_code, r.content
 
 
-def _preparar_destino(con, entorno: str, empresa_id: int) -> tuple[str, dict]:
+def _preparar_destino(con, entorno: str, empresa_id: int, cert: dict | None = None, error_cert: str | None = None,
+                      operacion: str = "consulta") -> tuple[str, dict, dict | None]:
+    """(URL, certificado, representante) para comunicarse con la AEAT, tras los interruptores del servidor.
+
+    Con `cert` (el que dio la cabecera del mensaje de remisión) no se vuelve a elegir: TLS y Cabecera/Representante
+    corresponden siempre al mismo certificado; quien lo pasa audita el uso (`registrar_uso` con el envío).
+    Sin `cert` (otros servicios, p. ej. la consulta a la AEAT) se elige con la misma regla, `certificados.para_envio`, y
+    se devuelve también el representante ({nif, nombre}; la consulta va sin IndicadorRepresentante y solo lo pone al
+    repetirse tras un 4140, ver consulta.py). El uso se audita
+    solo, como `operacion`, cuando el certificado se descifra en `certificados.ficheros_pem` justo antes de TLS (una
+    anotación por conexión; no hace falta llamar a `registrar_uso`)."""
     a = ajustes()
     if entorno == "pruebas" and not a.permitir_pruebas_aeat:
         raise simulador.NoEnviado("Remisión al entorno de pruebas deshabilitada en el servidor")
     if entorno == "produccion" and not a.permitir_produccion:
         raise simulador.NoEnviado("Remisión a producción deshabilitada en el servidor")
-    cert = certificados.activo(con, empresa_id, entorno)
-    if not cert:
-        raise simulador.NoEnviado(f"No hay certificado activo para {entorno}")
-    if not cert["legitimacion_dict"].get("vigente"):
-        raise simulador.NoEnviado(f"El certificado de {entorno} no está vigente")
-    return ENDPOINTS_SOAP[entorno]["sello" if cert["tipo"] == "persona_juridica" else "certificado"], cert
+    if error_cert:
+        raise simulador.NoEnviado(error_cert)
+    if cert is None:
+        try:
+            cert, _ = certificados.para_envio(con, db.fila(con, "SELECT * FROM empresas WHERE id=?", (empresa_id,)), entorno)
+        except certificados.CertificadoNoUtilizable as e:
+            raise simulador.NoEnviado(str(e)) from e
+        certificados.auditar_al_usar(con, cert, empresa_id, entorno, operacion)
+    representante = (cert.get("legitimacion_dict") or {}).get("representante")
+    return ENDPOINTS_SOAP[entorno]["sello" if cert["tipo"] == "persona_juridica" else "certificado"], cert, representante
 
 
 # --- Remitente ---------------------------------------------------------------------------------
@@ -213,7 +227,14 @@ def procesar(con, empresa_id: int, entorno: str, *, quien: str = "remitente", fo
 
 def _enviar(con, empresa_id: int, entorno: str, cola: list[dict]) -> dict:
     empresa = db.fila(con, "SELECT * FROM empresas WHERE id=?", (empresa_id,))
-    cab = {"nombre": empresa["razon_social"], "nif": empresa["nif"], "incidencia": bool(cola[0]["incidencia"])}
+    # Certificado elegido y representante (certificado de un tercero legitimado): misma regla que las consultas
+    try:
+        cert, representante = certificados.para_envio(con, empresa, entorno)
+        error_cert = None
+    except certificados.CertificadoNoUtilizable as e:
+        cert, representante, error_cert = None, None, str(e)
+    cab = {"nombre": empresa["razon_social"], "nif": empresa["nif"], "incidencia": bool(cola[0]["incidencia"]),
+           "representante": representante}
     try:
         cuerpo = xmlgen.mensaje_remision(cab, [r["xml"] for r in cola])
         errores = esquemas_xsd.validar(cuerpo)
@@ -245,7 +266,7 @@ def _enviar(con, empresa_id: int, entorno: str, cola: list[dict]) -> dict:
             con.execute("UPDATE control_flujo SET incidencia_desde=COALESCE(incidencia_desde, ?) WHERE empresa_id=? AND entorno=?",
                         (_iso(sig_dt), empresa_id, entorno))
         return {"accion": "fallo", "resultado": "no_enviado", "estado": "pendiente", "error": f"preparación: {type(e).__name__}"}
-    return _transmitir(con, empresa_id, entorno, cola, envio_id, carpeta, sobre, ids)
+    return _transmitir(con, empresa_id, entorno, cola, envio_id, carpeta, sobre, ids, cert=cert, error_cert=error_cert)
 
 
 def _preparar_envio(con, empresa_id, entorno, cola, carpeta, sobre, ahora, ids) -> int:
@@ -263,15 +284,21 @@ def _preparar_envio(con, empresa_id, entorno, cola, carpeta, sobre, ahora, ids) 
     return envio_id
 
 
-def _transmitir(con, empresa_id, entorno, cola, envio_id, carpeta, sobre, ids) -> dict:
+def _transmitir(con, empresa_id, entorno, cola, envio_id, carpeta, sobre, ids, cert=None, error_cert=None) -> dict:
     fase = "preparacion"
     try:
         if entorno == "simulador":
+            if error_cert:
+                raise simulador.NoEnviado(error_cert)
+            if cert:  # solo determina el representante (sin TLS); también se audita
+                certificados.registrar_uso(con, cert, empresa_id, entorno, envio_id)
             fase = "envio"
             cuerpo_resp = simulador.procesar(sobre)
             status, destino = (500, "simulador-local") if cuerpo_resp == b"HTTP500" else (200, "simulador-local")
         else:
-            url, cert = _preparar_destino(con, entorno, empresa_id)
+            url, cert, _ = _preparar_destino(con, entorno, empresa_id, cert, error_cert, operacion="remision")
+            cert.pop("_auditar_uso", None)  # se audita aquí, con el envío (una sola anotación)
+            certificados.registrar_uso(con, cert, empresa_id, entorno, envio_id)
             with certificados.ficheros_pem(cert) as (cp, kp):
                 fase = "envio"
                 status, cuerpo_resp = _post(url, sobre, cp, kp)
@@ -306,6 +333,7 @@ def _transmitir(con, empresa_id, entorno, cola, envio_id, carpeta, sobre, ids) -
                                tras_contacto=True)
         # Rechazo del envío completo (cabecera, certificado no autorizado...): los registros no se han registrado;
         # quedan bloqueados hasta corregir la causa. No es un rechazo de la factura.
+        texto = certificados.con_ayuda(texto)   # 4112, 4123 y 4124: certificado y representante
         return _tras_fallo(con, envio_id, cola, "fault_cliente", texto, estado="bloqueado", posible_entrega=False,
                            tras_contacto=True)
     return _aplicar_respuesta(con, envio_id, empresa_id, entorno, cola, resp)
@@ -374,7 +402,8 @@ def _aplicar_respuesta(con, envio_id, empresa_id, entorno, cola, resp: respmod.R
                 else:
                     estado = "rechazado"
                     desc = ((desc or "") + " — La AEAT ya tiene un registro con esta identificación (estado "
-                            f"{est_dup}) y no consta un envío previo sin respuesta de este registro: requiere revisión.")
+                            f"{est_dup}) y no consta un envío previo sin respuesta de este registro: requiere revisión (si la "
+                            "consulta a la AEAT devuelve este mismo registro, con la misma huella, puede conciliarse).")
             else:
                 estado = "rechazado"
             resumen[estado] += 1
@@ -413,6 +442,22 @@ def _aplicar_respuesta(con, envio_id, empresa_id, entorno, cola, resp: respmod.R
             "tiempo_espera": espera, **resumen}
 
 
+def cerrar_incidencia_resuelta(con, empresa_id: int | None = None, entorno: str | None = None) -> int:
+    """Cierra la incidencia de comunicación (control_flujo.incidencia_desde) de cada empresa/entorno (o solo del indicado)
+    que ya no tiene ningún registro sin respuesta definitiva. Un envío con respuesta la cierra en _aplicar_respuesta;
+    esto cubre los casos en que no queda nada que enviar: la conciliación con la consulta a la AEAT del último registro
+    pendiente y la restauración de una copia. Si no, las facturas posteriores se remitirían con Incidencia=S sin que
+    hubiera incidencia. Debe llamarse dentro de una transacción. Devuelve cuántas incidencias se han cerrado."""
+    sql = f"""UPDATE control_flujo SET incidencia_desde=NULL WHERE incidencia_desde IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM registros r WHERE r.empresa_id=control_flujo.empresa_id
+                              AND r.entorno=control_flujo.entorno AND r.estado_envio IN {ESTADOS_NO_DEFINITIVOS})"""
+    args: list = []
+    if empresa_id is not None:
+        sql += " AND empresa_id=? AND entorno=?"
+        args += [empresa_id, entorno]
+    return con.execute(sql, args).rowcount
+
+
 def estado_cola(con, empresa_id: int, entorno: str) -> dict:
     cf = db.fila(con, "SELECT * FROM control_flujo WHERE empresa_id=? AND entorno=?", (empresa_id, entorno))
     cuenta = {r["estado_envio"]: r["n"] for r in db.filas(con, """SELECT estado_envio, COUNT(*) n FROM registros
@@ -424,8 +469,8 @@ def estado_cola(con, empresa_id: int, entorno: str) -> dict:
         aviso = (f"{cuenta['bloqueado']} registro(s) bloqueado(s): la AEAT rechazó el envío completo. Mientras no se corrija "
                  f"la causa y se reintente, no se remite ningún registro posterior ({pend} pendiente(s) en total).")
     elif cf and cf.get("incidencia_desde") and pend:
-        aviso = (f"Incidencia de comunicación desde {cf['incidencia_desde']} (UTC): {pend} registro(s) pendiente(s) de remitir. "
-                 "La facturación puede continuar; se reintenta automáticamente al menos cada hora.")
+        aviso = (f"Incidencia de comunicación desde el {db.legible(cf['incidencia_desde'])}: {pend} registro(s) pendiente(s) de "
+                 "remitir o de confirmar. La facturación puede continuar; se reintenta automáticamente al menos cada hora.")
     return {"control_flujo": cf, "por_estado": cuenta, "pendientes": cuenta.get("pendiente", 0),
             "sin_confirmar": cuenta.get("sin_confirmar", 0), "bloqueados": cuenta.get("bloqueado", 0),
             "enviando": cuenta.get("enviando", 0), "aviso_incidencia": aviso, "ultimos_envios": envios}

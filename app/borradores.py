@@ -24,13 +24,94 @@ CASOS_SOPORTADOS = [
     "Impuesto: IVA (01); régimen general (ClaveRegimen 01); operación sujeta y no exenta sin inversión "
     "del sujeto pasivo (S1).",
     "Uno o varios tipos impositivos generales vigentes: 21 %, 10 %, 4 %.",
+    "Operaciones exentas de IVA (OperacionExenta E1 art. 20, E2 art. 21, E3 art. 22, E4 arts. 23 y 24, E6 otras), solas "
+    "o en la misma factura que operaciones sujetas: base exenta sin tipo ni cuota, causa confirmada por el usuario y "
+    "mención legal en la factura (art. 6.1.j RD 1619/2012). E2 y E3 se declaran con ClaveRegimen 02 (exportación); "
+    "E5 (entregas intracomunitarias) exige un destinatario extranjero y no está soportada.",
     "Retención de IRPF: no forma parte del ImporteTotal del registro ni del QR (bases + cuotas); el PDF muestra "
     "por separado «Total factura» y «Total a pagar» (FAQ AEAT para desarrolladores, nº 20).",
     "Factura rectificativa por diferencias (R1 o R4, TipoRectificativa I) de una factura expedida en la aplicación.",
     "Anulación del registro de una factura expedida en la aplicación; subsanación de registros.",
 ]
+
+# --- Operaciones exentas (OperacionExenta del registro, lista L10 de la Orden HAC/1177/2024) ------------------------------
+# Cada fila del desglose es sujeta (CalificacionOperacion S1, con tipo y cuota) o exenta (OperacionExenta, solo con la base);
+# las dos son excluyentes (validaciones AEAT 1195, 1196 y 1238). La causa no se puede deducir con seguridad del documento:
+# el usuario la elige o confirma, y la factura debe llevar la mención de la exención (art. 6.1.j RD 1619/2012)
+CAUSAS_EXENCION = {
+    "E1": {"nombre": "Exenta por el artículo 20 (operaciones interiores)", "precepto": "art. 20 Ley 37/1992",
+           "mencion": "Operación exenta de IVA (art. 20 Ley 37/1992)", "clave_regimen": "01"},
+    "E2": {"nombre": "Exenta por el artículo 21 (exportaciones)", "precepto": "art. 21 Ley 37/1992",
+           "mencion": "Operación exenta de IVA (art. 21 Ley 37/1992)", "clave_regimen": "02"},
+    "E3": {"nombre": "Exenta por el artículo 22 (operaciones asimiladas a las exportaciones)", "precepto": "art. 22 Ley 37/1992",
+           "mencion": "Operación exenta de IVA (art. 22 Ley 37/1992)", "clave_regimen": "02"},
+    "E4": {"nombre": "Exenta por los artículos 23 y 24 (zonas francas, depósitos y regímenes aduaneros o fiscales)",
+           "precepto": "arts. 23 y 24 Ley 37/1992", "mencion": "Operación exenta de IVA (arts. 23 y 24 Ley 37/1992)",
+           "clave_regimen": "01"},
+    "E5": {"nombre": "Exenta por el artículo 25 (entregas intracomunitarias)", "precepto": "art. 25 Ley 37/1992",
+           "mencion": "Operación exenta de IVA (art. 25 Ley 37/1992)", "clave_regimen": "01"},
+    "E6": {"nombre": "Exenta por otros motivos", "precepto": "otros preceptos",
+           "mencion": "Operación exenta de IVA", "clave_regimen": "01"},
+}
+# E5 exige identificar al destinatario con IDOtro (NIF-IVA de otro Estado miembro, validación AEAT 1289): la aplicación solo
+# admite destinatarios con NIF español
+CAUSAS_NO_SOPORTADAS = {"E5"}
+MAX_MENCION_EXENCION = 500
+
+
+def clase_fila(fila: dict) -> str:
+    """Clase de una fila del desglose: «exenta» (lleva causa E1–E6), la calificación indicada (S1, S2, N1, N2),
+    «sin_calificar» (sin causa de exención, sin calificación, sin tipo y sin cuota: una base sin IVA cuyo tratamiento debe
+    elegir el usuario) o «S1» por defecto (filas de versiones anteriores sin calificación pero con tipo o cuota)."""
+    if not isinstance(fila, dict):
+        return "S1"
+    if fila.get("operacion_exenta"):
+        return "exenta"
+    if fila.get("calificacion"):
+        return str(fila["calificacion"])
+    if fila.get("tipo_iva") in (None, "") and fila.get("cuota") in (None, ""):
+        return "sin_calificar"
+    return "S1"
+
+
+def es_exenta(fila: dict) -> bool:
+    return clase_fila(fila) == "exenta"
+
+
+def clave_regimen_exenta(causa: str | None) -> str:
+    """ClaveRegimen de una fila exenta: 02 (exportación) para E2 y E3, que con la clave 01 se rechazan (validación AEAT
+    1199); 01 (régimen general) para las demás."""
+    return (CAUSAS_EXENCION.get(causa or "") or {}).get("clave_regimen", "01")
+
+
+def mencion_exencion(causa: str | None) -> str | None:
+    """Mención legal propuesta para una causa (el usuario puede escribir otra más precisa: «art. 20.Uno.23º …»)."""
+    return (CAUSAS_EXENCION.get(causa or "") or {}).get("mencion")
+
+
+def normalizar_mencion(t) -> str:
+    """Mención de la exención con los saltos de línea de cualquier sistema (CRLF, CR) como LF y los tabuladores como
+    espacios, sin espacios al principio ni al final: así se guarda, se valida y se imprime."""
+    if not isinstance(t, str):
+        return ""
+    return t.replace("\r\n", "\n").replace("\r", "\n").replace("\t", " ").strip()
+
+
+def mencion_vacia(t: str) -> bool:
+    """Mención sin ninguna letra ni cifra («.», «-», «…»): no cita ningún precepto ni dice que la operación esté exenta."""
+    return not any(ch.isalnum() for ch in t)
+
+
+def texto_imprimible(t: str) -> bool:
+    """El texto se puede imprimir con las fuentes estándar del PDF (WinAnsi) y comprobarse después en el PDF generado."""
+    try:
+        t.encode("cp1252")
+    except UnicodeEncodeError:
+        return False
+    return not re.search(r"[\x00-\x1f\x7f]", t.replace("\n", " "))
+
+
 CASOS_BLOQUEADOS = {
-    "exencion": "Operaciones exentas (E1–E6)",
     "inversion_sujeto_pasivo": "Inversión del sujeto pasivo (S2)",
     "no_sujeta": "Operaciones no sujetas (N1/N2)",
     "recargo_equivalencia": "Recargo de equivalencia",
@@ -51,6 +132,32 @@ def _clave(t) -> str:
     """Texto comparable: sin tildes, mayúsculas, espacios ni puntuación."""
     import unicodedata
     return re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKD", str(t or "")).encode("ascii", "ignore").decode().casefold())
+
+
+# Fecha de un PDF (ISO 32000, 7.9.4): D:AAAA[MM[DD[HH[mm[SS]]]]][Z|+HH'mm'|-HH'mm']
+_FECHA_PDF = re.compile(r"(?:D:)?(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?(?:(Z)|([+-])(\d{2})(?:'?(\d{2}))?'?)?\s*$")
+
+
+def _fecha_firma_legible(v) -> str | None:
+    """La fecha de la firma (/M) como la ve el usuario, en hora peninsular («01/07/2026 a las 12:05»); None si no se lee."""
+    from datetime import datetime, timedelta, timezone
+    m = _FECHA_PDF.fullmatch(str(v or "").strip())
+    if not m:
+        return None
+    a, mes, dia, hh, mi, ss, z, signo, oh, om = m.groups()
+    if not dia:
+        return None                                     # solo el año o el mes: no es un día que se pueda mostrar
+    try:
+        if z:
+            tz = timezone.utc
+        elif signo:
+            tz = timezone((1 if signo == "+" else -1) * timedelta(hours=int(oh), minutes=int(om or 0)))
+        else:
+            tz = None                                   # sin desfase: se toma como hora peninsular
+        d = datetime(int(a), int(mes), int(dia), int(hh or 0), int(mi or 0), int(ss or 0), tzinfo=tz)
+    except ValueError:
+        return None
+    return db.legible(d.isoformat(), hora=hh is not None)
 
 
 def clasificar(ext: dict, inspeccion: dict, empresa: dict, duplicados: list[dict] | None = None) -> dict:
@@ -105,8 +212,10 @@ def clasificar(ext: dict, inspeccion: dict, empresa: dict, duplicados: list[dict
         firmas = [f for f in inspeccion.get("firmas", []) if f.get("firmado")]
         if firmas:
             f0 = firmas[0]
+            cuando = _fecha_firma_legible(f0.get("fecha"))
             return {"sugerida": "emitida_propia", "confianza": 0.8, "motivos": motivos + [
-                f"El PDF está firmado electrónicamente ({f0.get('nombre') or 'firmante no indicado'}, {f0.get('fecha') or 'sin fecha'}): "
+                f"El PDF está firmado electrónicamente ({f0.get('nombre') or 'firmante no indicado'}, "
+                f"{f'el {cuando}' if cuando else 'sin fecha legible'}): "
                 "indica que la factura ya se expidió y se entregó. Una factura expedida no se vuelve a expedir ni se le añade un "
                 "QR después; solo procede archivarla. Si en realidad es un borrador que aún no se ha entregado, confírmelo como "
                 "documento preparatorio (el PDF definitivo no conservará la firma)."]}
@@ -121,20 +230,13 @@ def clasificar(ext: dict, inspeccion: dict, empresa: dict, duplicados: list[dict
             "motivos": motivos + ["El NIF de la empresa no figura como emisor ni como destinatario."]}
 
 
-def datos_desde_extraccion(ext: dict, nombre_archivo: str = "") -> dict:
-    lineas = []
-    for l in ext.get("lineas", []):
-        lineas.append({k: _v(l.get(k, {})) for k in ("concepto", "cantidad", "unidad", "precio", "importe")})
+def _cifras_extraccion(ext: dict) -> tuple[list[dict], str | None, str | None, str | None]:
+    """Desglose sujeto, base imponible, cuota y total del borrador a partir de la extracción (antes de proponer exentas)."""
     desglose = []
     for d in ext.get("desglose", []):
         desglose.append({"tipo_iva": _v(d["tipo_iva"]), "base": _v(d["base"]), "cuota": _v(d["cuota"]),
                          "calificacion": "S1", "clave_regimen": "01", "impuesto": "01"})
-    ret = ext.get("retencion")
-    refs = {k: _v(v) for k, v in (ext.get("referencias") or {}).items()}
-    primera = (lineas[0]["concepto"] if lineas and lineas[0].get("concepto") else "") or ""
-    descripcion = re.sub(r"\s+", " ", primera).strip()[:500]
     total = _v(ext.get("total_factura", {}))
-    pagar = _v(ext.get("total_a_pagar", {}))
     if total is None and desglose:
         try:
             total = str(q2(sum(Decimal(d["base"]) + Decimal(d["cuota"]) for d in desglose)))
@@ -145,6 +247,20 @@ def datos_desde_extraccion(ext: dict, nombre_archivo: str = "") -> dict:
         if total is not None and any(_dec(x) is not None and _dec(x) > Decimal(total)
                                      for x in (ext.get("total_factura") or {}).get("sin_clasificar") or []):
             total = None
+    return desglose, _v(ext.get("base_imponible", {})), _v(ext.get("cuota_iva", {})), total
+
+
+def datos_desde_extraccion(ext: dict, nombre_archivo: str = "") -> dict:
+    lineas = []
+    for l in ext.get("lineas", []):
+        lineas.append({k: _v(l.get(k, {})) for k in ("concepto", "cantidad", "unidad", "precio", "importe")})
+    ret = ext.get("retencion")
+    refs = {k: _v(v) for k, v in (ext.get("referencias") or {}).items()}
+    primera = (lineas[0]["concepto"] if lineas and lineas[0].get("concepto") else "") or ""
+    descripcion = re.sub(r"\s+", " ", primera).strip()[:500]
+    pagar = _v(ext.get("total_a_pagar", {}))
+    desglose, base_imponible, cuota_total, total = _cifras_extraccion(ext)
+    desglose, cuota_total, base_imponible = _proponer_exencion(ext, desglose, base_imponible, cuota_total, total)
     return {
         "tipo_documento_origen": _v(ext.get("tipo_documento", {})),
         "num_serie": _v(ext.get("numero", {})),
@@ -156,8 +272,8 @@ def datos_desde_extraccion(ext: dict, nombre_archivo: str = "") -> dict:
         "descripcion_operacion": descripcion,
         "lineas": lineas,
         "desglose": desglose,
-        "base_imponible": _v(ext.get("base_imponible", {})),
-        "cuota_total": _v(ext.get("cuota_iva", {})),
+        "base_imponible": base_imponible,
+        "cuota_total": cuota_total,
         "importe_total": total,
         "retencion": {"porcentaje": _v(ret["porcentaje"]), "importe": _v(ret["importe"])} if ret else None,
         "total_a_pagar": pagar or total,
@@ -171,12 +287,245 @@ def datos_desde_extraccion(ext: dict, nombre_archivo: str = "") -> dict:
     }
 
 
+def fila_exenta(base: str | None, causa: str | None = None, motivo: str | None = None) -> dict:
+    """Fila exenta del desglose (sin tipo ni cuota). Sin causa es una base sin IVA cuyo tratamiento debe elegir el usuario."""
+    return {"tipo_iva": None, "base": base, "cuota": None, "calificacion": None, "clave_regimen": clave_regimen_exenta(causa),
+            "impuesto": "01", "operacion_exenta": causa, "motivo_exencion": (motivo or mencion_exencion(causa)) if causa else None}
+
+
+def _proponer_exencion(ext: dict, desglose: list[dict], base_txt, cuota_txt,
+                       total_txt, origen: dict | None = None) -> tuple[list[dict], str | None, str | None]:
+    """Propuesta de bases exentas a partir de la extracción (siempre para confirmar: validar() pide confirmar la causa).
+    Devuelve (desglose, cuota total, base imponible). Si separa una base exenta con causa de una factura mixta, anota en
+    `origen` (si se pasa) de dónde sale el importe (ver origen_base_exenta).
+
+    - Sin IVA en todo el documento (desglose vacío o solo filas al 0 % sin cuota, base = total, cuota cero o vacía): una base
+      exenta con la causa leída en el documento (solo si cita el artículo de la Ley del IVA: «exenta… art. 20…»: E1;
+      art. 21: E2…; ver Extractor.exencion) o, si no, sin causa, para que el usuario la elija (o corrija el IVA): una
+      mención sin artículo («exenta de IVA») o un «exento» de otro contexto («exento de responsabilidad») no da causa, y
+      la base sin calificar sigue bloqueada (SIN_IVA).
+    - Factura mixta: filas sujetas con cuota y una exención del IVA mencionada en el documento, con base > suma de las bases
+      sujetas, cuota = suma de sus cuotas y total = base + cuota: la diferencia es una base sin IVA. Sin el artículo citado
+      queda sin causa (bloqueada); con él, la causa solo se propone si el documento respalda la diferencia
+      (_respaldo_exenta: una base exenta impresa igual a ella o las líneas de la operación exenta) y no hay importes
+      ajenos a la base (INDICIOS_SIN_MIXTA); si no, el desglose no cambia (la base leída puede ser un SUBTOTAL o una
+      SUMA de las líneas, que solo dice que la diferencia no lleva IVA). Si la extracción no separa así las bases, ver
+      _mixta_impresa (solo con causa).
+    En cualquier otro caso el desglose no cambia (los descuadres los señala la validación)."""
+    base, cuota, total = _dec(base_txt), _dec(cuota_txt), _dec(total_txt)
+    if total is None:
+        return desglose, cuota_txt, base_txt
+
+    def cero(d):  # fila al 0 % (o sin tipo) sin cuota: el «IVA 0,00» o «Exento» de una factura sin IVA
+        t, b, c = _dec(d.get("tipo_iva")), _dec(d.get("base")), _dec(d.get("cuota"))
+        return c is not None and c == 0 and (t is None or t == 0) and b is not None and b != 0
+    sujetas = [d for d in desglose if not cero(d)]
+    ceros = [d for d in desglose if cero(d)]
+    # La causa solo se toma si viene de un artículo citado («articulo»): una extracción de una versión anterior sin
+    # «exencion» (aunque tenga el indicio) o con una causa sin artículo no propone ninguna
+    ex = ext.get("exencion") if isinstance(ext.get("exencion"), dict) else None
+    causa = ex.get("causa") if ex and ex.get("causa") in CAUSAS_EXENCION and ex.get("articulo") else None
+    motivo = ex.get("motivo") if ex and isinstance(ex.get("motivo"), str) and ex["motivo"].strip() else None
+    if base is None or base <= 0:
+        # base imponible no leída («SUMA 750,00 / IVA 21 % s/ 100,00 21,00 / TOTAL 771,00»): solo la factura mixta impresa
+        mixta = _mixta_impresa(ext, sujetas, None, cuota, causa, motivo, origen) \
+            if base is None and sujetas and not ceros else None
+        return mixta or (desglose, cuota_txt, base_txt)
+    if not sujetas:
+        if q2(base) != q2(total) or (cuota is not None and q2(cuota) != 0):
+            return desglose, cuota_txt, base_txt
+        if ceros and q2(sum(_dec(d["base"]) for d in ceros)) != q2(base):
+            return desglose, cuota_txt, base_txt
+        return [fila_exenta(str(q2(base)), causa, motivo)], "0.00", base_txt
+    if not ex or not (causa or ex.get("iva")) or cuota is None:   # «exento» de otro contexto: no es una base exenta
+        return desglose, cuota_txt, base_txt
+    try:
+        b_suj = sum(Decimal(d["base"]) for d in sujetas)
+        c_suj = sum(Decimal(d["cuota"]) for d in sujetas)
+    except (TypeError, InvalidOperation):
+        b_suj = c_suj = None
+    resto = q2(base - b_suj) if b_suj is not None else None
+    if resto is None or resto <= 0 or q2(c_suj) != q2(cuota) or q2(base + cuota) != q2(total) \
+            or (ceros and q2(sum(_dec(d["base"]) for d in ceros)) != resto):
+        mixta = None if ceros else _mixta_impresa(ext, sujetas, base, cuota, causa, motivo, origen)
+        return mixta or (desglose, cuota_txt, base_txt)
+    if causa is not None:
+        # la base imponible leída puede ser un SUBTOTAL o una SUMA de las líneas: la diferencia solo es exenta por la causa
+        # citada si el propio documento la respalda (una base exenta impresa igual a ella —«Base exenta 650,00» o una fila
+        # al 0 % sin cuota— o las líneas de la operación exenta) y no hay importes ajenos a la base
+        indicios = ext.get("indicios") if isinstance(ext.get("indicios"), dict) else {}
+        imp = ex.get("importes") if isinstance(ex.get("importes"), dict) else {}
+        exentas = {q2(x) for x in (_dec(v) for v in imp.get("exentas") or []) if x is not None}
+        if any(k in indicios for k in INDICIOS_SIN_MIXTA) or (exentas and exentas != {resto}):
+            return desglose, cuota_txt, base_txt
+        respaldo = _respaldo_exenta(ext, resto, q2(b_suj), impresa=bool(ceros) or exentas == {resto})
+        if respaldo is None:
+            return desglose, cuota_txt, base_txt
+        if origen is not None:
+            origen.update(respaldo, base=str(resto),
+                          calculo=f"base imponible leída {q2(base)} − bases sujetas {q2(b_suj)}")
+    return sujetas + [fila_exenta(str(resto), causa, motivo)], cuota_txt, base_txt
+
+
+# Particularidades que cambian las cuentas del cuadro de totales o que no son base exenta por la causa citada: con ellas la
+# diferencia no se propone como base exenta (tasas, fianzas, indemnizaciones, provisiones de fondos, gastos por cuenta del
+# cliente o repercutidos: Extractor.indicios, «importes_ajenos»). Dependen de que el documento use esas palabras
+INDICIOS_SIN_MIXTA = ("suplidos", "recargo_equivalencia", "inversion_sujeto_pasivo", "no_sujeta", "importes_ajenos")
+
+# Objeto de las exenciones más habituales del art. 20.Uno de la Ley 37/1992 (texto sin tildes y en minúsculas): una línea de
+# conceptos es de la operación exenta si nombra el mismo objeto que la frase de la exención (o el del apartado citado)
+TEMAS_EXENCION = {
+    "vivienda": r"\bviviendas?\b|\bpisos?\b",
+    "ensenanza": r"\bensenanzas?\b|\beducaci|\beducativ|\bformaci[o]n\b|\bformativ|\bcursos?\b|\bclases?\b|\bmatricula|"
+                 r"\bacademi|\bescolar|\bdocen|\bleccion|\btutoria|\bidiomas?\b|\bcolegio|\bguarderia",
+    "sanitaria": r"\bsanitari|\bmedic|\bhospital|\bclinic|\bdental|\bodontolog|\bfisioterap|\bpsicolog|\benfermer|"
+                 r"\bterapi|\brehabilitaci|\bpodolog",
+    "seguro": r"\bseguros?\b|\bpolizas?\b|\breaseguros?\b",
+    "financiera": r"\bprestamos?\b|\bcreditos?\b|\bintereses\b|\bfinancier|\bavales?\b",
+    "deportiva": r"\bdeport|\bgimnasio|\bpolideportivo",
+    "cultural": r"\bcultura|\bmuseos?\b|\bbibliotecas?\b|\bteatros?\b|\bconciertos?\b",
+    "social": r"\basistencia social|\bresidencia de (?:mayores|ancianos)|\bdependencia\b|\bdiscapacidad|\bcentro de dia\b",
+    "terrenos": r"\bterrenos?\b|\bsolar(?:es)?\b|\brustic",
+}
+# apartado del art. 20.Uno citado → objeto
+TEMAS_APARTADO = {2: "sanitaria", 3: "sanitaria", 4: "sanitaria", 5: "sanitaria", 8: "social", 9: "ensenanza",
+                  10: "ensenanza", 13: "deportiva", 14: "cultural", 16: "seguro", 18: "financiera", 20: "terrenos",
+                  23: "vivienda"}
+RE_APARTADO_20 = re.compile(r"\b20\s*\.?\s*(?:uno|1)\s*[.,]?\s*(\d{1,2})\s*(?:o\b|\.|º|\b)")
+# palabras de la frase de la exención que no dicen su objeto
+PALABRAS_GENERICAS = frozenset(
+    "exento exenta exentos exentas exencion exenciones articulo impuesto valor anadido operacion operaciones servicio "
+    "servicios prestacion prestaciones factura facturas segun conforme alquiler alquileres arrendamiento arrendamientos "
+    "arrendamiento leyes sobre importe importes total gastos concepto conceptos mensual enero febrero marzo abril mayo "
+    "junio julio agosto septiembre octubre noviembre diciembre regimen general especial directiva real decreto previsto "
+    "prevista dispuesto establecido apartado numero estan dicha dicho presente objeto entrega entregas actividad "
+    "actividades realizada realizadas sujeta sujetas sujeto regulado regulada recogido recogida previsto aplicable "
+    "aplicacion vigente normativa tributaria tributario presente".split())
+# se comparan los seis primeros caracteres: «impuestos» o «servicio» son tan genéricos como «impuesto» o «servicios»
+_PREFIJOS_GENERICOS = frozenset(w[:6] for w in PALABRAS_GENERICAS)
+
+
+def _normal(t) -> str:
+    import unicodedata
+    return unicodedata.normalize("NFKD", str(t or "")).encode("ascii", "ignore").decode().casefold()
+
+
+def _palabras(t: str) -> set[str]:
+    return {w[:6] for w in re.findall(r"[a-z]{5,}", t) if w[:6] not in _PREFIJOS_GENERICOS}
+
+
+def _respaldo_exenta(ext: dict, resto: Decimal, b_suj: Decimal, impresa: bool = False) -> dict | None:
+    """Respaldo en el propio documento de una base exenta calculada como diferencia (factura mixta): las líneas de conceptos
+    de la operación exenta (las que dicen «exento/a» o nombran el objeto de la frase de la exención o del apartado del
+    art. 20.Uno citado) suman exactamente la diferencia y las demás líneas suman exactamente las bases sujetas; o bien
+    (impresa) el documento imprime la base exenta. Devuelve {"lineas": [[concepto, importe], …], "impresa": bool} o None.
+    Un SUBTOTAL o una SUMA igual a la suma de las líneas no respalda nada: solo dice que la diferencia no lleva IVA. Una
+    línea con un importe ajeno a la base (tasa, fianza, indemnización…: el indicio «importes_ajenos») tampoco: devuelve None
+    aunque el indicio no figure en la extracción."""
+    from .extraccion.campos import Extractor
+    ex = ext.get("exencion") if isinstance(ext.get("exencion"), dict) else {}
+    # la frase de la exención (la mención propuesta; el renglón leído puede llevar otras frases: «Gastos… (art. 20 LAU)»)
+    frase = _normal(ex.get("motivo") or ex.get("texto") or "")
+    temas = {t for t, rx in TEMAS_EXENCION.items() if re.search(rx, frase)}
+    for m in RE_APARTADO_20.finditer(frase):
+        if int(m.group(1)) in TEMAS_APARTADO:
+            temas.add(TEMAS_APARTADO[int(m.group(1))])
+    propias = _palabras(re.sub(r"\(.*?\)", " ", frase))
+    lineas, suma, ligadas, suma_ligadas = [], Decimal(0), [], Decimal(0)
+    for l in ext.get("lineas") or []:
+        concepto = _v(l.get("concepto")) if isinstance(l, dict) else None
+        imp = _dec(_v(l.get("importe"))) if isinstance(l, dict) else None
+        if not isinstance(concepto, str) or imp is None:
+            lineas = None
+            break
+        if Extractor._importe_ajeno(concepto):
+            return None
+        c = _normal(concepto)
+        suma += imp
+        if re.search(r"\bexent[oa]s?\b", c) or any(re.search(TEMAS_EXENCION[t], c) for t in temas) \
+                or _palabras(c) & propias:
+            ligadas.append([re.sub(r"\s+", " ", concepto).strip()[:80], str(q2(imp))])
+            suma_ligadas += imp
+    if lineas is not None and ligadas and q2(suma_ligadas) == q2(resto) and q2(suma - suma_ligadas) == q2(b_suj):
+        return {"lineas": ligadas, "impresa": impresa}
+    return {"lineas": [], "impresa": True} if impresa else None
+
+
+def origen_base_exenta(ext: dict | None) -> dict | None:
+    """De dónde sale la base exenta que la extracción propone en una factura mixta: {"base", "calculo", "lineas",
+    "impresa"} (ver _respaldo_exenta), o None si no propone ninguna (o no es mixta). Lo usa la confirmación EXENTA_CAUSA."""
+    if not isinstance(ext, dict):
+        return None
+    try:
+        desglose, base, cuota, total = _cifras_extraccion(ext)
+        origen: dict = {}
+        _proponer_exencion(ext, desglose, base, cuota, total, origen)
+    except Exception:  # noqa: BLE001  (una extracción guardada por otra versión: la confirmación sale sin el origen)
+        return None
+    return origen or None
+
+
+def _mixta_impresa(ext: dict, sujetas: list[dict], base: Decimal | None, cuota: Decimal | None, causa: str | None,
+                   motivo: str | None, origen: dict | None = None) -> tuple[list[dict], str, str] | None:
+    """Factura mixta cuyas bases no separa la extracción («BASE IMPONIBLE 750 / BASE 21 % 100 / IVA 21 % 21 / TOTAL 771»,
+    «BASE IMPONIBLE 750 / I.V.A. 21 % s/ 100,00 21,00 / TOTAL 771», «BASE EXENTA 650 / BASE 4 % 100 / IVA 4 % 4 /
+    TOTAL 754»): la base exenta se propone a partir de las cifras impresas en el cuadro de totales
+    (Extractor._importes_factura_mixta) solo si
+    - el documento cita el artículo 20–25 de la Ley del IVA que da la causa (una tasa, un suplido o unos honorarios
+      «exentos» sin ese artículo no se convierten en base exenta) y no tiene suplidos, recargo de equivalencia, inversión
+      del sujeto pasivo, operaciones no sujetas ni importes ajenos a la base (INDICIOS_SIN_MIXTA);
+    - cada fila sujeta cuadra al céntimo (base × tipo = cuota; la base es la impresa en «IVA 21 % s/ 100,00» si la leída
+      no cuadra) y la suma de sus cuotas es la cuota total impresa;
+    - la base exenta, total − bases sujetas − cuotas, es positiva y el documento la respalda: es la cifra impresa como
+      base exenta (si se imprime alguna, todas deben ser esa) o, si no se imprime, las líneas de la operación exenta suman
+      exactamente esa cifra y las demás, las bases sujetas (_respaldo_exenta). Una base imponible total, un SUBTOTAL o
+      una SUMA impresos no bastan: suelen ser la suma de las líneas y solo dicen que la diferencia no lleva IVA.
+    Devuelve (desglose, cuota total, base imponible) o None (el desglose no cambia y el descuadre sigue bloqueando)."""
+    ex = ext.get("exencion") if isinstance(ext.get("exencion"), dict) else {}
+    imp = ex.get("importes") if isinstance(ex.get("importes"), dict) else None
+    total = _dec(_v(ext.get("total_factura") or {}))   # el total impreso, nunca uno deducido
+    indicios = ext.get("indicios") if isinstance(ext.get("indicios"), dict) else {}
+    if causa is None or imp is None or total is None or cuota is None or any(k in indicios for k in INDICIOS_SIN_MIXTA):
+        return None
+    sobre = {}
+    for s in imp.get("sobre") or []:
+        t, b, c = (_dec(s.get(k)) if isinstance(s, dict) else None for k in ("tipo", "base", "cuota"))
+        if None not in (t, b, c):
+            sobre.setdefault(q2(t), set()).add((q2(b), q2(c)))
+    filas = []
+    for d in sujetas:
+        t, b, c = _dec(d.get("tipo_iva")), _dec(d.get("base")), _dec(d.get("cuota"))
+        if t is None or t <= 0 or c is None or c <= 0:
+            return None
+        if b is None or q2(b * t / Decimal(100)) != q2(c):
+            impresas = {bs for bs, cs in sobre.get(q2(t), set()) if cs == q2(c) and q2(bs * t / Decimal(100)) == q2(c)}
+            if len(impresas) != 1:
+                return None
+            b = impresas.pop()
+        filas.append(dict(d, base=str(q2(b))))
+    b_suj = q2(sum(Decimal(d["base"]) for d in filas))
+    c_suj = q2(sum(_dec(d["cuota"]) for d in filas))
+    resto = q2(total - b_suj - c_suj)
+    if c_suj != q2(cuota) or resto <= 0:
+        return None
+    exentas = {q2(x) for x in (_dec(v) for v in imp.get("exentas") or []) if x is not None}
+    if exentas and exentas != {resto}:
+        return None
+    respaldo = _respaldo_exenta(ext, resto, b_suj, impresa=bool(exentas))
+    if respaldo is None:
+        return None
+    if origen is not None:
+        origen.update(respaldo, base=str(resto), calculo=f"total impreso {q2(total)} − bases sujetas y cuotas {b_suj + c_suj}")
+    return filas + [fila_exenta(str(resto), causa, motivo)], str(c_suj), str(q2(b_suj + resto))
+
+
 # Rutas de los campos editables del borrador
 CAMPOS_EDITABLES = re.compile(
     r"^(num_serie|fecha_documento|fecha_operacion|descripcion_operacion|base_imponible|cuota_total|importe_total|"
     r"total_a_pagar|forma_pago|iban|vencimiento|observaciones|"
     r"(emisor|destinatario)\.(nombre|nif|domicilio)|referencias\.[a-z_]{1,30}|retencion\.(porcentaje|importe)|"
-    r"lineas\.\d{1,3}\.(concepto|cantidad|unidad|precio|importe)|desglose\.\d{1,2}\.(tipo_iva|base|cuota)|"
+    r"lineas\.\d{1,3}\.(concepto|cantidad|unidad|precio|importe)|"
+    r"desglose\.\d{1,2}\.(tipo_iva|base|cuota|calificacion|operacion_exenta|motivo_exencion)|"
     r"lineas|desglose|retencion)$")
 
 
@@ -184,7 +533,8 @@ CAMPOS_NUMERICOS = re.compile(r"^(base_imponible|cuota_total|importe_total|total
                               r"lineas\.\d+\.(cantidad|precio|importe)|desglose\.\d+\.(tipo_iva|base|cuota))$")
 RE_NUMERO = re.compile(r"^[+-]?\d{1,12}(?:\.\d{1,6})?$")
 CLAVES_LISTA = {"lineas": ("concepto", "cantidad", "unidad", "precio", "importe"),
-                "desglose": ("tipo_iva", "base", "cuota", "calificacion", "clave_regimen", "impuesto")}
+                "desglose": ("tipo_iva", "base", "cuota", "calificacion", "clave_regimen", "impuesto", "operacion_exenta",
+                             "motivo_exencion")}
 MAX_TEXTO = 5000
 # Tamaño de la factura compuesta (pdf_final): un borrador que ocuparía más renglones no se compone ni se expide. Sin este
 # límite, conceptos de miles de renglones (admitidos uno a uno) harían que cada vista previa o expedición tardase minutos
@@ -215,6 +565,7 @@ def renglones_estimados(datos: dict) -> int:
     for k, v in dic(datos.get("referencias")).items():
         n += max(_renglones(k if isinstance(k, str) else "", 16), _renglones(v, 55))
     n += 2 * len(lista(datos.get("desglose")))
+    n += sum(_renglones(f.get("motivo_exencion"), 72) for f in lista(datos.get("desglose")) if f.get("operacion_exenta"))
     rect = dic(datos.get("rectificativa"))
     n += _renglones(rect.get("motivo"), 72) + _renglones(rect.get("num_serie_rectificada"), 72)
     n += sum(_renglones(datos.get(k), 72) for k in ("observaciones", "forma_pago", "iban", "vencimiento"))
@@ -246,6 +597,12 @@ def _escalar(ruta: str, valor):
         raise ValueError(f"{ruta}: «{valor[:40]}» no es un número válido (use punto decimal, p. ej. 1028.50)")
     if ruta.endswith(".nif"):
         valor = nifmod.normalizar(valor)
+    if ruta.startswith("desglose.") and ruta.endswith(".motivo_exencion"):
+        valor = normalizar_mencion(valor)   # CRLF, CR y tabuladores de un cliente de la API: como los guarda la interfaz
+    if ruta.startswith("desglose.") and ruta.endswith(".operacion_exenta") and valor not in CAUSAS_EXENCION:
+        raise ValueError(f"{ruta}: «{valor[:10]}» no es una causa de exención (E1, E2, E3, E4, E5 o E6)")
+    if ruta.startswith("desglose.") and ruta.endswith(".calificacion") and valor not in ("S1", "S2", "N1", "N2"):
+        raise ValueError(f"{ruta}: «{valor[:10]}» no es una calificación de la operación (S1, S2, N1 o N2)")
     return valor
 
 
@@ -501,7 +858,7 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
                 propia = o["clasificacion"] == "emitida_propia"  # expedida por la empresa, aunque no se leyera su NIF
                 if o["tiene_factura"] or not (propia or nifmod.normalizar(o["emisor_nif"] or "") == nifmod.normalizar(empresa["nif"])):
                     continue  # la factura expedida ya la cubre DUPLICADA; otro emisor no es la misma factura
-                desc = f"«{o['nombre_archivo']}» (importado el {str(o['subido_en'])[:10]}"
+                desc = f"«{o['nombre_archivo']}» (importado el {db.legible(o['subido_en'], hora=False)}"
                 if propia:
                     archivados.append(desc + (", archivado)" if o["confirmado"] else ", propuesto para archivo)"))
                 else:
@@ -544,7 +901,8 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
         add("bloqueo", "fecha_documento", "FECHA_FUTURA", "La fecha del documento es posterior a hoy.")
     if fd and fd != hoy:
         add("confirmar", "fecha_documento", "FECHA_EXPEDICION",
-            f"El documento está fechado el {fd}; la factura se expedirá con fecha de hoy ({hoy}). "
+            f"El documento está fechado el {db.legible(fd, hora=False)}; la factura se expedirá con fecha de hoy "
+            f"({db.legible(hoy, hora=False)}). "
             "Si la operación se realizó en otra fecha, indíquela como fecha de operación.")
     fo = datos.get("fecha_operacion")
     if fo and fo > hoy:
@@ -575,21 +933,43 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
             and (cuota is None or q2(cuota) == 0):
         # factura sin IVA repercutido (p. ej. alquiler de vivienda): total = base, sin cuota ni desglose
         add("bloqueo", "desglose", "SIN_IVA",
-            f"La factura no repercute IVA: el total ({q2(total)}) es igual a la base imponible y no hay cuota. Las operaciones "
-            "exentas o no sujetas al impuesto no están soportadas por esta aplicación. Si la operación está sujeta a IVA, "
-            "indique el tipo, la base y la cuota en el desglose y corrija la cuota y el total.")
+            f"La factura no repercute IVA: el total ({q2(total)}) es igual a la base imponible y no hay cuota. Si la operación "
+            "está exenta, añada en el desglose una base exenta y elija la causa de exención (E1–E6) y la mención legal; "
+            "si está sujeta a IVA, indique el tipo, la base y la cuota en el desglose y corrija la cuota y el total. Las "
+            "operaciones no sujetas al impuesto no están soportadas.")
     elif not desglose:
         add("bloqueo", "desglose", "DESGLOSE_FALTA", "No se ha identificado el desglose de bases y cuotas por tipo de IVA.")
     suma_base, suma_cuota = Decimal("0"), Decimal("0")
+    ext_exencion = (extraccion or {}).get("exencion") if isinstance((extraccion or {}).get("exencion"), dict) else None
+    origen = None   # de dónde sale la base exenta propuesta en una factura mixta (solo si hay alguna fila exenta)
+    if ext_exencion and ext_exencion.get("causa") and any(clase_fila(d) == "exenta" for d in desglose):
+        origen = origen_base_exenta(extraccion)
+    # renglón con una tasa, fianza, indemnización… (indicio «importes_ajenos»): se cita al confirmar la causa de la exención
+    ajeno = ((extraccion or {}).get("indicios") or {}).get("importes_ajenos") \
+        if isinstance((extraccion or {}).get("indicios"), dict) else None
+    ajeno = re.sub(r"\s+", " ", str(ajeno.get("texto") or "")).strip()[:80] if isinstance(ajeno, dict) else ""
     for i, d in enumerate(desglose):
+        clase = clase_fila(d)
+        if clase in ("exenta", "sin_calificar"):
+            b = _dec(d.get("base"))
+            if b is not None:
+                suma_base += b
+            _validar_fila_exenta(add, i, d, clase, b, es_rectificativa, ext_exencion, origen, ajeno)
+            continue
         t, b, c = _dec(d.get("tipo_iva")), _dec(d.get("base")), _dec(d.get("cuota"))
         if t is None or b is None or c is None:
             add("bloqueo", f"desglose.{i}", "DESGLOSE_INCOMPLETO", "Desglose incompleto (tipo, base y cuota).")
             continue
         if t not in TIPOS_IVA_SOPORTADOS:
-            add("bloqueo", f"desglose.{i}.tipo_iva", "TIPO_NO_SOPORTADO", f"Tipo de IVA {t} % no soportado.")
-        if (d.get("calificacion") or "S1") != "S1" or (d.get("clave_regimen") or "01") != "01":
-            add("bloqueo", f"desglose.{i}", "CALIFICACION_NO_SOPORTADA", "Solo se admite régimen general S1/01.")
+            add("bloqueo", f"desglose.{i}.tipo_iva", "TIPO_NO_SOPORTADO", f"Tipo de IVA {t} % no soportado." + (
+                " Si la operación está exenta, márquela como exenta en el desglose y elija la causa (E1–E6)."
+                if t == 0 and c == 0 else ""))
+        if (d.get("calificacion") or "S1") != "S1" or (d.get("clave_regimen") or "01") != "01" \
+                or (d.get("impuesto") or "01") != "01":
+            add("bloqueo", f"desglose.{i}", "CALIFICACION_NO_SOPORTADA",
+                "Solo se admiten operaciones sujetas y no exentas sin inversión del sujeto pasivo (S1) en régimen general "
+                "(01) del IVA, u operaciones exentas (E1–E6). La inversión del sujeto pasivo (S2), las operaciones no "
+                "sujetas (N1/N2) y otros regímenes o impuestos no están soportados.")
         esperado = q2(b * t / Decimal(100))
         if esperado != q2(c):
             nivel = "confirmar" if abs(esperado - c) <= Decimal("0.01") else "bloqueo"
@@ -604,7 +984,8 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
     elif desglose and q2(suma_base) != q2(base):
         add("bloqueo", "base_imponible", "BASE_DESCUADRE", f"La suma de bases por tipo ({q2(suma_base)}) ≠ base ({q2(base)}).")
     if cuota is None:
-        add("bloqueo", "cuota_total", "CUOTA_FALTA", "Falta la cuota de IVA.")
+        add("bloqueo", "cuota_total", "CUOTA_FALTA", "Falta la cuota de IVA." + (
+            " Todas las bases son exentas: indique 0.00." if desglose and all(es_exenta(x) for x in desglose) else ""))
     elif desglose and q2(suma_cuota) != q2(cuota):
         add("bloqueo", "cuota_total", "CUOTA_TOTAL_DESCUADRE", f"La suma de cuotas ({q2(suma_cuota)}) ≠ cuota total ({q2(cuota)}).")
     tf_ext = (extraccion or {}).get("total_factura")
@@ -759,6 +1140,14 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
     for ind in datos.get("indicios") or []:
         if ind in CASOS_BLOQUEADOS and not (es_rectificativa and ind == "rectificativa"):
             add("bloqueo", "indicios", f"NO_SOPORTADO_{ind.upper()}", f"Caso no soportado: {CASOS_BLOQUEADOS[ind]}.")
+        elif ind == "exencion" and not any(clase_fila(x) in ("exenta", "sin_calificar") for x in desglose):
+            # el documento menciona una exención pero ninguna base del desglose es exenta
+            nota = ((extraccion or {}).get("indicios") or {}).get("exencion")
+            nota = str(nota.get("texto") or "")[:120] if isinstance(nota, dict) else ""
+            add("confirmar", "desglose", "EXENCION_MENCIONADA",
+                "El documento menciona una exención" + (f" («{nota}»)" if nota else "") + ", pero ninguna base del desglose "
+                "es exenta. Si alguna operación de la factura está exenta, márquela como exenta en el desglose y elija la "
+                "causa; si todas están sujetas a IVA, confirme.")
         elif ind == "descuento":
             add("confirmar", "lineas", "DESCUENTO", "El documento menciona un descuento: confirme que la base imponible ya lo descuenta.")
 
@@ -807,6 +1196,99 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
             i["clave"] = f"{i['codigo']}:{i['campo']}" + (f":{i['ref']}" if i.get("ref") else "")
             i["confirmado"] = i["clave"] in conf
     return inc
+
+
+def _validar_fila_exenta(add, i: int, d: dict, clase: str, b: Decimal | None, es_rectificativa: bool,
+                         ext_exencion: dict | None, origen: dict | None = None, ajeno: str = "") -> None:
+    """Fila sin IVA del desglose: exenta (con causa) o sin calificar (sin causa, sin tipo y sin cuota). `origen`: de dónde
+    sale la base exenta que la extracción propuso en una factura mixta (origen_base_exenta). `ajeno`: renglón del documento
+    con una tasa, fianza, indemnización… (indicio «importes_ajenos»), que la base exenta puede incluir sin deber."""
+    campo = f"desglose.{i}"
+    if clase == "sin_calificar":
+        # exención del IVA mencionada sin el artículo que da la causa («Operación exenta de IVA»): se cita, sin proponer causa
+        nota = (str(ext_exencion.get("texto") or "")[:120] if isinstance(ext_exencion, dict) and ext_exencion.get("iva")
+                and not ext_exencion.get("causa") else "")
+        add("bloqueo", campo, "SIN_IVA",
+            f"La fila {i + 1} del desglose no repercute IVA (base {q2(b) if b is not None else 'sin indicar'}, sin tipo ni "
+            "cuota). "
+            + (f"El documento menciona una exención («{nota}») pero no cita el artículo de la Ley 37/1992 que da su causa: "
+               "no se propone ninguna. " if nota else "")
+            + "Si la operación está exenta, elija la causa de exención (E1–E6) y revise la mención legal que se "
+            "imprimirá en la factura; si está sujeta a IVA, indique el tipo y la cuota y corrija la cuota y el total. Las "
+            "operaciones no sujetas al impuesto no están soportadas.")
+        return
+    causa = d.get("operacion_exenta")
+    info = CAUSAS_EXENCION.get(causa)
+    if d.get("calificacion"):
+        add("bloqueo", campo, "EXENTA_Y_SUJETA",
+            f"La fila {i + 1} indica a la vez una calificación ({d['calificacion']}) y una causa de exención ({causa}): son "
+            "excluyentes (validaciones AEAT 1196 y 1238). Elija «Sujeta» o «Exenta».")
+    if info is None:
+        add("bloqueo", f"{campo}.operacion_exenta", "EXENTA_CAUSA_NO_VALIDA",
+            f"«{causa}» no es una causa de exención admitida (E1, E2, E3, E4 o E6).")
+    elif causa in CAUSAS_NO_SOPORTADAS:
+        add("bloqueo", f"{campo}.operacion_exenta", "EXENTA_NO_SOPORTADA",
+            f"{causa} ({info['nombre'].lower()}): la AEAT exige identificar al destinatario con su NIF-IVA de otro Estado "
+            "miembro (IDOtro, validación 1289) y la aplicación solo admite destinatarios con NIF español. Las entregas "
+            "intracomunitarias no están soportadas.")
+    t, c = _dec(d.get("tipo_iva")), _dec(d.get("cuota"))
+    if (d.get("tipo_iva") not in (None, "") and t != 0) or (d.get("cuota") not in (None, "") and c != 0):
+        add("bloqueo", campo, "EXENTA_CON_CUOTA",
+            f"La fila {i + 1} es exenta: no lleva tipo de IVA ni cuota (validación AEAT 1238). Deje vacíos el tipo y la cuota "
+            "o, si la operación está sujeta, márquela como sujeta.")
+    if (d.get("impuesto") or "01") != "01" or (info and (d.get("clave_regimen") or "01") not in ("01", info["clave_regimen"])):
+        add("bloqueo", campo, "CALIFICACION_NO_SOPORTADA",
+            "Solo se admiten operaciones exentas del IVA (impuesto 01) en régimen general (01) o, para E2 y E3, de exportación (02).")
+    if b is None:
+        add("bloqueo", f"{campo}.base", "DESGLOSE_INCOMPLETO", f"Falta la base exenta de la fila {i + 1}.")
+    elif not es_rectificativa and b < 0:
+        add("bloqueo", campo, "NEGATIVO", "Importes negativos: use el procedimiento de rectificación.")
+    elif b == 0 and not es_rectificativa:
+        add("bloqueo", f"{campo}.base", "EXENTA_BASE_CERO", f"La base exenta de la fila {i + 1} es cero: indíquela o quite la fila.")
+    motivo = normalizar_mencion(d.get("motivo_exencion"))
+    if not motivo or mencion_vacia(motivo):
+        add("bloqueo", f"{campo}.motivo_exencion", "EXENTA_MENCION_FALTA",
+            (f"La mención de la exención («{motivo[:20]}») solo tiene signos de puntuación o espacios. " if motivo else "")
+            + "Indique la mención de la exención que se imprimirá en la factura: la referencia al precepto de la Ley 37/1992 "
+            "(o de la Directiva 2006/112/CE) o la indicación de que la operación está exenta (art. 6.1.j RD 1619/2012)"
+            + (f", p. ej. «{info['mencion']}»." if info else "."))
+    elif len(motivo) > MAX_MENCION_EXENCION:
+        add("bloqueo", f"{campo}.motivo_exencion", "EXENTA_MENCION_LARGA",
+            f"La mención de la exención supera {MAX_MENCION_EXENCION} caracteres.")
+    elif not texto_imprimible(motivo):
+        add("bloqueo", f"{campo}.motivo_exencion", "EXENTA_MENCION_CARACTERES",
+            "La mención de la exención contiene caracteres que no se pueden imprimir en la factura: escríbala solo con "
+            "letras, cifras y signos del alfabeto latino.")
+    if info is None or causa in CAUSAS_NO_SOPORTADAS:
+        return
+    leida = (isinstance(ext_exencion, dict) and ext_exencion.get("causa") == causa and ext_exencion.get("articulo")
+             and ext_exencion.get("texto"))
+    add("confirmar", campo, "EXENTA_CAUSA",
+        f"Base exenta de la fila {i + 1} ({q2(b) if b is not None else '—'}): {causa} — {info['nombre']}"
+        + (f", con clave de régimen {info['clave_regimen']} (exportación)" if info["clave_regimen"] != "01" else "")
+        + f". Mención en la factura: «{motivo[:200]}». "
+        + (f"Propuesta a partir del texto del documento («{str(ext_exencion['texto'])[:120]}»). " if leida else "")
+        + (_texto_origen(origen) if leida and origen and b is not None and _dec(origen.get("base")) == q2(b) else "")
+        + (f"El documento incluye importes que no suelen formar parte de una base exenta (tasas, fianzas, indemnizaciones, "
+           f"provisiones de fondos o gastos repercutidos o por cuenta del cliente), como «{ajeno}»: compruebe que esta base "
+           "no los incluye y, si los incluye, corrija la base y el total. " if ajeno else "")
+        + "La aplicación no puede comprobar que la operación esté exenta: confirme la causa con la normativa (o con su "
+          "asesor) antes de expedir; si no es correcta, cámbiela o marque la operación como sujeta.")
+
+
+def _texto_origen(origen: dict) -> str:
+    """Frase de la confirmación EXENTA_CAUSA que explica de dónde sale una base exenta calculada como diferencia."""
+    lineas = [x for x in origen.get("lineas") or [] if isinstance(x, (list, tuple)) and len(x) == 2]
+    citadas = [f"«{c}» ({imp})" for c, imp in lineas[:3]] + ([f"{len(lineas) - 3} más"] if len(lineas) > 3 else [])
+    out = f"Esta base exenta ({origen.get('base')}) se ha calculado como diferencia ({origen.get('calculo')})"
+    if origen.get("impresa"):
+        out += " y coincide con la base exenta impresa en el documento"
+    if citadas:
+        out += ("; corresponde a la línea " if len(lineas) == 1 else "; corresponde a las líneas ") \
+            + (", ".join(citadas[:-1]) + " y " + citadas[-1] if len(citadas) > 1 else citadas[0]) + "."
+    else:
+        out += "; no se han identificado las líneas de conceptos que la forman: compruébelas en el original."
+    return out + " Compruebe que esas operaciones son las exentas por la causa citada. "
 
 
 def _ref_documentos(ids: list[str]) -> str:
@@ -909,5 +1391,8 @@ def evaluar_ambito(e: dict) -> dict:
                        "facturas deben expedirse solo desde esta aplicación y el programa de origen debe limitarse a "
                        "documentos preparatorios.")
     if puede:
-        motivos.append("Supuesto implementado: territorio común, sin SII, sin exclusiones indicadas.")
+        motivos.append("Supuesto implementado: territorio común, sin SII, sin exclusiones indicadas. Operaciones de IVA en "
+                       "régimen general sujetas a los tipos del 21, 10 o 4 % y operaciones exentas (E1–E4 y E6), con la causa "
+                       "confirmada en cada factura; las no sujetas, la inversión del sujeto pasivo y el recargo de "
+                       "equivalencia siguen sin soportarse.")
     return {"puede_emitir": puede, "motivos": motivos}

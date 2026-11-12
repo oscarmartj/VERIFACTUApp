@@ -28,7 +28,7 @@ from .. import nif as nifmod
 from ..importes import parse_importe, q2
 from .texto import CONF_TEXTO_DUDOSO, Linea, Pagina, Palabra, lineas as agrupar_lineas
 
-VERSION_EXTRACTOR = "reglas-2.2"
+VERSION_EXTRACTOR = "reglas-2.3"
 
 RE_IMPORTE = re.compile(r"(?<![\d/.,])[-−]?(?:\d{1,3}(?:\.\d{3})+,\d{1,4}|\d{1,3}(?: \d{3})+,\d{1,4}|\d{1,3}(?:,\d{3})+\.\d{2}|\d+,\d{1,4}|\d+\.\d{2})(?![\d/])")
 RE_PORCENTAJE = re.compile(r"(\d{1,2}(?:[.,]\d{1,2})?)\s*%")
@@ -278,6 +278,27 @@ RE_PALABRA_IMPUESTO = re.compile(rf"(?<![{_LETRA}])(?:impuestos?|tax(?:es)?|vat|
 RE_PORCENTAJE_ROTULO = re.compile(r"%|°/o|\bo/o\b|\bpor\s*(?:100|ciento)\b", re.I)
 # exención o no sujeción declarada: compatible con una factura sin IVA (no la descarta)
 RE_SIN_IVA_DECLARADO = re.compile(r"exent[oa]s?|exenci[oó]n|no\s+sujet[oa]s?|inversi[oó]n\s+del\s+sujeto\s+pasivo", re.I)
+# Mención de una exención del IVA y precepto citado: «Exenta de IVA art. 20.Uno.9º LIVA», «Operación exenta en virtud del
+# artículo 20.Uno.23º de la Ley 37/1992», «arts. 23 y 24». El artículo da la causa propuesta (borradores.CAUSAS_EXENCION)
+RE_EXENCION_TEXTO = re.compile(r"\bexent[oa]s?\b|\bexenci[oó]n", re.I)
+RE_ARTICULO_EXENCION = re.compile(r"\bart(?:[ií]culos?|s?\.)?\s*(2[0-5])(?!\d)", re.I)
+# el IVA nombrado en la frase («exenta de IVA», «del Impuesto sobre el Valor Añadido»)
+RE_IVA_MENCION = re.compile(r"\bi\.?\s?v\.?\s?a\b|valor\s+a[ñn]adido", re.I)
+# Norma a la que pertenece el artículo citado: la Ley del IVA («Ley 37/1992», «LIVA», «Ley del IVA», «Ley del Impuesto sobre
+# el Valor Añadido») u otra («art. 22 del contrato», «art. 25 de la Ley 49/2002», un reglamento, un real decreto, el IRPF…).
+# Solo un artículo de la Ley del IVA da la causa de la exención
+RE_NORMA_CITADA = re.compile(
+    r"(?P<iva>(?<![\w/])(?:ley\s+)?37\s*/\s*(?:19)?92(?!\d)|\bL\.?\s?I\.?\s?V\.?\s?A\b"
+    r"|\bley\s+del\s+(?:i\.?\s?v\.?\s?a\b|impuesto\s+sobre\s+el\s+valor\s+a[ñn]adido|impuesto\b(?!\s+(?:sobre|de)\b)))"
+    r"|(?P<otra>\b(?:leyes|ley|reales\s+decretos|real\s+decreto|decretos?|reglamentos?|directivas?|c[oó]digos?|estatutos?"
+    r"|ordenanzas?|convenios?|contratos?|cl[aá]usulas?|pliegos?|constituci[oó]n|normas?\s+forale?s?"
+    r"|R\.?\s?I\.?\s?V\.?\s?A|[LR]\.?\s?I\.?\s?R\.?\s?P\.?\s?F|I\.?\s?R\.?\s?P\.?\s?F|L\.?\s?G\.?\s?T|T\.?\s?R\.?\s?L\.?\s?I\.?\s?T\.?\s?P)\b"
+    r"|\bR\.?\s?D\.?(?=\s*(?:leg(?:islativo|\.)?\s*)?\d))", re.I)
+# fin de una frase: punto seguido de mayúscula (no el de «art. 20» ni el de «20.Uno.9º», ni el de «art. 20. Uno. 9º»: tras
+# el número del artículo, un apartado «Uno», «Dos»… sigue la cita) o punto y coma
+RE_FIN_FRASE = re.compile(r"(?<!\d)\.\s+(?=[A-ZÁÉÍÓÚÑ¿¡«\"(])"
+                          r"|(?<=\d)\.\s+(?=[A-ZÁÉÍÓÚÑ¿¡«\"(])(?!(?i:uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b)|;")
+CAUSA_POR_ARTICULO = {"20": "E1", "21": "E2", "22": "E3", "23": "E4", "24": "E4", "25": "E5"}
 # el total incluye el IVA («IVA incluido», «impuestos incluidos», «incluye IVA»): el documento sí repercute IVA
 RE_IVA_INCLUIDO = re.compile(r"(?:\biva|i\.\s?v\.\s?a\.?|\bimpuestos?)\s*(?:incl\.?|incluid[oa]s?|inclu[íi]d[oa]s?)(?![a-z])|"
                              r"\binclu(?:ye|ido|idos)\s+(?:el\s+)?(?:iva|i\.\s?v\.\s?a|impuestos?)\b|\bcon\s+iva\b|\biva\s+inc\b", re.I)
@@ -4855,7 +4876,203 @@ class Extractor:
             par = self._nota_garantia()
             if par:
                 out["retencion_garantia"] = par
+        if "exencion" in out or any(RE_EXENCION_TEXTO.search(l.texto) or RE_ARTICULO_EXENCION.search(l.texto)
+                                    for l in self.lineas):
+            # importes que no son base imponible o no están exentos por la causa citada (tasas, fianzas, indemnizaciones,
+            # provisiones de fondos, gastos por cuenta del cliente o repercutidos): con ellos el borrador no separa por sí
+            # solo una base exenta de una factura mixta (borradores.INDICIOS_SIN_MIXTA). Solo se busca si el documento
+            # menciona una exención o cita un artículo 20–25 (lo único que cambia), con las mismas expresiones que
+            # exencion() —«exentos», «Art 20», «artículos 20 y siguientes»—, que son más amplias que el indicio «exencion»
+            for l in self.lineas:
+                if self._importe_ajeno(l.texto):
+                    out["importes_ajenos"] = {"texto": l.texto, "pagina": l.pagina, "bbox": l.bbox()}
+                    break
         return out
+
+    RE_IMPORTE_AJENO = re.compile(
+        r"\bfianzas?\b|\bindemnizaci[oó]n(?:es)?\b|provisi[oó]n(?:es)?\s+de\s+fondos|"
+        r"por\s+cuenta\s+del?\s+(?:cliente|destinatario|arrendatario|inquilino)|\btasas?\b|\bbasuras?\b|"
+        r"\bdep[oó]sitos?\s+(?:de\s+|en\s+)?garant[ií]a|\bgarant[ií]as?\s+adicional(?:es)?\b|"
+        r"\bimpuesto\s+sobre\s+bienes\s+inmuebles\b|\brepercut(?:id[oa]s?|en?|imos)\b", re.I)
+    RE_IBI = re.compile(r"\bI\.?\s?B\.?\s?I\b")   # en mayúsculas: «Ibi» es también un municipio
+    # «IVA repercutido», «cuota repercutida»: es el propio impuesto, no un importe ajeno
+    RE_IVA_REPERCUTIDO = re.compile(r"(?:i\.?\s?v\.?\s?a\.?|cuotas?|impuestos?)(?:\s+(?:del?\s+)?\d{1,2}(?:[.,]\d{1,2})?\s*%)?"
+                                    r"\s*$", re.I)
+
+    @classmethod
+    def _importe_ajeno(cls, texto: str) -> bool:
+        if cls.RE_IBI.search(texto):
+            return True
+        for m in cls.RE_IMPORTE_AJENO.finditer(texto):
+            if m.group(0).lower().startswith("repercut") and cls.RE_IVA_REPERCUTIDO.search(texto[max(0, m.start() - 30):m.start()]):
+                continue
+            return True
+        return False
+
+    MAX_CANDIDATOS_EXENCION = 200
+
+    def exencion(self):
+        """Propuesta de causa de exención (siempre para confirmar). Solo un artículo de la Ley del IVA da la causa (20 → E1,
+        21 → E2, 22 → E3, 23 y 24 → E4, 25 → E5): el renglón que menciona la exención («exento/a», «exención») y cita el
+        artículo (buscado también en los renglones de debajo que continúan la frase), o un renglón que cita el artículo de
+        la Ley 37/1992 aunque no diga «exenta». El artículo es de la Ley del IVA si la cita la nombra («art. 20.Uno.9º
+        LIVA», «Ley 37/1992, art. 20») o, si no nombra ninguna norma, si la misma frase dice «exenta» y nombra el IVA
+        («Exenta de IVA según el art. 20.Uno.9º»); el artículo de otra norma («art. 22 del contrato», «art. 25 de la
+        Ley 49/2002») no da causa. La mención propuesta es el texto citado.
+
+        Una exención mencionada sin ese artículo («Operación exenta de IVA», «IVA EXENTO», o «exento» en otro contexto:
+        «exento de responsabilidad», «exento de retención») no da causa: devuelve causa None (con el texto y «iva»: si la
+        frase nombra el IVA) y la base sin IVA queda sin calificar para que el usuario elija la causa y escriba la mención
+        (no se inventa la del art. 20). Devuelve None si el documento no menciona ninguna exención ni cita esos artículos."""
+        ls = self.lineas
+        candidatos = []
+        for i, l in enumerate(ls):
+            exento = bool(RE_EXENCION_TEXTO.search(l.texto))
+            if not exento and not RE_ARTICULO_EXENCION.search(l.texto):
+                continue
+            par = [l]
+            if exento and not RE_ARTICULO_EXENCION.search(l.texto):
+                j = i
+                while len(par) < 3:   # la frase sigue en el renglón de debajo, alineado a la izquierda
+                    ult = ls[j]
+                    h = max(ult.bottom - ult.top, 1.0)
+                    k = next((k for k in range(j + 1, min(j + 6, len(ls))) if ls[k].pagina == ult.pagina
+                              and -1.0 <= ls[k].top - ult.bottom <= 1.2 * h and abs(ls[k].x0 - ult.x0) <= 20), None)
+                    if k is None:
+                        break
+                    par.append(ls[k])
+                    j = k
+                    if RE_ARTICULO_EXENCION.search(ls[k].texto):
+                        break
+                if not RE_ARTICULO_EXENCION.search(" ".join(x.texto for x in par)):
+                    par = [l]
+            texto = re.sub(r"\s+", " ", " ".join(x.texto for x in par)).strip()[:300]
+            cita = self._cita_articulo_exencion(texto)
+            art = cita[0] if cita else None
+            iva = any(RE_EXENCION_TEXTO.search(f) and RE_IVA_MENCION.search(f) for f in self._frases(texto))
+            if art is None and not exento:
+                continue   # cita un artículo 20–25 de otra norma, sin mencionar ninguna exención
+            rango = (0 if exento else 1) if art else (2 if iva else 3)
+            candidatos.append((rango, len(candidatos), texto, cita, iva, l))
+            if len(candidatos) >= self.MAX_CANDIDATOS_EXENCION:
+                break
+        if not candidatos:
+            return None
+        _, _, texto, cita, iva, l = min(candidatos)
+        if cita is None:
+            return {"causa": None, "articulo": None, "motivo": None, "texto": texto, "iva": iva, "pagina": l.pagina,
+                    "bbox": l.bbox()}
+        art, pos = cita
+        # la mención propuesta es solo la frase de la exención (no la frase siguiente del mismo renglón, que puede citar
+        # otra norma: «… exento de IVA (art. 20.Uno.23º LIVA). Gastos incluidos (art. 20 LAU).»)
+        out = {"causa": CAUSA_POR_ARTICULO[art], "articulo": art, "motivo": self._mencion_citada(texto, pos), "texto": texto,
+               "iva": True, "pagina": l.pagina, "bbox": l.bbox()}
+        importes = self._importes_factura_mixta()
+        if importes:
+            out["importes"] = importes
+        return out
+
+    @staticmethod
+    def _frases(texto: str) -> list[str]:
+        out, ini = [], 0
+        for m in RE_FIN_FRASE.finditer(texto):
+            out.append(texto[ini:m.start()])
+            ini = m.end()
+        return out + [texto[ini:]]
+
+    @staticmethod
+    def _frases_con_posicion(texto: str) -> list[tuple[int, int]]:
+        """Tramos (inicio, fin) de las frases del texto: con su punto final, sin el punto y coma ni los espacios."""
+        out, ini = [], 0
+        for m in RE_FIN_FRASE.finditer(texto):
+            out.append((ini, m.start() + (1 if texto[m.start()] == "." else 0)))
+            ini = m.end()
+        return out + [(ini, len(texto))]
+
+    @classmethod
+    def _mencion_citada(cls, texto: str, pos: int) -> str:
+        """Mención de la exención citada del documento: la frase del artículo (posición pos) y, si esa frase no dice
+        «exenta», la frase contigua que lo dice («Operación exenta de IVA. Art. 20.Uno.23º Ley 37/1992.»); nunca las
+        demás frases del renglón («Gracias por su confianza.», «Gastos de comunidad incluidos (art. 20 LAU).»)."""
+        frases = cls._frases_con_posicion(texto)
+        k = max(i for i, (a, _) in enumerate(frases) if a <= pos or i == 0)
+        a, b = frases[k]
+        if not RE_EXENCION_TEXTO.search(texto[a:b]):
+            if k > 0 and RE_EXENCION_TEXTO.search(texto[frases[k - 1][0]:frases[k - 1][1]]):
+                a = frases[k - 1][0]
+            elif k + 1 < len(frases) and RE_EXENCION_TEXTO.search(texto[frases[k + 1][0]:frases[k + 1][1]]):
+                b = frases[k + 1][1]
+        return texto[a:b].strip() or texto
+
+    # Renglones del cuadro de totales de una factura mixta (sujeta y exenta), con la cifra al final: la base exenta rotulada
+    # («Base exenta 650,00 €», «Exento 650,00»), la base imponible total sin tipo («Base imponible 750,00», «Suma 750,00»)
+    # y la cuota calculada sobre una base distinta de la total («I.V.A. 21 % s/ 100,00 21,00 €»)
+    _IMP_MIXTA = r"([-−]?(?:\d{1,3}(?:\.\d{3})+,\d{2}|\d{1,3}(?:,\d{3})+\.\d{2}|\d+,\d{2}|\d+\.\d{2}))"
+    _EUR_MIXTA = r"(?:\s*(?:€|eur(?:os)?\.?))?"
+    RE_MIXTA_EXENTA = re.compile(
+        r"(?:total\s+)?(?:(?:base|importe)s?\s+(?:imponibles?\s+)?|operaci[oó]n(?:es)?\s+)?exent[oa]s?"
+        r"(?:\s+de\s+i\.?\s?v\.?\s?a\.?)?(?:\s*\([^()%]{0,40}\))?\s*:?\s*" + _IMP_MIXTA + _EUR_MIXTA, re.I)
+    RE_MIXTA_BASE = re.compile(
+        r"(?:total\s+)?(?:bases?\s+imponibles?(?:\s+total(?:es)?)?|suma(?:\s+total)?|subtotal|base\s+total)\s*:?\s*"
+        + _IMP_MIXTA + _EUR_MIXTA, re.I)
+    RE_MIXTA_SOBRE = re.compile(
+        r"(?:cuota\s+(?:del?\s+)?)?(?:i\.?\s?v\.?\s?a\.?|cuota)\s*\(?\s*(\d{1,2}(?:[.,]\d{1,2})?)\s*%\s*\)?\s*(?:s/|sobre)\s*"
+        r"(?:(?:la\s+)?base(?:\s+imponible)?\s*(?:de\s+)?)?" + _IMP_MIXTA + _EUR_MIXTA + r"\s+" + _IMP_MIXTA + _EUR_MIXTA, re.I)
+    MAX_IMPORTES_MIXTA = 20
+
+    def _importes_factura_mixta(self) -> dict | None:
+        """Cifras impresas en renglones propios del cuadro de totales (fuera de la tabla de conceptos, sin texto de
+        visibilidad dudosa) que permiten separar la base exenta de una factura mixta: {"exentas", "bases", "sobre"}. El
+        borrador solo las usa si todo cuadra al céntimo (borradores._proponer_exencion); None si no hay ninguna."""
+        self.tabla()
+        de_tabla = getattr(self, "_ids_filas_tabla", set())
+        out: dict[str, list] = {"exentas": [], "bases": [], "sobre": []}
+        for f in self.filas:
+            if id(f) in de_tabla or any(p.metodo == "texto_pdf" and p.conf < 1.0 for p in f.palabras):
+                continue
+            t = re.sub(r"\s+", " ", f.texto).strip()
+            if len(t) > 160:
+                continue
+            m = self.RE_MIXTA_SOBRE.fullmatch(t)
+            if m:
+                tipo, base, cuota = _num(m.group(1)), _num(m.group(2)), _num(m.group(3))
+                if None not in (tipo, base, cuota):
+                    out["sobre"].append({"tipo": str(q2(tipo)), "base": str(q2(base)), "cuota": str(q2(cuota))})
+                continue
+            for clave, rx in (("exentas", self.RE_MIXTA_EXENTA), ("bases", self.RE_MIXTA_BASE)):
+                m = rx.fullmatch(t)
+                v = _num(m.group(1)) if m else None
+                if v is not None:
+                    out[clave].append(str(q2(v)))
+                    break
+            if sum(len(v) for v in out.values()) >= self.MAX_IMPORTES_MIXTA:
+                break
+        return out if any(out.values()) else None
+
+    @staticmethod
+    def _cita_articulo_exencion(texto: str) -> tuple[str, int] | None:
+        """Número y posición del primer artículo 20–25 citado en el texto que es de la Ley del IVA (ver exencion()), o
+        None. La norma es la primera nombrada tras el artículo en su frase o, si no hay, la última nombrada justo antes."""
+        for m in RE_ARTICULO_EXENCION.finditer(texto):
+            ini, fin = 0, len(texto)
+            for f in RE_FIN_FRASE.finditer(texto):
+                if f.end() <= m.start():
+                    ini = f.end()
+                elif f.start() >= m.end():
+                    fin = f.start()
+                    break
+            n = RE_NORMA_CITADA.search(texto[m.end():fin][:120])
+            if n is None:
+                previas = list(RE_NORMA_CITADA.finditer(texto[max(ini, m.start() - 60):m.start()]))
+                n = previas[-1] if previas else None
+            if n is not None:
+                if n.group("iva"):
+                    return m.group(1), m.start()
+                continue   # artículo de otra norma
+            frase = texto[ini:fin]
+            if RE_EXENCION_TEXTO.search(frase) and RE_IVA_MENCION.search(frase):
+                return m.group(1), m.start()
+        return None
 
     # retención y garantía/fianza en la misma frase de una nota, con incisos («Se retiene el 2 % del importe de la presente
     # certificación… en concepto de garantía», «s/ B.I.», «según art. 14 del contrato»): sin cruzar un fin de frase (punto
@@ -4982,6 +5199,7 @@ class Extractor:
             "referencias": self._seccion("las referencias", self.referencias, lambda a: {}),
             **self._seccion("los datos de pago", self.pago, lambda a: {}, "forma_pago"),
             "indicios": self.indicios(),
+            "exencion": self._seccion("la mención de la exención", self.exencion, lambda a: None, "desglose"),
             "extraccion_parcial": self._parciales,
             "paginas": [{"numero": p.numero, "metodo": p.metodo, "conf_media": p.conf_media,
                          "ancho": p.ancho, "alto": p.alto} for p in self.paginas],

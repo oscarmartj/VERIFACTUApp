@@ -352,6 +352,23 @@ def _filas(v) -> list[dict]:
     return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
 
 
+def _causa_exencion(causa) -> str:
+    """Rótulo de la causa de exención en el cuadro de totales («E1 · art. 20 Ley 37/1992»)."""
+    from .borradores import CAUSAS_EXENCION
+    info = CAUSAS_EXENCION.get(str(causa or ""))
+    return f"{causa} · {info['precepto']}" if info else str(causa or "")
+
+
+def menciones_exencion(datos: dict) -> list[str]:
+    """Textos de la mención de la exención de las bases exentas, sin repetir y en el orden del desglose."""
+    out = []
+    for d in _filas(datos.get("desglose")):
+        m = d.get("motivo_exencion")
+        if d.get("operacion_exenta") and isinstance(m, str) and m.strip() and m.strip() not in out:
+            out.append(m.strip())
+    return out
+
+
 class DocumentoDemasiadoLargo(ValueError):
     """El borrador ocuparía demasiadas páginas: su vista previa no se compone (ver borradores.MAX_RENGLONES_PDF; la
     expedición la impide la validación, y una factura ya expedida siempre se puede volver a componer)."""
@@ -467,6 +484,15 @@ def reconstruir(datos: dict, *, modo: str, entorno: str | None, url_qr: str | No
         # (un borrador a medio editar puede tener filas incompletas: la vista previa las muestra en blanco, nunca falla)
         desglose = _filas(datos.get("desglose"))
         for d in desglose:
+            if d.get("operacion_exenta"):
+                # base exenta: sin tipo ni cuota, con su causa (la mención legal va debajo de los totales)
+                tot.append([_p(f"Base exenta ({_causa_exencion(d.get('operacion_exenta'))})", est["der"]),
+                            _p(_imp(d.get("base")), est["der"])])
+                continue
+            if not d.get("calificacion") and d.get("tipo_iva") in (None, "") and d.get("cuota") in (None, ""):
+                # (solo en un borrador: base sin IVA cuya causa de exención aún no se ha elegido; no puede expedirse así)
+                tot.append([_p("Base sin IVA (causa de exención por indicar)", est["der"]), _p(_imp(d.get("base")), est["der"])])
+                continue
             if len(desglose) > 1:
                 tot.append([_p(f"Base imponible al {_pct(d.get('tipo_iva'))} %", est["der"]), _p(_imp(d.get("base")), est["der"])])
             tot.append([_p(f"IVA {_pct(d.get('tipo_iva'))} %", est["der"]), _p(_imp(d.get("cuota")), est["der"])])
@@ -480,6 +506,10 @@ def reconstruir(datos: dict, *, modo: str, entorno: str | None, url_qr: str | No
         tt = Table(tot, colWidths=[150 * mm, 30 * mm], splitInRow=partir)
         tt.setStyle(TableStyle([("LINEABOVE", (0, -1), (-1, -1), 0.6, AZUL)]))
         story += [tt, Spacer(1, 5 * mm)]
+        # Mención de la exención (art. 6.1.j RD 1619/2012): una vez por texto distinto
+        menciones = menciones_exencion(datos)
+        if menciones:
+            story += [_p(m, est["neg"]) for m in menciones] + [Spacer(1, 3 * mm)]
         # Condiciones de pago
         pago = []
         if datos.get("forma_pago"):
@@ -589,6 +619,8 @@ def superposicion_viable(datos: dict, extraccion: dict | None, fecha_expedicion:
         return False, "La fecha impresa no coincide con la fecha de expedición"
     if datos.get("retencion"):
         return False, "Factura con retención: se compone para mostrar total y total a pagar diferenciados"
+    if any(d.get("operacion_exenta") for d in _filas(datos.get("desglose"))):
+        return False, "Factura con operaciones exentas: se compone para mostrar la base exenta, su causa y la mención legal"
     return True, "Lo impreso coincide con los datos aprobados"
 
 
@@ -637,12 +669,21 @@ def leer_qrs(pdf: bytes, paginas: int) -> list[list[str]]:
     return out
 
 
+def _no_girado(o) -> bool:
+    """Objeto del PDF que no es un carácter girado (la marca de agua diagonal de borrador o de entorno de pruebas)."""
+    m = o.get("matrix") if o.get("object_type") == "char" else None
+    return not m or (abs(m[1]) < 1e-6 and abs(m[2]) < 1e-6)
+
+
 def verificar(pdf: bytes, datos: dict, url_qr: str | None, fecha_expedicion: str | None) -> dict:
     """Comprueba que el PDF refleja los datos aprobados y que el QR decodifica a la URL registrada."""
     import pdfplumber
+    menciones = menciones_exencion(datos)
     with pdfplumber.open(io.BytesIO(pdf)) as d:
         texto = "\n".join((p.extract_text() or "") for p in d.pages)
         n = len(d.pages)
+        # sin la marca de agua diagonal (sus letras, giradas, se intercalan con las del texto horizontal)
+        horizontal = "\n".join((p.filter(_no_girado).extract_text() or "") for p in d.pages) if menciones else ""
     norm = re.sub(r"\s+", " ", texto)
     compacto = re.sub(r"\s+", "", texto)  # un número largo puede partirse en varias líneas
     comprobaciones = {
@@ -653,6 +694,10 @@ def verificar(pdf: bytes, datos: dict, url_qr: str | None, fecha_expedicion: str
         "fecha_expedicion": _d(fecha_expedicion) in norm if fecha_expedicion else True,
         "leyenda_qr": (qrmod.LEYENDA_SUPERIOR in norm) if url_qr else (qrmod.LEYENDA_SUPERIOR not in norm),
     }
+    if menciones:
+        # la mención obligatoria de la exención (art. 6.1.j RD 1619/2012) está impresa
+        compacto_h = re.sub(r"\s+", "", horizontal)
+        comprobaciones["mencion_exencion"] = all(re.sub(r"\s+", "", m) in compacto_h for m in menciones)
     try:
         qrs = leer_qrs(pdf, n)
     except Exception as e:  # noqa: BLE001 — un fallo de verificación nunca debe pasar por bueno

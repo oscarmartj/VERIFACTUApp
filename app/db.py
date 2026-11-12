@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -26,12 +27,38 @@ def utc_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def legible(marca, hora: bool = True) -> str:
+    """Una marca ISO 8601 para mostrarla al usuario en hora peninsular: «01/07/2026 a las 12:05» (o solo «01/07/2026»).
+    Sin desfase se toma como hora peninsular (ahora_iso); lo que no es una fecha se devuelve tal cual."""
+    if not marca:
+        return "—"
+    try:
+        d = datetime.fromisoformat(str(marca))
+    except ValueError:
+        return str(marca)
+    d = (d if d.tzinfo else d.replace(tzinfo=TZ)).astimezone(TZ)
+    return d.strftime("%d/%m/%Y a las %H:%M") if hora else d.strftime("%d/%m/%Y")
+
+
+def crear_privado(ruta: Path) -> None:
+    """Una base de datos nueva se crea solo para el usuario del servicio: su carpeta (si hay que crearla) 0700 y el fichero
+    0600 antes de que SQLite lo abra, de modo que su WAL y su -shm heredan ese modo (copias.proteger_ficheros ajusta al
+    arrancar las creadas por versiones anteriores)."""
+    if not ruta.parent.exists():
+        ruta.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if not ruta.exists():
+        try:
+            os.close(os.open(ruta, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+        except FileExistsError:
+            pass
+
+
 def conectar(ruta: Path | None = None, crear: bool = True) -> sqlite3.Connection:
     """crear=False abre solo una base existente (herramientas de copia: nunca crean una base vacía)."""
     ruta = ruta or ajustes().db_path
     if not crear and not ruta.exists():
         raise FileNotFoundError(f"No existe la base de datos {ruta}")
-    ruta.parent.mkdir(parents=True, exist_ok=True)
+    crear_privado(ruta)
     con = sqlite3.connect(ruta, timeout=30, isolation_level=None, check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")

@@ -170,11 +170,14 @@ def test_caso5_casos_tributarios(app_cliente):
     emp = dict(db.fila(con, "SELECT * FROM empresas WHERE id=?", (eid,)), ambito_dict={"puede_emitir": True})
     inc = borradores.validar(con, emp, None, datos, serie={"codigo": "A", "siguiente_numero": 9, "numero_detectado": 9})
     assert not [i for i in inc if i["nivel"] == "bloqueo"], inc
-    # Casos no soportados: exención, ISP, tipo no vigente
-    for ind, cod in (("exencion", "NO_SOPORTADO_EXENCION"), ("inversion_sujeto_pasivo", "NO_SOPORTADO_INVERSION_SUJETO_PASIVO"),
-                     ("suplidos", "NO_SOPORTADO_SUPLIDOS")):
+    # Casos no soportados: ISP, suplidos, tipo no vigente
+    for ind, cod in (("inversion_sujeto_pasivo", "NO_SOPORTADO_INVERSION_SUJETO_PASIVO"), ("suplidos", "NO_SOPORTADO_SUPLIDOS")):
         inc = borradores.validar(con, emp, None, dict(datos, indicios=[ind]), serie={"codigo": "A", "siguiente_numero": 9, "numero_detectado": 9})
         assert cod in {i["codigo"] for i in inc if i["nivel"] == "bloqueo"}
+    # Exención mencionada sin ninguna base exenta en el desglose: ya no bloquea (exentas soportadas), se pide confirmar
+    inc = borradores.validar(con, emp, None, dict(datos, indicios=["exencion"]), serie={"codigo": "A", "siguiente_numero": 9, "numero_detectado": 9})
+    assert "EXENCION_MENCIONADA" in {i["codigo"] for i in inc if i["nivel"] == "confirmar"}
+    assert not [i for i in inc if i["nivel"] == "bloqueo"], inc
     d2 = json.loads(json.dumps(datos))
     d2["desglose"][0]["tipo_iva"] = "7.5"
     d2["desglose"][0]["cuota"] = "7.50"
@@ -443,6 +446,7 @@ def test_caso13_acceso_ajeno(app_cliente):
     c.ok(c.post(f"/api/empresas/{eid}/miembros", {"email": "lector@ejemplo.test", "nombre": "L", "clave": "clave-lector-123", "rol": "lector"}))
     lec = Cliente(TestClient(c.tc.app))
     lec.csrf = lec.ok(lec.post("/api/sesion", {"email": "lector@ejemplo.test", "clave": "clave-lector-123"}))["csrf"]
+    lec.ok(lec.put("/api/yo/clave", {"clave_actual": "clave-lector-123", "clave_nueva": "clave-lector-456"}))  # contraseña temporal
     assert lec.get(f"/api/facturas/{fid}").status_code == 200
     assert lec.post(f"/api/facturas/{fid}/rectificativa", {"tipo": "R1", "motivo": "x"}).status_code == 404
 

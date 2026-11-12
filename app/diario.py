@@ -58,6 +58,88 @@ def anotar(tipo: str, datos: dict) -> None:
         os.close(fd)
 
 
+def pendientes_sin_diario(entradas: list[dict]) -> dict[int, int]:
+    """Empresas que siguen pendientes tras la última restauración sin diario (anotación `restauracion_sin_diario`), con el
+    último registro que tenía cada una en la base restaurada: {empresa_id: id del último registro (0 si ninguno)}.
+
+    Lo expedido después de aquella copia no se conoce. Una empresa deja de estar pendiente cuando hace lo que pide el aviso
+    —consultar, de forma completa y fiable, cada mes desde el de la copia hasta el de la restauración (`meses`) en cada
+    entorno en el que tenía registros (en cualquiera si no tenía ninguno): anotaciones `consulta_aeat`— o cuando genera un
+    registro nuevo (anotación `registro` posterior con un id mayor). Como está en el diario, sobrevive a que se pierda otra
+    vez la base de datos y a que se repita una restauración incompleta."""
+    k = max((i for i, e in enumerate(entradas) if e.get("tipo") == "restauracion_sin_diario"), default=None)
+    if k is None:
+        return {}
+    try:
+        marca = entradas[k].get("datos") or {}
+        meses = [m for m in marca.get("meses") or [] if isinstance(m, str)]
+        pend = {}
+        for eid, x in (marca.get("empresas") or {}).items():
+            x = x if isinstance(x, dict) else {"ultimo": x, "entornos": []}
+            pend[int(eid)] = (int(x.get("ultimo") or 0), [e for e in x.get("entornos") or [] if isinstance(e, str)])
+    except (TypeError, ValueError, AttributeError):
+        return {}
+    hechas: dict[int, set] = {}
+    out = {eid: ult for eid, (ult, _) in pend.items()}
+    for e in entradas[k + 1:]:
+        d = e.get("datos") or {}
+        if not isinstance(d, dict):
+            continue
+        eid = d.get("empresa_id")
+        if eid not in out:
+            continue
+        if e.get("tipo") == "consulta_aeat" and isinstance(d.get("mes"), str):
+            h = hechas.setdefault(eid, set())
+            h.add((d.get("entorno"), d["mes"]))
+            h.add(("*", d["mes"]))
+            ult, entornos = pend[eid]
+            necesarias = {(en, m) for en in (entornos or ["*"]) for m in meses}
+            if necesarias <= h:
+                out.pop(eid)
+        elif e.get("tipo") == "registro" and isinstance(d.get("id"), int) and d["id"] > out[eid]:
+            out.pop(eid)
+    return out
+
+
+def pendientes_actuales() -> dict[int, int]:
+    """pendientes_sin_diario del diario actual sin leerlo entero cuando no hace falta: busca (sin descodificar) la última
+    anotación `restauracion_sin_diario` y solo lee desde ella. Sin ninguna, {} enseguida, aunque el diario sea grande."""
+    import mmap
+    p = ruta()
+    if not p.exists() or p.stat().st_size == 0:
+        return {}
+    marca = b'"tipo": "restauracion_sin_diario"'
+    with open(p, "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
+        fin = len(m)
+        while True:
+            pos = m.rfind(marca, 0, fin)
+            if pos < 0:
+                return {}
+            ini = m.rfind(b"\n", 0, pos) + 1
+            entradas = _leer_lineas(m[ini:].splitlines())
+            if entradas and entradas[0].get("tipo") == "restauracion_sin_diario":
+                return pendientes_sin_diario(entradas)
+            fin = pos   # el texto estaba dentro de otra anotación (o la línea no es válida): se sigue buscando antes
+
+
+def _leer_lineas(lineas) -> list[dict]:
+    """Mismas comprobaciones que leer() (UTF-8 estricto y suma de cada línea), sobre unas líneas ya separadas."""
+    out = []
+    for bruta in lineas:
+        bruta = bruta.strip()
+        if not bruta:
+            continue
+        try:
+            e = json.loads(bruta.decode("utf-8"))
+            suma = e.pop("sha", None)
+            if suma is not None and suma != _suma(e):
+                raise ValueError("suma no coincide")
+            out.append(e)
+        except (UnicodeDecodeError, ValueError):
+            continue
+    return out
+
+
 def guardar_binario(relativa: str, contenido: bytes) -> None:
     """Copia espejo (en el volumen del diario) de un binario no regenerable: PDF definitivo o documento original."""
     p = ruta_espejo(relativa)

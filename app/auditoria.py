@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
 
 from lxml import etree
@@ -24,7 +25,18 @@ def verificar_cadena(con, empresa_id: int, entorno: str) -> dict:
             errores.append(f"Registro {r['id']}: la huella del XML difiere")
         if x.findtext("sf:FechaHoraHusoGenRegistro", namespaces=ns) != r["fecha_hora_huso"]:
             errores.append(f"Registro {r['id']}: marca temporal del XML difiere")
-        if previo is None:
+        # Cadena reanudada desde la AEAT tras un desastre: el registro se encadena al último registro que tenía la AEAT
+        # (ancla), no al último local
+        ancla = json.loads(r["ancla_aeat"]) if r.get("ancla_aeat") else None
+        if ancla:
+            if r["secuencia"] != (previo["secuencia"] + 1 if previo else 1):
+                errores.append(f"Registro {r['id']}: salto de secuencia")
+            if r["huella_anterior"] != ancla.get("huella"):
+                errores.append(f"Registro {r['id']}: no encadena con el registro de la AEAT desde el que se reanudó la cadena")
+            if x.findtext("sf:Encadenamiento/sf:RegistroAnterior/sf:Huella", namespaces=ns) != ancla.get("huella") or \
+                    x.findtext("sf:Encadenamiento/sf:RegistroAnterior/sf:NumSerieFactura", namespaces=ns) != ancla.get("num_serie"):
+                errores.append(f"Registro {r['id']}: el XML no encadena con el registro de la AEAT desde el que se reanudó la cadena")
+        elif previo is None:
             if r["secuencia"] != 1 or r["huella_anterior"] or x.find("sf:Encadenamiento/sf:PrimerRegistro", ns) is None:
                 errores.append(f"Registro {r['id']}: debería ser el primero de la cadena")
         else:
@@ -54,8 +66,15 @@ def coherencia_factura(con, factura_id: int) -> dict:
         "importe_total": d["importe_total"] == x.findtext("sf:ImporteTotal", namespaces=ns) == q["importe"],
         "cuota_total": d["cuota_total"] == x.findtext("sf:CuotaTotal", namespaces=ns),
         "destinatario": d["destinatario"]["nif"] == x.findtext("sf:Destinatarios/sf:IDDestinatario/sf:NIF", namespaces=ns),
-        "desglose": [(z["tipo_iva"], z["base"], z["cuota"]) for z in d["desglose"]] == [
+        "desglose": [(z.get("tipo_iva"), z["base"], z.get("cuota")) for z in d["desglose"]] == [
             (e.findtext("sf:TipoImpositivo", namespaces=ns), e.findtext("sf:BaseImponibleOimporteNoSujeto", namespaces=ns),
              e.findtext("sf:CuotaRepercutida", namespaces=ns)) for e in x.findall("sf:Desglose/sf:DetalleDesglose", ns)],
+        # sujeta (CalificacionOperacion) o exenta (OperacionExenta, con su clave de régimen) en cada fila
+        "calificacion": [(z.get("calificacion") if not z.get("operacion_exenta") else None, z.get("operacion_exenta"),
+                          z.get("clave_regimen") or "01") for z in d["desglose"]] == [
+            (e.findtext("sf:CalificacionOperacion", namespaces=ns), e.findtext("sf:OperacionExenta", namespaces=ns),
+             e.findtext("sf:ClaveRegimen", namespaces=ns)) for e in x.findall("sf:Desglose/sf:DetalleDesglose", ns)],
+        "cuota_suma": d["cuota_total"] == f"{sum((Decimal(z['cuota']) for z in d['desglose'] if z.get('cuota')), Decimal(0)):.2f}",
+        "importe_suma": d["importe_total"] == f"{sum((Decimal(z['base']) + Decimal(z.get('cuota') or 0) for z in d['desglose']), Decimal(0)):.2f}",
     }
     return {"ok": all(c.values()), "comprobaciones": c}

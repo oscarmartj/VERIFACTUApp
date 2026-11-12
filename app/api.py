@@ -5,6 +5,7 @@ import io
 import json
 import re
 import secrets
+import sqlite3
 import threading
 import zipfile
 
@@ -14,8 +15,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 
-from . import (almacen, borradores, certificados, db, emision, importacion, nif as nifmod, produccion, remision,
-               seguridad, series, simulador)
+from . import (almacen, borradores, certificados, db, emision, errores, importacion, multiusuario, nif as nifmod, produccion,
+               remision, seguridad, series, simulador)
 from .config import APP_NOMBRE, APP_VERSION, ajustes
 from . import pdf_final
 from .pdf_final import png_paginas
@@ -40,7 +41,13 @@ def sesion(request: Request, con=Depends(get_con)) -> dict:
         raise HTTPException(401, "Sesión no iniciada o caducada")
     if request.method not in ("GET", "HEAD") and not secrets.compare_digest(request.headers.get("X-CSRF-Token", ""), s["csrf"]):
         raise HTTPException(403, "Token CSRF no válido")
+    # Contraseña temporal (fijada por el operador o por un alta directa): hasta cambiarla solo puede hacer eso
+    if s.get("cambiar_clave") and request.url.path not in RUTAS_CON_CLAVE_TEMPORAL:
+        raise HTTPException(403, "Debe cambiar su contraseña antes de continuar")
     return s
+
+
+RUTAS_CON_CLAVE_TEMPORAL = ("/api/yo", "/api/yo/clave", "/api/sesion")
 
 
 def rol(con, s, empresa_id: int, minimo: str = "lector") -> str:
@@ -61,7 +68,7 @@ def exigir_superadmin(con, s) -> None:
     """Privilegio de instalación (productor, alta de empresas, simulador). No basta ser admin de una empresa."""
     u = db.fila(con, "SELECT superadmin FROM usuarios WHERE id=?", (s["usuario_id"],))
     if not u or not u["superadmin"]:
-        raise HTTPException(403, "Requiere el privilegio de administración de la instalación")
+        raise HTTPException(403, "Solo el operador de la plataforma puede realizar esta acción")
 
 
 _NO_XML = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]")
@@ -78,6 +85,12 @@ def _texto_xml(v, campo: str, maximo: int, minimo: int = 1) -> str:
 
 def _razon_social(v) -> str:
     return _texto_xml(v, "Razón social", 120)
+
+
+def _textos(body: dict, campos, mensaje: str) -> None:
+    """Campos de texto opcionales del cuerpo: si vienen (no nulos), deben ser textos JSON. Si no, 422 (nunca 500)."""
+    if any(body.get(k) is not None and not isinstance(body.get(k), str) for k in campos):
+        raise HTTPException(422, mensaje)
 
 
 _IMPORTACIONES = anyio.CapacityLimiter(2)  # la espera ocurre en el bucle de eventos, no ocupa hilos
@@ -108,12 +121,20 @@ def _entornos():
 @router.get("/estado")
 def estado(con=Depends(get_con)):
     n = db.fila(con, "SELECT COUNT(*) n FROM usuarios")["n"]
-    return {"instalada": n > 0, "version": APP_VERSION, "nombre": APP_NOMBRE, "entornos_habilitados": _entornos()}
+    return {"instalada": n > 0, "version": APP_VERSION, "nombre": APP_NOMBRE, "entornos_habilitados": _entornos(),
+            "registro_abierto": multiusuario.registro_abierto(con)}
 
 
 @router.post("/instalar")
 def instalar(body: dict, response: Response, con=Depends(get_con)):
     emp = body.get("empresa") or {}
+    if not isinstance(emp, dict):
+        raise HTTPException(422, "Indique los datos de la empresa (NIF, razón social y domicilio)")
+    if not all(isinstance(body.get(k), str) for k in ("email", "nombre", "clave")):
+        raise HTTPException(422, "Indique su correo electrónico, su nombre y una contraseña")
+    _textos(emp, ("nif", "razon_social", "domicilio"), "NIF, razón social y domicilio de la empresa deben ser textos")
+    if body.get("registro_abierto") is not None and not isinstance(body.get("registro_abierto"), bool):
+        raise HTTPException(422, "registro_abierto debe ser verdadero o falso")
     n = nifmod.normalizar(emp.get("nif"))
     if not nifmod.es_valido(n):
         raise HTTPException(422, "NIF de la empresa no válido")
@@ -124,11 +145,16 @@ def instalar(body: dict, response: Response, con=Depends(get_con)):
             if db.fila(con, "SELECT COUNT(*) n FROM usuarios")["n"] > 0:
                 raise HTTPException(409, "La aplicación ya está instalada")
             uid = seguridad.crear_usuario(con, body["email"], body["nombre"], body["clave"])
-            con.execute("UPDATE usuarios SET superadmin=1 WHERE id=?", (uid,))
+            con.execute("UPDATE usuarios SET superadmin=1, alta_origen='instalacion' WHERE id=?", (uid,))
             eid = crear_empresa(con, uid, n, rs, emp.get("domicilio"))
             _asegurar_productor(con)
+            # Registro abierto a cualquiera: decisión expresa del operador (por defecto, cerrado)
+            multiusuario.fijar_ajuste(con, "registro_abierto", "1" if body.get("registro_abierto") is True else "0", uid)
     except ValueError as e:
         raise HTTPException(422, str(e))
+    multiusuario.anotar_usuario(con, uid)
+    multiusuario.anotar_ajuste(con, "registro_abierto")
+    multiusuario.anotar_verificacion_nif(con, eid)   # la empresa del operador queda verificada al crearla
     return _login_resp(con, uid, response)
 
 
@@ -145,12 +171,22 @@ def _anotar_miembros(con, eid: int) -> None:
         db.actividad(con, "diario.error", empresa_id=eid, detalle={"anotacion": "miembros"})
 
 
+class EmpresaYaDadaDeAlta(sqlite3.IntegrityError):
+    """El NIF (o una forma equivalente: control con dígito o con letra) ya está dado de alta en la plataforma."""
+
+
 def crear_empresa(con, uid: int, nif: str, razon: str, domicilio: str | None) -> int:
+    if multiusuario.nif_ya_dado_de_alta(con, nif):
+        raise EmpresaYaDadaDeAlta(nif)
     cur = con.execute("INSERT INTO empresas (nif, razon_social, domicilio, creado_en) VALUES (?,?,?,?)",
                       (nif, razon.strip(), domicilio, db.ahora_iso()))
     eid = cur.lastrowid
     con.execute("INSERT INTO miembros (usuario_id, empresa_id, rol, relacion) VALUES (?,?, 'admin', 'administrador')", (uid, eid))
     db.actividad(con, "empresa.creada", usuario_id=uid, empresa_id=eid)
+    if multiusuario.es_operador_activo(con, uid):   # la da de alta el operador: su NIF queda verificado por él
+        con.execute("""UPDATE empresas SET nif_verificado_en=?, nif_verificado_por=?, nif_verificado_motivo='alta_por_operador',
+                       nif_verificado_version=1 WHERE id=?""", (db.ahora_iso(), uid, eid))
+        db.actividad(con, "empresa.nif_verificado", usuario_id=uid, empresa_id=eid, detalle={"motivo": "alta_por_operador"})
     return eid
 
 
@@ -163,12 +199,15 @@ def _login_resp(con, uid: int, response: Response):
     token, csrf = seguridad.crear_sesion(con, uid)
     response.set_cookie(COOKIE, token, httponly=True, samesite="strict", secure=ajustes().cookie_segura,
                         max_age=ajustes().sesion_horas * 3600, path="/")
-    u = db.fila(con, "SELECT id, email, nombre, superadmin FROM usuarios WHERE id=?", (uid,))
+    u = db.fila(con, "SELECT id, email, nombre, superadmin, cambiar_clave, alta_origen FROM usuarios WHERE id=?", (uid,))
+    u["clave_restablecida_en"] = multiusuario.clave_restablecida_en(con, uid)
     return {"usuario": u, "csrf": csrf, "empresas": _empresas_de(con, uid)}
 
 
 @router.post("/sesion")
 def login(body: dict, response: Response, con=Depends(get_con)):
+    if not isinstance(body.get("email", ""), str) or not isinstance(body.get("clave", ""), str):
+        raise HTTPException(422, "Indique su correo electrónico y su contraseña")
     u = seguridad.login(con, body.get("email", ""), body.get("clave", ""))
     if not u:
         raise HTTPException(401, "Credenciales no válidas")
@@ -178,14 +217,17 @@ def login(body: dict, response: Response, con=Depends(get_con)):
 
 @router.get("/yo")
 def yo(s=Depends(sesion), con=Depends(get_con)):
-    sup = db.fila(con, "SELECT superadmin FROM usuarios WHERE id=?", (s["usuario_id"],))["superadmin"]
-    return {"usuario": {"id": s["usuario_id"], "email": s["email"], "nombre": s["nombre"], "superadmin": sup}, "csrf": s["csrf"],
+    u = db.fila(con, "SELECT superadmin, alta_origen FROM usuarios WHERE id=?", (s["usuario_id"],))
+    return {"usuario": {"id": s["usuario_id"], "email": s["email"], "nombre": s["nombre"], "superadmin": u["superadmin"],
+                        "cambiar_clave": s.get("cambiar_clave", 0), "alta_origen": u["alta_origen"],
+                        "clave_restablecida_en": multiusuario.clave_restablecida_en(con, s["usuario_id"])}, "csrf": s["csrf"],
             "empresas": _empresas_de(con, s["usuario_id"])}
 
 
 @router.delete("/sesion")
 def logout(request: Request, response: Response, s=Depends(sesion), con=Depends(get_con)):
     seguridad.cerrar_sesion(con, request.cookies.get(COOKIE))
+    multiusuario.anotar_sesion_cerrada(con, s)   # la restauración de una copia anterior no la vuelve a abrir
     response.delete_cookie(COOKIE, path="/")
     return {"ok": True}
 
@@ -211,18 +253,30 @@ def empresa_get(eid: int, s=Depends(sesion), con=Depends(get_con)):
     return _empresa_out(con, eid, s["usuario_id"])
 
 
+EMPRESA_YA_DADA_DE_ALTA = "Esa empresa ya está dada de alta en la aplicación: pida acceso a uno de sus administradores"
+
+
 @router.post("/empresas")
 def empresa_nueva(body: dict, s=Depends(sesion), con=Depends(get_con)):
-    exigir_superadmin(con, s)
+    """Cualquier usuario puede dar de alta sus empresas (queda como administrador). El NIF es único en la plataforma:
+    una sola cadena VERI*FACTU por obligado tributario y sistema. No se revela nada de la empresa ya existente."""
+    if any(body.get(k) is not None and not isinstance(body.get(k), str) for k in ("nif", "razon_social", "domicilio")):
+        raise HTTPException(422, "NIF, razón social y domicilio deben ser textos")
     rs = _razon_social(body.get("razon_social"))
     n = nifmod.normalizar(body.get("nif"))
     if not nifmod.es_valido(n):
         raise HTTPException(422, "NIF no válido")
-    if db.fila(con, "SELECT id FROM empresas WHERE nif=?", (n,)):
-        raise HTTPException(409, "Ya existe una empresa con ese NIF")
-    with db.transaccion(con):
-        eid = crear_empresa(con, s["usuario_id"], n, rs, body.get("domicilio"))
+    dom = _texto_xml(body.get("domicilio"), "Domicilio", 300) if body.get("domicilio") else None
+    try:
+        with db.transaccion(con):
+            multiusuario.comprobar_cupo_empresas(con, s["usuario_id"])
+            eid = crear_empresa(con, s["usuario_id"], n, rs, dom)   # NIF único, también en sus formas equivalentes
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, EMPRESA_YA_DADA_DE_ALTA)
+    except multiusuario.CupoSuperado as e:
+        raise HTTPException(429, str(e))
     _anotar_miembros(con, eid)
+    multiusuario.anotar_verificacion_nif(con, eid)   # solo si la dio de alta el operador (verificada al crearla)
     return _empresa_out(con, eid, s["usuario_id"])
 
 
@@ -234,6 +288,10 @@ CAMPOS_EMPRESA = ("razon_social", "domicilio", "tipo_contribuyente", "territorio
 def empresa_put(eid: int, body: dict, s=Depends(sesion), con=Depends(get_con)):
     rol(con, s, eid, "admin")
     cambios = {k: body[k] for k in CAMPOS_EMPRESA if k in body}
+    _textos(cambios, ("razon_social", "domicilio", "tipo_contribuyente", "territorio", "otras_exclusiones", "origen_pdf",
+                      "origen_pdf_detalle"), "Los datos de la empresa deben ser textos")
+    if any(cambios.get(k) is not None and not isinstance(cambios.get(k), int) for k in ("sii", "canarias_ceuta_melilla")):
+        raise HTTPException(422, "SII y Canarias, Ceuta o Melilla deben indicarse con sí o no")
     if "razon_social" in cambios:
         cambios["razon_social"] = _razon_social(cambios["razon_social"])
     if cambios.get("domicilio"):
@@ -278,21 +336,55 @@ def autorizacion_usuario(eid: int, body: dict, s=Depends(sesion), con=Depends(ge
 
 @router.post("/empresas/{eid}/miembros")
 def miembro_nuevo(eid: int, body: dict, s=Depends(sesion), con=Depends(get_con)):
-    """Alta de un usuario en la empresa (solo administradores). Si el usuario existe, se le da acceso."""
+    """Alta de una persona en la empresa (solo administradores).
+
+    - Ya es miembro: se actualizan su rol y su relación.
+    - No es miembro: se crea una invitación de un solo uso dirigida a su correo. La respuesta es la misma exista o no una
+      cuenta con ese correo (no revela qué correos están registrados ni mete a nadie en una empresa sin que acepte).
+    - Compatibilidad (`clave`): solo el operador de la plataforma puede crear así una cuenta NUEVA (la contraseña así
+      fijada es temporal y debe cambiarse al entrar). Si el correo ya tiene cuenta, también se crea una invitación (la
+      misma respuesta que sin `clave`): nadie entra en una empresa sin aceptarlo y su contraseña no cambia."""
     rol(con, s, eid, "admin")
     if body.get("rol") not in ("admin", "emisor", "lector"):
         raise HTTPException(422, "Rol no válido")
+    if any(body.get(k) is not None and not isinstance(body.get(k), str) for k in ("email", "nombre", "clave", "relacion")):
+        raise HTTPException(422, "Correo, nombre, contraseña y relación deben ser textos")
+    email = body.get("email", "").strip() if isinstance(body.get("email"), str) else ""
+    ya = db.fila(con, "SELECT m.usuario_id FROM miembros m JOIN usuarios u ON u.id=m.usuario_id WHERE m.empresa_id=? AND u.email=?",
+                 (eid, email))
+    directo = bool(body.get("clave")) and bool(db.fila(con, "SELECT superadmin FROM usuarios WHERE id=?", (s["usuario_id"],))["superadmin"])
+    if directo and not ya and db.fila(con, "SELECT 1 FROM usuarios WHERE email=?", (email,)):
+        directo = False   # cuenta existente que no es miembro: solo por invitación (consentimiento)
+    if not ya and not directo:
+        from .api_multiusuario import invitar_a_empresa
+        return {"accion": "invitacion", "invitacion": invitar_a_empresa(con, s, eid, body)}
+    nuevo = False
     try:
         with db.transaccion(con):
-            u = db.fila(con, "SELECT id FROM usuarios WHERE email=?", (body.get("email", "").strip(),))
-            uid = u["id"] if u else seguridad.crear_usuario(con, body["email"], body.get("nombre", ""), body["clave"])
+            u = db.fila(con, "SELECT id FROM usuarios WHERE email=?", (email,))
+            if u and not ya:   # la cuenta se creó entretanto: tampoco se la mete sin que acepte
+                raise multiusuario.OperacionNoPermitida("Esa persona ya tiene una cuenta: vuelva a intentarlo para enviarle "
+                                                        "una invitación.")
+            if u:
+                uid = u["id"]
+                if ya:   # degradar a un administrador anula sus invitaciones; nunca sin administrador activo
+                    multiusuario.antes_de_cambiar_rol(con, empresa_id=eid, usuario_id=uid, rol_nuevo=body["rol"],
+                                                      por=s["usuario_id"])
+            else:
+                uid = seguridad.crear_usuario(con, body["email"], body.get("nombre") or "", body["clave"])
+                con.execute("UPDATE usuarios SET cambiar_clave=1, alta_origen='alta_operador' WHERE id=?", (uid,))
+                nuevo = True
             con.execute("INSERT OR REPLACE INTO miembros (usuario_id, empresa_id, rol, relacion) VALUES (?,?,?,?)",
-                        (uid, eid, body["rol"], body.get("relacion", "empleado_autorizado")))
+                        (uid, eid, body["rol"], body.get("relacion") or "empleado_autorizado"))
             db.actividad(con, "miembro.alta", usuario_id=s["usuario_id"], empresa_id=eid, detalle={"usuario": uid, "rol": body["rol"]})
     except (ValueError, KeyError) as e:
         raise HTTPException(422, str(e))
+    except multiusuario.OperacionNoPermitida as e:
+        raise HTTPException(409, str(e))
+    if nuevo:
+        multiusuario.anotar_usuario(con, uid)
     _anotar_miembros(con, eid)
-    return {"usuario_id": uid}
+    return {"usuario_id": uid, "accion": "actualizado" if ya else "alta"}
 
 
 @router.get("/empresas/{eid}/miembros")
@@ -313,8 +405,9 @@ def auditoria_cadena(eid: int, entorno: str = "simulador", s=Depends(sesion), co
 def productor_put(body: dict, s=Depends(sesion), con=Depends(get_con)):
     """Identificación del productor del SIF (privilegio de instalación)."""
     exigir_superadmin(con, s)
+    _textos(body, ("nif", "nombre", "domicilio"), "Nombre, NIF y domicilio del productor deben ser textos")
     n = nifmod.normalizar(body.get("nif"))
-    if not nifmod.es_valido(n) or not body.get("nombre"):
+    if not nifmod.es_valido(n) or not (body.get("nombre") or "").strip():
         raise HTTPException(422, "Indique nombre y NIF válidos del productor")
     with db.transaccion(con):
         _asegurar_productor(con)
@@ -329,8 +422,24 @@ def productor_put(body: dict, s=Depends(sesion), con=Depends(get_con)):
 def series_list(eid: int, s=Depends(sesion), con=Depends(get_con)):
     rol(con, s, eid)
     out = db.filas(con, "SELECT * FROM series WHERE empresa_id=? ORDER BY entorno, codigo", (eid,))
+    anio_hoy = db.ahora().year
     for x in out:
-        x["contadores"] = db.filas(con, "SELECT anio, siguiente FROM series_contadores WHERE serie_id=?", (x["id"],))
+        x["contadores"] = db.filas(con, "SELECT anio, siguiente FROM series_contadores WHERE serie_id=? ORDER BY anio",
+                                   (x["id"],))
+        # Siguiente número real (el contador del año en curso, o el único de una serie sin año), escrito con el patrón;
+        # `siguiente_numero` es solo el número inicial (año de confirmación, o series sin año sin contador aún)
+        con_anio = series.tiene_anio(x["patron"])
+        anio = anio_hoy if con_anio else 0
+        x["con_anio"] = con_anio
+        x["anio_actual"] = anio
+        x["anio_confirmacion"] = int(x["confirmada_en"][:4]) if x.get("confirmada_en") else None
+        x["siguiente_actual"] = series.siguiente(con, x["id"], anio) if x.get("confirmada_en") else x["siguiente_numero"]
+        try:
+            x["siguiente_texto"] = series.formatear(x["patron"], x["siguiente_actual"], anio or anio_hoy)
+            for c in x["contadores"]:
+                c["siguiente_texto"] = series.formatear(x["patron"], c["siguiente"], c["anio"] or anio_hoy)
+        except ValueError:   # patrón antiguo no válido
+            x["siguiente_texto"] = None
     return out
 
 
@@ -339,18 +448,30 @@ def series_new(eid: int, body: dict, s=Depends(sesion), con=Depends(get_con)):
     rol(con, s, eid, "admin")
     if body.get("entorno") not in ("simulador", "pruebas", "produccion"):
         raise HTTPException(422, "Entorno no válido")
+    _textos(body, ("codigo", "patron", "descripcion"), "Código, patrón y descripción de la serie deben ser textos")
+    if body.get("tipo", "ordinaria") not in ("ordinaria", "rectificativa"):
+        raise HTTPException(422, "Tipo de serie no válido (ordinaria o rectificativa)")
     try:
         series.patron_a_regex(body.get("patron", ""))
     except ValueError as e:
         raise HTTPException(422, str(e))
-    n = int(body.get("siguiente_numero") or 1)
-    if n < 1:
-        raise HTTPException(422, "El siguiente número debe ser ≥ 1")
-    with db.transaccion(con):
-        cur = con.execute("""INSERT INTO series (empresa_id, entorno, codigo, patron, descripcion, tipo, siguiente_numero)
-                             VALUES (?,?,?,?,?,?,?)""", (eid, body["entorno"], body.get("codigo", "").strip() or body["patron"],
-                                                        body["patron"], body.get("descripcion"), body.get("tipo", "ordinaria"), n))
-        db.actividad(con, "serie.creada", usuario_id=s["usuario_id"], empresa_id=eid, objeto="serie", objeto_id=cur.lastrowid, detalle=body)
+    sig = body.get("siguiente_numero")
+    if sig is None or sig == "" or (type(sig) is int and sig == 0):   # sin indicar: empieza en 1
+        n = 1
+    else:
+        n = _entero(sig, "Siguiente número", 1, series.MAX_NUMERO, texto=True)
+    codigo = (body.get("codigo") or "").strip() or body["patron"]
+    try:
+        with db.transaccion(con):
+            cur = con.execute("""INSERT INTO series (empresa_id, entorno, codigo, patron, descripcion, tipo, siguiente_numero)
+                                 VALUES (?,?,?,?,?,?,?)""", (eid, body["entorno"], codigo, body["patron"], body.get("descripcion"),
+                                                            body.get("tipo", "ordinaria"), n))
+            db.actividad(con, "serie.creada", usuario_id=s["usuario_id"], empresa_id=eid, objeto="serie", objeto_id=cur.lastrowid,
+                         detalle=body)
+    except sqlite3.IntegrityError as e:   # UNIQUE (empresa_id, entorno, codigo)
+        if "UNIQUE" not in str(e):
+            raise
+        raise HTTPException(409, f"Ya existe una serie con el código «{codigo}» en ese entorno: elija otro código.")
     return db.fila(con, "SELECT * FROM series WHERE id=?", (cur.lastrowid,))
 
 
@@ -369,6 +490,7 @@ def series_confirmar(sid: int, s=Depends(sesion), con=Depends(get_con)):
 
 @router.post("/series/probar")
 def series_probar(body: dict, s=Depends(sesion)):
+    _textos(body, ("patron", "num_serie"), "Patrón y número de factura deben ser textos")
     try:
         return series.probar(body.get("patron", ""), body.get("num_serie", ""))
     except ValueError as e:
@@ -490,6 +612,7 @@ def documento_bloqueo(did: int, body: dict, s=Depends(sesion), con=Depends(get_c
     """Marca un documento como de referencia/no emitible fuera del simulador local."""
     d = _obj(con, "documentos", did)
     rol(con, s, d["empresa_id"], "admin")
+    _textos(body, ("motivo",), "Motivo: debe ser un texto")
     with db.transaccion(con):
         con.execute("UPDATE documentos SET bloqueo_emision=? WHERE id=?", (body.get("motivo") or None, did))
         db.actividad(con, "documento.bloqueo", usuario_id=s["usuario_id"], empresa_id=d["empresa_id"], objeto="documento",
@@ -520,6 +643,7 @@ def _borrador_out(con, b: dict, entorno: str = "simulador") -> dict:
             "puede_emitir": borradores.puede_emitir(inc), "cambios": cambios, "procedencia": ext,
             "entorno_validado": entorno,
             "serie_detectada": {k: serie[k] for k in ("id", "codigo", "patron", "numero_detectado", "siguiente_numero")} if serie else None,
+            "serie_propuesta": _serie_propuesta(json.loads(b["datos"]).get("num_serie")) if not serie else None,
             "entornos_disponibles": [k for k, v in _entornos().items() if v]}
 
 
@@ -755,7 +879,7 @@ def registro_xml(rid: int, s=Depends(sesion), con=Depends(get_con)):
 @router.get("/empresas/{eid}/facturas-lote.zip")
 def facturas_lote(eid: int, ids: str, s=Depends(sesion), con=Depends(get_con)):
     rol(con, s, eid)
-    lista = [int(x) for x in ids.split(",") if x.strip().isdigit()][:500]
+    lista = [int(x) for x in (x.strip() for x in ids.split(",")) if re.fullmatch(r"[0-9]{1,18}", x)][:500]   # solo cifras ASCII
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for fid in lista:
@@ -772,6 +896,7 @@ def facturas_lote(eid: int, ids: str, s=Depends(sesion), con=Depends(get_con)):
 @router.post("/facturas/{fid}/rectificativa")
 def factura_rectificativa(fid: int, body: dict, s=Depends(sesion), con=Depends(get_con)):
     _factura_ctx(con, s, fid, "emisor")
+    _textos(body, ("motivo", "tipo"), "Motivo y tipo de rectificativa deben ser textos")
     try:
         return {"borrador_id": emision.borrador_rectificativa(con, factura_id=fid, usuario_id=s["usuario_id"],
                                                               tipo=body.get("tipo", "R1"), motivo=(body.get("motivo") or "")[:300])}
@@ -782,6 +907,7 @@ def factura_rectificativa(fid: int, body: dict, s=Depends(sesion), con=Depends(g
 @router.post("/facturas/{fid}/anular")
 def factura_anular(fid: int, body: dict, request: Request, s=Depends(sesion), con=Depends(get_con)):
     _factura_ctx(con, s, fid, "admin")
+    _textos(body, ("motivo",), "Motivo: debe ser un texto")
     if body.get("confirmo") is not True or not body.get("motivo"):
         raise HTTPException(422, "Indique el motivo y confirme la anulación")
     try:
@@ -799,6 +925,7 @@ def factura_anular(fid: int, body: dict, request: Request, s=Depends(sesion), co
 def registro_subsanar(rid: int, body: dict, request: Request, s=Depends(sesion), con=Depends(get_con)):
     r = _obj(con, "registros", rid)
     rol(con, s, r["empresa_id"], "admin")
+    _textos(body, ("motivo",), "Motivo: debe ser un texto")
     if body.get("confirmo") is not True:
         raise HTTPException(422, "Confirme la subsanación")
     try:
@@ -854,58 +981,71 @@ def registro_reintentar(rid: int, request: Request, s=Depends(sesion), con=Depen
     return {"ok": True, "siguiente_intento_en": sig, "afectados": len(afectados)}
 
 
-# --- Remisión, certificados, producción ----------------------------------------------------------------------------
+# --- Remisión, certificados, producción (certificados y legitimaciones: app/api_certificados.py) ----------------------
 @router.get("/empresas/{eid}/remision")
 def remision_estado(eid: int, entorno: str = "simulador", s=Depends(sesion), con=Depends(get_con)):
     rol(con, s, eid)
     out = remision.estado_cola(con, eid, entorno)
     if entorno == "simulador":
-        out["simulador"] = simulador.modo_actual()
+        # solo el modo de fallo de esta empresa (el de otra empresa nunca le afecta)
+        e = db.fila(con, "SELECT nif FROM empresas WHERE id=?", (eid,))
+        out["simulador"] = simulador.modo_actual(e["nif"]) if e else simulador.modo_actual("-")
     return out
+
+
+def _fijar_modo_simulador(con, s, empresa: dict, body: dict, origen: str) -> dict:
+    """Modo de fallo del simulador local para los próximos envíos (o consultas) de UNA empresa (su NIF). `origen`:
+    «operador» (panel de la plataforma) o «empresa» (un administrador para la suya)."""
+    if not isinstance(body, dict):
+        raise HTTPException(422, "Cuerpo no válido")
+    modo, servicio, veces = body.get("modo", "normal"), body.get("servicio") or "remision", body.get("veces", 1)
+    if not isinstance(modo, str) or not isinstance(servicio, str):
+        raise HTTPException(422, "Modo desconocido")
+    if isinstance(veces, bool) or not isinstance(veces, int) or not 1 <= veces <= 20:
+        raise HTTPException(422, "«veces» debe ser un número entero entre 1 y 20")
+    try:
+        simulador.fijar_modo(modo, veces, servicio, nif=empresa["nif"], empresa_id=empresa["id"], origen=origen)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    db.actividad(con, "simulador.modo", usuario_id=s["usuario_id"], empresa_id=empresa["id"],
+                 detalle={"modo": modo, "servicio": servicio, "veces": veces})
+    # al operador solo se le devuelven los modos que fijó él (no los que la empresa fijó para sí)
+    out = simulador.modo_actual(empresa["nif"], "operador" if origen == "operador" else None)
+    # al operador no se le devuelve el identificador interno de una empresa de la que no es miembro, solo el NIF que indicó
+    return out | ({"nif": empresa["nif"]} if origen == "operador" else {"empresa_id": empresa["id"], "nif": empresa["nif"]})
+
+
+@router.post("/empresas/{eid}/simulador/modo")
+def simulador_modo_empresa(eid: int, body: dict, s=Depends(sesion), con=Depends(get_con)):
+    """Un administrador de la empresa fija el modo de fallo del simulador local para los envíos de esa empresa. Nunca afecta
+    a otra empresa ni a la AEAT. Como todas las rutas de una empresa, exige ser miembro (el operador de la plataforma usa
+    POST /api/simulador/modo)."""
+    rol(con, s, eid, "admin")
+    e = db.fila(con, "SELECT id, nif FROM empresas WHERE id=?", (eid,))
+    if not e:
+        raise HTTPException(404, "No encontrado")
+    return _fijar_modo_simulador(con, s, e, body, "empresa")
 
 
 @router.post("/simulador/modo")
 def simulador_modo(body: dict, s=Depends(sesion), con=Depends(get_con)):
+    """Modo de fallo del simulador local para una empresa cualquiera, indicada por el NIF que escribe el operador de la
+    plataforma (su panel; las dos formas del carácter de control valen, como en la verificación del NIF). Solo el
+    operador: un administrador lo fija para la suya con POST /api/empresas/{eid}/simulador/modo, que, como toda ruta de
+    una empresa, exige ser miembro y entra en el barrido de aislamiento. No acepta el identificador interno de la empresa:
+    recorriéndolo, el operador podría averiguar el NIF de empresas de las que no es miembro."""
     exigir_superadmin(con, s)
-    try:
-        simulador.fijar_modo(body.get("modo", "normal"), int(body.get("veces", 1)))
-    except ValueError as e:
-        raise HTTPException(422, str(e))
-    db.actividad(con, "simulador.modo", usuario_id=s["usuario_id"], detalle=body)
-    return simulador.modo_actual()
-
-
-@router.post("/empresas/{eid}/certificados")
-async def certificado_subir(eid: int, archivo: UploadFile = File(...), clave: str = Form(""), entorno: str = Form(...),
-                            s=Depends(sesion), con=Depends(get_con)):
-    rol(con, s, eid, "admin")
-    if entorno not in ("pruebas", "produccion"):
-        raise HTTPException(422, "Entorno no válido")
-    datos = await archivo.read(2_000_001)
-    if len(datos) > 2_000_000:
-        raise HTTPException(422, "El archivo del certificado supera 2 MB")
-    empresa = db.fila(con, "SELECT * FROM empresas WHERE id=?", (eid,))
-    try:
-        with db.transaccion(con):
-            cid = certificados.guardar(con, empresa=empresa, entorno=entorno, p12=datos, clave=clave, usuario_id=s["usuario_id"])
-            db.actividad(con, "certificado.cargado", usuario_id=s["usuario_id"], empresa_id=eid, objeto="certificado", objeto_id=cid,
-                         detalle={"entorno": entorno})
-    except certificados.CertificadoNoValido as e:
-        raise HTTPException(422, str(e))
-    return _cert_out(db.fila(con, "SELECT * FROM certificados WHERE id=?", (cid,)))
-
-
-def _cert_out(c):
-    c = dict(c)
-    c.pop("blob_cifrado", None)
-    c["legitimacion"] = json.loads(c.get("legitimacion") or "{}")
-    return c
-
-
-@router.get("/empresas/{eid}/certificados")
-def certificados_list(eid: int, s=Depends(sesion), con=Depends(get_con)):
-    rol(con, s, eid)
-    return [_cert_out(c) for c in db.filas(con, "SELECT * FROM certificados WHERE empresa_id=? ORDER BY id DESC", (eid,))]
+    body = body if isinstance(body, dict) else {}
+    if "empresa_id" in body or not isinstance(body.get("nif"), str):
+        raise HTTPException(422, "Indique el NIF de la empresa: el modo del simulador es de cada empresa")
+    n = nifmod.normalizar(body["nif"])
+    if not nifmod.es_valido(n):
+        raise HTTPException(422, "NIF no válido")
+    v = multiusuario.nifs_equivalentes(n)
+    e = db.fila(con, f"SELECT id, nif FROM empresas WHERE nif IN ({','.join('?' * len(v))})", v)
+    if not e:
+        raise HTTPException(404, "No hay ninguna empresa dada de alta con ese NIF")
+    return _fijar_modo_simulador(con, s, e, {k: x for k, x in body.items() if k != "nif"}, "operador")
 
 
 @router.get("/empresas/{eid}/produccion")
@@ -923,6 +1063,7 @@ def produccion_get(eid: int, s=Depends(sesion), con=Depends(get_con)):
 @router.post("/empresas/{eid}/produccion/autorizacion")
 def produccion_autorizar(eid: int, body: dict, s=Depends(sesion), con=Depends(get_con)):
     rol(con, s, eid, "admin")
+    _textos(body, ("texto_confirmacion",), "Escriba el texto de confirmación")
     texto = (body.get("texto_confirmacion") or "").strip()
     e = db.fila(con, "SELECT * FROM empresas WHERE id=?", (eid,))
     esperado = f"AUTORIZO EL ENVÍO REAL A LA AEAT DE {e['nif']}"
@@ -935,28 +1076,19 @@ def produccion_autorizar(eid: int, body: dict, s=Depends(sesion), con=Depends(ge
     return {"ok": True}
 
 
-@router.post("/empresas/{eid}/legitimacion")
-def legitimacion_declarar(eid: int, body: dict, s=Depends(sesion), con=Depends(get_con)):
-    rol(con, s, eid, "admin")
-    if body.get("metodo") not in ("apoderamiento_aeat", "colaborador_social"):
-        raise HTTPException(422, "Método no válido")
-    did = body.get("evidencia_documento_id")
-    if did:
-        d = db.fila(con, "SELECT empresa_id FROM documentos WHERE id=?", (did,))
-        if not d or d["empresa_id"] != eid:
-            raise HTTPException(404, "Documento no encontrado")
-    with db.transaccion(con):
-        con.execute("""INSERT INTO legitimaciones (empresa_id, metodo, evidencia_documento_id, declarado_por, declarado_en, notas)
-                       VALUES (?,?,?,?,?,?)""", (eid, body["metodo"], did, s["usuario_id"], db.ahora_iso(), body.get("notas")))
-        db.actividad(con, "legitimacion.declarada", usuario_id=s["usuario_id"], empresa_id=eid, detalle={"metodo": body["metodo"]})
-    return {"ok": True}
+_SQL_ACTIVIDAD_EMPRESA = """SELECT a.id, a.en, u.nombre usuario, a.accion, a.objeto, a.objeto_id, a.detalle FROM actividad a
+    LEFT JOIN usuarios u ON u.id=a.usuario_id WHERE a.empresa_id=? AND a.accion {} 'error.interno' ORDER BY a.id DESC LIMIT {}"""
 
 
 @router.get("/empresas/{eid}/actividad")
 def actividad(eid: int, s=Depends(sesion), con=Depends(get_con)):
+    """Las 500 anotaciones más recientes de la empresa y, aparte, sus 100 errores internos más recientes (agregados por
+    ruta, tipo y minuto): los errores que provoque un miembro no desplazan la auditoría de la empresa."""
     rol(con, s, eid)
-    return db.filas(con, """SELECT a.id, a.en, u.nombre usuario, a.accion, a.objeto, a.objeto_id, a.detalle FROM actividad a
-                           LEFT JOIN usuarios u ON u.id=a.usuario_id WHERE a.empresa_id=? ORDER BY a.id DESC LIMIT 500""", (eid,))
+    errores.volcar()   # errores internos contados de minutos ya terminados (nunca el minuto en curso)
+    filas = (db.filas(con, _SQL_ACTIVIDAD_EMPRESA.format("<>", 500), (eid,))
+             + db.filas(con, _SQL_ACTIVIDAD_EMPRESA.format("=", 100), (eid,)))
+    return sorted(filas, key=lambda a: a["id"], reverse=True)
 
 
 @router.get("/declaracion")
@@ -967,3 +1099,185 @@ def declaracion(s=Depends(sesion), con=Depends(get_con)):
     return {"version": APP_VERSION, "estado": d["estado"] if d else "borrador",
             "formalizada_por": d["formalizada_por"] if d else None, "formalizada_en": d["formalizada_en"] if d else None,
             "contenido": d["contenido"] if d else (borrador.read_text(encoding="utf-8") if borrador.exists() else "")}
+
+
+# --- Series con ceros de relleno y consulta a la AEAT (series-consulta) --------------------------------------------
+def _serie_propuesta(num_serie) -> dict | None:
+    """Patrón propuesto para crear la serie de un número que no encaja con ninguna serie confirmada."""
+    if not isinstance(num_serie, str) or not num_serie.strip():
+        return None
+    return series.proponer_patron(num_serie, db.ahora().year)
+
+
+@router.post("/series/proponer")
+def series_proponer(body: dict, s=Depends(sesion)):
+    """Propone un patrón a partir de un número de factura («042/A26» → «{n:3}/A{aa}»). No crea nada."""
+    if body.get("num_serie") is not None and not isinstance(body.get("num_serie"), str):
+        raise HTTPException(422, "Número de factura no válido")
+    p = _serie_propuesta(body.get("num_serie"))
+    return p or {"patron": None}
+
+
+def _entero(v, campo: str, minimo: int, maximo: int, *, texto: bool = False) -> int:
+    """Entero estricto: número JSON (no booleano) o, en la URL (`texto`), solo cifras ASCII. Fuera de rango → 422."""
+    if texto and isinstance(v, str) and re.fullmatch(r"[0-9]{1,13}", v):
+        v = int(v)
+    if not isinstance(v, int) or isinstance(v, bool) or not minimo <= v <= maximo:
+        raise HTTPException(422, f"{campo}: indique un número entero de {minimo} a {maximo}")
+    return v
+
+
+def _anio_avance(v, *, texto: bool = False) -> int | None:
+    """Año del contador (series con {aa}/{aaaa}); ausente, vacío o 0 en las series sin año."""
+    if v is None or (texto and v in ("", "0")) or (type(v) is int and v == 0):
+        return None
+    return _entero(v, "Año", series.ANIO_MIN, series.ANIO_MAX, texto=texto)
+
+
+def _serie_de_admin(con, s, sid: int) -> dict:
+    """Serie de una empresa que el usuario administra (404 si no existe o no la administra)."""
+    from . import consulta
+    if not 1 <= sid <= consulta.MAX_ID:
+        raise HTTPException(422, "Identificador de serie no válido")
+    se = _obj(con, "series", sid)
+    rol(con, s, se["empresa_id"], "admin")
+    return se
+
+
+@router.get("/series/{sid}/avance")
+def series_avance_previa(sid: int, anio: str | None = None, siguiente: str | None = None, s=Depends(sesion),
+                         con=Depends(get_con)):
+    """Contador actual de la serie (y último número expedido aquí) y, con `siguiente`, qué números se saltarían al
+    avanzarlo. No cambia nada."""
+    se = _serie_de_admin(con, s, sid)
+    a = _anio_avance(anio, texto=True)
+    n = None if siguiente in (None, "") else _entero(siguiente, "Siguiente número", 1, series.MAX_NUMERO, texto=True)
+    try:
+        out = series.preparar_avance(con, se, a, n)
+    except series.AvanceNoValido as e:
+        raise HTTPException(e.estado, str(e)) from e
+    from . import consulta
+    est = consulta.estado_cadena(con, se["empresa_id"], se["entorno"])
+    # Avanzar el contador no arregla la cadena: si está atrasada respecto a la AEAT, hay que reanudarla antes de expedir
+    out["aviso_cadena"] = consulta.mensaje_cadena_atrasada(est, se["entorno"]) if est and est["estado"] == "atrasada" else None
+    return out
+
+
+@router.post("/series/{sid}/avanzar")
+def series_avanzar(sid: int, body: dict, s=Depends(sesion), con=Depends(get_con)):
+    """Avanza el contador de una serie más allá de números ya usados fuera de esta instalación (p. ej. los que la consulta
+    a la AEAT muestra «solo en la AEAT» tras perder la base de datos y el diario). Administrador, con confirmación expresa
+    del contador revisado (`actual`): nunca retrocede ni queda por debajo de un número expedido aquí. Queda en la actividad
+    de la empresa (`serie.contador_avanzado`) y en el diario de recuperación (`serie_contador`), de modo que una
+    restauración lo conserva."""
+    from . import diario
+    se = _serie_de_admin(con, s, sid)
+    if body.get("confirmo") is not True:
+        raise HTTPException(422, "Confirme el avance del contador: los números que se saltan no podrán expedirse con esta "
+                                 "aplicación")
+    a = _anio_avance(body.get("anio"))
+    actual = _entero(body.get("actual"), "Contador revisado («actual»)", 1, series.MAX_NUMERO)
+    nuevo = _entero(body.get("siguiente"), "Siguiente número", 1, series.MAX_NUMERO)
+    motivo = body.get("motivo")
+    if motivo is not None and not isinstance(motivo, str):
+        raise HTTPException(422, "Motivo: debe ser un texto")
+    motivo = _texto_xml(motivo, "Motivo", 200) if motivo and motivo.strip() else None
+    try:
+        with db.transaccion(con):
+            se = db.fila(con, "SELECT * FROM series WHERE id=?", (sid,))
+            p = series.preparar_avance(con, se, a, nuevo)
+            if p["actual"] != actual:
+                raise series.AvanceNoValido(f"El contador ha cambiado desde que lo revisó (ahora va por el "
+                                            f"{p['actual_texto']}): revise de nuevo los números que se saltan.")
+            series.avanzar(con, sid, p["anio"], nuevo)
+            saltados = {k: p["saltados"][k] for k in ("desde", "hasta", "cantidad", "primero", "ultimo")}
+            db.actividad(con, "serie.contador_avanzado", usuario_id=s["usuario_id"], empresa_id=se["empresa_id"], objeto="serie",
+                         objeto_id=sid, detalle={"entorno": se["entorno"], "codigo": se["codigo"], "patron": se["patron"],
+                                                 "anio": p["anio"], "anterior": actual, "siguiente": nuevo,
+                                                 "saltados": saltados, "motivo": motivo})
+            # Diario de recuperación, antes de confirmar: si no puede anotarse, no se cambia nada
+            diario.anotar("serie_contador", {"serie_id": sid, "empresa_id": se["empresa_id"], "anio": p["anio"],
+                                             "anterior": actual, "siguiente": nuevo, "serie": se})
+    except series.AvanceNoValido as e:
+        raise HTTPException(e.estado, str(e)) from e
+    except OSError as e:
+        raise HTTPException(503, "No se pudo anotar el avance en el diario de recuperación: no se ha cambiado nada.") from e
+    return dict(p, anterior=actual)
+
+
+def _cuerpo_consulta(body: dict) -> tuple[str, str, str, str | None]:
+    entorno = body.get("entorno")
+    if entorno not in ("simulador", "pruebas", "produccion"):
+        raise HTTPException(422, "Entorno no válido")
+    for k, texto in (("ejercicio", "Ejercicio no válido (aaaa)"), ("periodo", "Periodo no válido (01 a 12)")):
+        if body.get(k) is not None and (isinstance(body.get(k), bool) or not isinstance(body.get(k), (str, int))):
+            raise HTTPException(422, texto)
+    ejercicio = str(body.get("ejercicio") or "").strip()   # la validación estricta (cifras ASCII, rango) es de consulta
+    periodo = str(body.get("periodo") or "").strip()
+    if re.fullmatch(r"[1-9]", periodo):
+        periodo = "0" + periodo
+    ns = body.get("num_serie")
+    if ns is not None and not isinstance(ns, str):
+        raise HTTPException(422, "Número de factura no válido")
+    ns = (ns or "").strip() or None
+    if ns is not None:
+        ns = _texto_xml(ns, "Número de factura", 60)
+    return entorno, ejercicio, periodo, ns
+
+
+@router.post("/empresas/{eid}/consulta")
+def consulta_aeat(eid: int, body: dict, s=Depends(sesion), con=Depends(get_con)):
+    """Consulta a la AEAT los registros de la empresa en un periodo y los compara con los locales (no cambia nada)."""
+    from . import consulta
+    rol(con, s, eid, "emisor")
+    entorno, ejercicio, periodo, ns = _cuerpo_consulta(body)
+    empresa = db.fila(con, "SELECT * FROM empresas WHERE id=?", (eid,))
+    try:
+        return consulta.consultar_y_comparar(con, empresa, s["usuario_id"], entorno, ejercicio, periodo, ns)
+    except consulta.ErrorConsulta as e:
+        raise HTTPException(e.estado, str(e)) from e
+
+
+@router.post("/empresas/{eid}/consulta/reanudar-cadena")
+def consulta_reanudar_cadena(eid: int, body: dict, s=Depends(sesion), con=Depends(get_con)):
+    """Reanuda la cadena desde el último registro que tiene la AEAT (administrador, CSRF, con confirmación y la huella del
+    registro revisado). Vuelve a consultar en el servidor; se audita y se anota en el diario. Idempotente."""
+    from . import consulta
+    rol(con, s, eid, "admin")
+    entorno = body.get("entorno")
+    if entorno not in ("simulador", "pruebas", "produccion"):
+        raise HTTPException(422, "Entorno no válido")
+    if body.get("confirmo") is not True:
+        raise HTTPException(422, f"Confirme que ha revisado el último registro {consulta.servicio(entorno, prep='de')} antes "
+                                 "de reanudar la cadena")
+    empresa = db.fila(con, "SELECT * FROM empresas WHERE id=?", (eid,))
+    try:
+        return consulta.reanudar_cadena(con, empresa, s["usuario_id"], entorno, body.get("huella"))
+    except consulta.ErrorConsulta as e:
+        raise HTTPException(e.estado, str(e)) from e
+
+
+@router.post("/empresas/{eid}/consulta/conciliar")
+def consulta_conciliar(eid: int, body: dict, request: Request, s=Depends(sesion), con=Depends(get_con)):
+    """Conciliación segura (administrador, con confirmación): marca como aceptados los registros sin respuesta
+    definitiva que la AEAT tiene con la misma huella. Vuelve a consultar antes de cambiar nada."""
+    from . import consulta
+    rol(con, s, eid, "admin")
+    if body.get("confirmo") is not True:
+        raise HTTPException(422, "Confirme la conciliación")
+    entorno = body.get("entorno")
+    if entorno not in ("simulador", "pruebas", "produccion"):
+        raise HTTPException(422, "Entorno no válido")
+    ids = body.get("registro_ids")
+    if not isinstance(ids, list) or not all(isinstance(x, int) and not isinstance(x, bool) and 1 <= x <= consulta.MAX_ID
+                                            for x in ids):
+        raise HTTPException(422, "«registro_ids» debe ser una lista de identificadores (enteros positivos)")
+    empresa = db.fila(con, "SELECT * FROM empresas WHERE id=?", (eid,))
+    try:
+        r = consulta.conciliar(con, empresa, s["usuario_id"], entorno, ids)
+    except consulta.ErrorConsulta as e:
+        raise HTTPException(e.estado, str(e)) from e
+    tr = getattr(request.app.state, "trabajador", None)
+    if tr and r["conciliados"]:
+        tr.despertar()
+    return r
