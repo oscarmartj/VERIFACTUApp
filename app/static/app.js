@@ -16,20 +16,21 @@ const MAX_PAGINAS_SONDEO = 30;
  * ====================================================================================== */
 
 const ENTORNOS = {
+  // corto: selectores y distintivos pequeños; etiqueta: el distintivo grande de la cabecera (siempre visible)
   simulador: {
-    corto: 'Simulador local', tono: 'simulador',
-    franja: 'Simulador local: las facturas quedan solo en esta instalación y nada se envía a la AEAT.',
-    destino: 'al simulador local (no es la AEAT; no tiene efectos fiscales)',
+    corto: 'Modo práctica', tono: 'simulador', etiqueta: 'Modo práctica: no se envía a Hacienda',
+    franja: 'Modo práctica: no se envía nada a Hacienda. Las facturas quedan solo en esta aplicación y no tienen efectos fiscales.',
+    destino: 'al simulador del modo práctica (no es Hacienda; sin efectos fiscales)',
   },
   pruebas: {
-    corto: 'Pruebas AEAT', tono: 'pruebas',
-    franja: 'Entorno de PRUEBAS de la AEAT: los registros se envían al servicio de preproducción, sin efectos fiscales.',
-    destino: 'al entorno de pruebas de la AEAT (sin efectos fiscales)',
+    corto: 'Pruebas de Hacienda', tono: 'pruebas', etiqueta: 'Pruebas de Hacienda (sin efectos fiscales)',
+    franja: 'Pruebas de Hacienda: las facturas se envían al servicio de pruebas de la AEAT, sin efectos fiscales.',
+    destino: 'al servicio de pruebas de Hacienda (AEAT, sin efectos fiscales)',
   },
   produccion: {
-    corto: 'PRODUCCIÓN', tono: 'produccion',
-    franja: 'PRODUCCIÓN: las facturas que expida son reales, tienen efectos fiscales y se remiten a la AEAT.',
-    destino: 'a la AEAT (PRODUCCIÓN, con plenos efectos fiscales)',
+    corto: 'PRODUCCIÓN', tono: 'produccion', etiqueta: 'PRODUCCIÓN: facturas reales',
+    franja: 'PRODUCCIÓN: las facturas que emita son reales, tienen efectos fiscales y se envían a Hacienda (AEAT).',
+    destino: 'a Hacienda (AEAT, PRODUCCIÓN, con plenos efectos fiscales)',
   },
 };
 
@@ -41,15 +42,27 @@ const ESTADO_FACTURA = {
   rectificada: ['Rectificada', 'info'],
 };
 
+// Estado del envío de cada factura, en lenguaje llano; «aceptado» depende de quién la aceptó (textoEstadoEnvio)
 const ESTADO_ENVIO = {
-  pendiente: ['Envío pendiente', 'neutral'],
+  pendiente: ['Pendiente de enviar', 'neutral'],
   enviando: ['Enviando', 'info'],
-  sin_confirmar: ['Resultado sin confirmar', 'warn'],
-  aceptado: ['Registro aceptado', 'ok'],
-  aceptado_con_errores: ['Aceptado con errores', 'warn'],
-  rechazado: ['Rechazado', 'danger'],
-  bloqueado: ['Bloqueado (requiere acción)', 'danger'],
+  sin_confirmar: ['Sin confirmar (se reintentará)', 'warn'],
+  aceptado: ['Aceptada', 'ok'],
+  aceptado_con_errores: ['Aceptada con errores', 'warn'],
+  rechazado: ['Rechazada', 'danger'],
+  bloqueado: ['Bloqueada: requiere su acción', 'danger'],
 };
+
+/** «Registro aceptado» → «Aceptada en la simulación» (modo práctica) o «Aceptada por Hacienda» (pruebas y producción). */
+function textoEstadoEnvio(estado, entorno) {
+  if (estado === 'aceptado') {
+    if (entorno === 'simulador') return 'Aceptada en la simulación';
+    if (entorno === 'pruebas') return 'Aceptada por Hacienda (pruebas)';
+    if (entorno === 'produccion') return 'Aceptada por Hacienda';
+  }
+  if (estado === 'aceptado_con_errores' && entorno === 'simulador') return 'Aceptada con errores en la simulación';
+  return ESTADO_ENVIO[estado] ? ESTADO_ENVIO[estado][0] : (estado ? humanizar(estado) : '—');
+}
 
 const ESTADO_BORRADOR = {
   requiere_revision: ['Requiere revisión', 'warn'],
@@ -93,6 +106,14 @@ const CLASIFICACIONES = {
   },
 };
 
+// Clasificación en lenguaje llano (pantalla del documento y «Cambiar» del borrador)
+const CLASIFICACION_SIMPLE = {
+  preparatorio: { etiqueta: 'Proforma o presupuesto (aún no entregada)', explicacion: 'Se prepara para emitirla con esta aplicación: revisará sus datos antes de emitir.' },
+  emitida_propia: { etiqueta: 'Factura que ya entregué a mi cliente', explicacion: 'Solo se archiva: no se vuelve a emitir ni se le añade un QR.' },
+  recibida: { etiqueta: 'Factura de un proveedor', explicacion: 'Se conserva como factura recibida; no es una venta suya.' },
+  desconocido: { etiqueta: 'Otro documento (no se procesa)', explicacion: 'Queda archivado sin más efectos.' },
+};
+
 const METODOS = { texto_pdf: 'Texto PDF', ocr: 'OCR', calculado: 'Calculado', no_encontrado: 'No encontrado' };
 
 const TIPOS_CONTRIBUYENTE = [
@@ -105,7 +126,9 @@ const TERRITORIOS = [
   ['comun', 'Territorio común'],
   ['pais_vasco', 'País Vasco (territorio foral)'],
   ['navarra', 'Navarra (territorio foral)'],
+  ['foral', 'Territorio foral (País Vasco o Navarra)'],
 ];
+const TERRITORIOS_FORALES = ['pais_vasco', 'navarra', 'foral'];
 const ORIGENES_PDF = [
   ['plantilla_ofimatica', 'Plantilla ofimática (Word, Excel, LibreOffice…)'],
   ['programa_facturacion', 'Programa de facturación'],
@@ -272,12 +295,14 @@ function fmtFecha(v) {
 
 /** Las fechas y horas se muestran en hora peninsular (la de la aplicación), sea cual sea la zona del navegador. */
 const ZONA_HORARIA = 'Europe/Madrid';
+/** «12/11/2026, 10:05»: día, mes y año con cuatro cifras (nunca «12/11/26» ni una marca ISO). */
+const FORMATO_FECHA_HORA = { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' };
 
 function fmtFechaHora(v) {
   if (!v) return '—';
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return String(v);
-  return d.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short', timeZone: ZONA_HORARIA });
+  return d.toLocaleString('es-ES', { ...FORMATO_FECHA_HORA, timeZone: ZONA_HORARIA });
 }
 
 /** Solo el día (dd/mm/aaaa) de una fecha o de una marca de tiempo, en hora peninsular. */
@@ -441,6 +466,9 @@ function mensajeDeError(datos, estado) {
   return `${genericos[estado] || 'Error'} (HTTP ${estado})`;
 }
 
+/** El servidor rechazó emitir o confirmar porque el borrador ya no es el que se mostraba (409 «borrador_cambiado»). */
+const borradorCambiado = (err) => !!(err && err.estado === 409 && err.datos && err.datos.codigo === 'borrador_cambiado');
+
 /** Datos adicionales de un error (p. ej. incidencias devueltas al emitir). */
 function detalleExtra(err) {
   const d = err && err.datos && typeof err.datos === 'object' ? err.datos.detail : null;
@@ -484,6 +512,18 @@ async function api(ruta, { metodo = 'GET', json, form, sinRedireccion = false } 
     if (r.status === 404 && app.empresaId && new RegExp(`^/empresas/${enc(app.empresaId)}(?:[/?]|$)`).test(ruta)) {
       err.accesoComprobado = true;
       err.sinAcceso = await comprobarAccesoEmpresa();
+    }
+    // Una acción que el papel no permite responde 404 (el servidor no da detalles): a quien sí es miembro de la empresa se
+    // le explica en lugar de un «No encontrado»
+    if (r.status === 404 && metodo !== 'GET' && !err.sinAcceso && app.empresaId && empresaActual() && rolActual() !== 'admin') {
+      // El papel puede haber cambiado con la pantalla abierta: se relee la sesión antes de explicarlo
+      if (!err.accesoComprobado) {
+        try { err.sinAcceso = sincronizarEmpresas(await api('/yo')); } catch { /* se explica con el papel conocido */ }
+      }
+      if (!err.sinAcceso && empresaActual() && rolActual() !== 'admin') {
+        err.message = textoSinPermiso();
+        err.sinPermiso = true;
+      }
     }
     throw err;
   }
@@ -546,6 +586,44 @@ const empresaActual = () => app.empresas.find((e) => String(e.id) === String(app
 const rolActual = () => (empresaActual() || {}).rol || 'lector';
 const esAdmin = () => rolActual() === 'admin';
 const puedeEmitirRol = () => ['admin', 'emisor'].includes(rolActual());
+const ORDEN_ROL = { lector: 0, emisor: 1, admin: 2 };
+const tieneRol = (minimo) => (ORDEN_ROL[rolActual()] ?? 0) >= ORDEN_ROL[minimo];
+const NOMBRE_ROL = { admin: 'Administrador', emisor: 'Emisor', lector: 'Lector' };
+
+/**
+ * «Modo avanzado» (preferencia de cada persona, desactivado por defecto): muestra las herramientas técnicas (editor de la
+ * numeración, detalle de los envíos, consulta a Hacienda, actividad, huellas, CSV y XML, códigos de incidencia, «Mis
+ * certificados» y la legitimación completa). Solo cambia lo que se ve: los permisos los comprueba siempre el servidor.
+ */
+const modoAvanzado = () => !!(app.usuario && Number(app.usuario.modo_avanzado));
+
+async function cambiarModoAvanzado(activar) {
+  try {
+    const r = await api('/yo/preferencias', { metodo: 'PUT', json: { modo_avanzado: !!activar } });
+    if (app.usuario) app.usuario.modo_avanzado = r.modo_avanzado;
+    construirCabecera();
+    notificar(activar ? 'Modo avanzado activado: se muestran las herramientas técnicas.' : 'Modo avanzado desactivado.', 'ok');
+    enrutar({ forzar: true });
+  } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+}
+
+/** Botón para activar el modo avanzado desde donde se echa en falta una herramienta (nada se borra: solo se oculta). */
+function botonModoAvanzado(texto = 'Mostrar las opciones avanzadas') {
+  const b = boton(texto, async () => { await conEspera(b, () => cambiarModoAvanzado(true)); }, { tipo: 'enlace', pequeno: true });
+  return b;
+}
+
+/** En una pantalla del modo avanzado abierta por su dirección: se muestra igual, con una línea que lo explica. */
+function avisoPantallaAvanzada() {
+  if (modoAvanzado()) return null;
+  return h('p', { class: 'ayuda' }, 'Esta pantalla es una herramienta del modo avanzado (menú «Más»). ', botonModoAvanzado('Activar el modo avanzado'));
+}
+
+/** Mensaje claro cuando el papel en la empresa no permite una acción (el servidor responde 404, sin dar detalles). */
+function textoSinPermiso() {
+  const rol = NOMBRE_ROL[rolActual()] || rolActual();
+  return `Su papel en esta empresa («${rol}») no permite esta acción. Si la necesita, pídasela a un administrador de la empresa.`;
+}
 
 function entornosHabilitados() {
   const e = app.estado && app.estado.entornos_habilitados;
@@ -572,7 +650,7 @@ function pillDe(mapa, clave, titulo) {
 function badgeEntorno(entorno, grande = false) {
   const e = ENTORNOS[entorno];
   return h('span', { class: ['badge-entorno', `ent-${e ? e.tono : 'desconocido'}`, grande && 'badge-grande'] },
-    grande ? h('span', { class: 'badge-pre' }, 'Entorno: ') : null, e ? e.corto : String(entorno || '—'));
+    e ? (grande ? e.etiqueta : e.corto) : String(entorno || '—'));
 }
 
 function boton(texto, onclick, { tipo = 'secundario', pequeno = false, ...props } = {}) {
@@ -631,6 +709,12 @@ function notificar(mensaje, tono = 'info') {
   const el = h('div', { class: `toast toast-${tono}`, role: tono === 'danger' ? 'alert' : 'status' },
     h('span', { class: 'toast-texto' }, mensaje),
     h('button', { type: 'button', class: 'toast-cerrar', 'aria-label': 'Cerrar aviso', onclick: () => el.remove() }, '×'));
+  // Avisos informativos: como mucho dos a la vista (el más reciente sustituye a los anteriores), para que no tapen el
+  // contenido tras una serie de pasos rápidos; los de error se conservan hasta que se cierran o caducan.
+  if (tono !== 'danger') {
+    const previos = [...zona.children].filter((x) => !x.classList.contains('toast-danger'));
+    previos.slice(0, Math.max(0, previos.length - 1)).forEach((x) => x.remove());
+  }
   zona.append(el);
   while (zona.children.length > 4) zona.firstElementChild.remove();
   window.setTimeout(() => el.remove(), tono === 'danger' ? 15000 : 6000);
@@ -794,24 +878,31 @@ function descargar(url) {
  * Estructura: cabecera, navegación y entorno
  * ====================================================================================== */
 
+// Menú principal: «Documentos», «Facturas», «Configuración» y «Más». En «Más», lo que se usa de vez en cuando; lo técnico,
+// solo con el modo avanzado (las rutas siguen funcionando siempre: se ocultan, nunca se quitan).
 const NAVEGACION = [
   ['/importar', 'Documentos'],
   ['/facturas', 'Facturas'],
-  ['/remision', 'Remisión'],
-  ['/consulta-aeat', 'Consulta AEAT'],
   ['/configuracion', 'Configuración'],
-  ['/mis-certificados', 'Mis certificados'],
-  ['/actividad', 'Actividad'],
-  ['/declaracion', 'Declaración responsable'],
 ];
+const NAVEGACION_MAS = [
+  ['/remision', 'Envíos a Hacienda', {}],
+  ['/consulta-aeat', 'Consulta a Hacienda', { avanzado: true, rol: 'emisor' }],
+  ['/actividad', 'Actividad', { avanzado: true }],
+  ['/mis-certificados', 'Mis certificados', { avanzado: true }],
+  ['/empresa-nueva', 'Dar de alta otra empresa', {}],
+  ['/declaracion', 'Declaración responsable', {}],
+];
+const enMenuMas = ([, , o]) => (!o.avanzado || modoAvanzado()) && (!o.rol || tieneRol(o.rol));
 
 function construirCabecera() {
   const cab = document.getElementById('cabecera');
   vaciar(cab);
   document.body.dataset.entorno = app.usuario ? app.entorno : '';
-  if (!app.usuario || app.usuario.cambiar_clave) { cab.hidden = true; return; }
+  if (!app.usuario || app.usuario.cambiar_clave) { cab.hidden = true; pintarPie(); return; }
   cab.hidden = false;
   const habilitados = entornosHabilitados();
+  pintarPie();
   const selEmpresa = h('select', { id: 'sel-empresa', onchange: (e) => cambiarEmpresa(e.target.value, e.target) },
     app.empresas.length
       ? app.empresas.map((e) => h('option', { value: e.id, selected: String(e.id) === String(app.empresaId) }, `${e.razon_social} · ${e.nif}`))
@@ -819,18 +910,32 @@ function construirCabecera() {
   const selEntorno = h('select', { id: 'sel-entorno', onchange: (e) => cambiarEntorno(e.target.value, e.target) },
     Object.keys(ENTORNOS).map((k) => h('option', { value: k, selected: k === app.entorno, disabled: !habilitados.includes(k) },
       ENTORNOS[k].corto + (habilitados.includes(k) ? '' : ' (no habilitado)'))));
+  // El selector de entorno solo aparece si hay más de uno habilitado; la etiqueta del entorno se ve siempre
   const barra = h('div', { class: 'barra' },
     h('a', { class: 'marca', href: '#/importar' }, h('span', { class: 'marca-nombre' }, nombreApp()), h('span', { class: 'marca-sub' }, 'VERI*FACTU')),
     h('div', { class: 'barra-controles' },
       h('div', { class: 'control-compacto' }, h('label', { for: 'sel-empresa' }, 'Empresa'), selEmpresa),
-      h('div', { class: 'control-compacto' }, h('label', { for: 'sel-entorno' }, 'Entorno de emisión'), selEntorno),
+      habilitados.length > 1 ? h('div', { class: 'control-compacto' }, h('label', { for: 'sel-entorno' }, 'Dónde se emite'), selEntorno) : null,
       h('div', { class: 'badge-contenedor', 'aria-live': 'polite' }, badgeEntorno(app.entorno, true))),
     h('div', { class: 'barra-usuario' },
       h('span', { class: 'usuario-nombre', title: app.usuario.email }, app.usuario.nombre || app.usuario.email),
       enlacesCuentaMU(),
       boton('Cerrar sesión', cerrarSesion, { tipo: 'enlace', pequeno: true })));
+  const mas = h('details', { class: 'nav-mas' },
+    h('summary', { dataset: { ruta: '/mas' } }, 'Más'),
+    h('ul', { class: 'nav-mas-lista' },
+      NAVEGACION_MAS.filter(enMenuMas).map(([ruta, texto]) => h('li', null, h('a', { href: `#${ruta}`, dataset: { ruta } }, texto))),
+      h('li', { class: 'nav-mas-modo' },
+        h('p', { class: 'ayuda' }, modoAvanzado()
+          ? 'Modo avanzado activado: se muestran las herramientas técnicas (numeración, envíos, consulta, actividad, certificados).'
+          : 'El modo avanzado muestra las herramientas técnicas: editor de la numeración, detalle de los envíos, consulta a Hacienda, actividad y certificados.'),
+        boton(modoAvanzado() ? 'Desactivar el modo avanzado' : 'Activar el modo avanzado', (ev) => {
+          const b = ev.currentTarget;
+          conEspera(b, () => cambiarModoAvanzado(!modoAvanzado()));
+        }, { pequeno: true }))));
   const nav = h('nav', { class: 'nav-principal', 'aria-label': 'Secciones' },
-    h('ul', null, NAVEGACION.map(([ruta, texto]) => h('li', null, h('a', { href: `#${ruta}`, dataset: { ruta } }, texto)))));
+    h('ul', null, NAVEGACION.map(([ruta, texto]) => h('li', null, h('a', { href: `#${ruta}`, dataset: { ruta } }, texto))),
+      h('li', { class: 'nav-mas-item' }, mas)));
   const e = ENTORNOS[app.entorno];
   const franja = h('div', { class: `franja franja-${e.tono}` }, e.franja);
   const avisos = h('div', { id: 'avisos-empresa', class: 'avisos-empresa', role: 'region', 'aria-label': 'Avisos de comunicación', hidden: true });
@@ -852,7 +957,7 @@ function pintarAvisos() {
     h('div', { class: 'avisos-texto' },
       h('strong', null, lista.length === 1 ? 'Incidencia de comunicación' : `Incidencias de comunicación (${lista.length})`),
       h('ul', null, lista.map((a) => h('li', null, String(a))))),
-    h('a', { href: '#/remision', class: 'avisos-enlace' }, 'Ver remisión')));
+    h('a', { href: '#/remision', class: 'avisos-enlace' }, 'Ver los envíos')));
 }
 
 async function refrescarAvisos(forzar = false) {
@@ -876,21 +981,34 @@ function actualizarAvisos(empresa) {
 function marcarNavegacion() {
   const { ruta } = analizarHash();
   const mapa = { '/documento': '/importar', '/borrador': '/importar', '/factura': '/facturas' };
-  let activa = ruta;
+  let activa = ruta === '/primeros-pasos' ? '/configuracion' : ruta;
   for (const [pref, destino] of Object.entries(mapa)) if (ruta.startsWith(`${pref}/`)) activa = destino;
   if (activa.startsWith('/configuracion')) activa = '/configuracion';
   document.querySelectorAll('.nav-principal a').forEach((a) => {
     if (a.dataset.ruta === activa) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
   });
+  // «Más»: se cierra al navegar y se marca si la pantalla actual está en él
+  const mas = document.querySelector('.nav-mas');
+  if (mas) {
+    mas.open = false;
+    mas.classList.toggle('activo', NAVEGACION_MAS.some(([r]) => r === activa));
+  }
 }
 
 function construirPie() {
+  pintarPie();
+}
+
+/** Pie: versión y, con la sesión iniciada, la declaración responsable del sistema (siempre accesible). */
+function pintarPie() {
   const pie = document.getElementById('pie');
-  vaciar(pie);
-  pie.append(
+  if (!pie) return;
+  // anadir (no el append nativo): un hijo null no debe aparecer como el texto «null»
+  anadir(vaciar(pie), [
     h('span', null, `${nombreApp()}${app.estado && app.estado.version ? ` · versión ${app.estado.version}` : ''}`),
-    h('span', null, 'Los documentos se muestran como imágenes generadas en el servidor; el navegador nunca abre los PDF originales.'));
+    app.usuario && !app.usuario.cambiar_clave ? h('a', { href: '#/declaracion' }, 'Declaración responsable') : null,
+    h('span', null, 'Los documentos se muestran como imágenes generadas en el servidor; el navegador nunca abre los PDF originales.')]);
 }
 
 async function cambiarEntorno(nuevo, sel) {
@@ -906,7 +1024,7 @@ async function cambiarEntorno(nuevo, sel) {
   app.entorno = nuevo;
   guardarLS(LS_ENTORNO, nuevo);
   construirCabecera();
-  notificar(`Entorno de emisión: ${ENTORNOS[nuevo].corto}`, nuevo === 'produccion' ? 'danger' : 'info');
+  notificar(`Ahora emite en: ${ENTORNOS[nuevo].etiqueta}`, nuevo === 'produccion' ? 'danger' : 'info');
   if (typeof app.alCambiarEntorno === 'function') app.alCambiarEntorno(nuevo);
   else enrutar({ forzar: true });
 }
@@ -1002,6 +1120,7 @@ const RUTAS = [
   [/^\/cambiar-clave$/, paginaCambiarClave, { publica: true }],
   [/^\/cuenta$/, paginaCuenta, { sinEmpresa: true }],
   [/^\/empresa-nueva$/, paginaEmpresaNueva, { sinEmpresa: true }],
+  [/^\/primeros-pasos$/, paginaPrimerosPasos],
   [/^\/plataforma$/, paginaPlataforma, { sinEmpresa: true }],
   [/^\/configuracion(?:\/([a-z_]+))?$/, paginaConfiguracion],
   [/^\/importar$/, paginaImportar],
@@ -1013,7 +1132,7 @@ const RUTAS = [
   [/^\/consulta-aeat$/, paginaConsultaAeat],
   [/^\/actividad$/, paginaActividad],
   [/^\/mis-certificados$/, paginaMisCertificados, { sinEmpresa: true }],
-  [/^\/declaracion$/, paginaDeclaracion],
+  [/^\/declaracion$/, paginaDeclaracion, { sinEmpresa: true }],
 ];
 
 async function enrutar({ forzar = false } = {}) {
@@ -1202,14 +1321,18 @@ async function paginaLogin(ctx) {
 
 const PASOS_CONFIG = [
   ['empresa', 'Datos de la empresa'],
-  ['ambito', 'Ámbito del emisor'],
-  ['autorizacion', 'Autorización del usuario'],
-  ['series', 'Series de numeración'],
-  ['certificados', 'Certificados'],
-  ['productor', 'Productor del sistema'],
-  ['produccion', 'Paso a producción'],
+  ['ambito', 'Tres preguntas sobre su empresa'],
+  ['series', 'Numeración de sus facturas'],
+  ['certificados', 'Certificado'],
+  ['productor', 'Productor del sistema', { soloOperador: true }],
+  ['produccion', 'Empezar a enviar a Hacienda'],
   ['usuarios', 'Usuarios y empresas'],
 ];
+// Rutas antiguas: «Autorización del usuario» forma parte ahora de las tres preguntas
+const PASOS_RENOMBRADOS = { autorizacion: 'ambito' };
+
+/** Pasos que ve el usuario: el del productor del sistema solo lo ve el operador de la plataforma. */
+const pasosConfig = () => PASOS_CONFIG.filter(([, , o]) => !(o && o.soloOperador) || esSuperadmin());
 
 function cuerpoEmpresa(emp, cambios = {}) {
   const base = {
@@ -1223,9 +1346,22 @@ function cuerpoEmpresa(emp, cambios = {}) {
   return { ...base, ...cambios };
 }
 
+/** Las tres preguntas están respondidas, el supuesto es soportado y el usuario declaró su autorización. */
+function tresPreguntasHechas(emp) {
+  return respuestasEmpresa(emp) && !!emp.declaracion_autorizacion_en;
+}
+
+/** Las respuestas de la empresa a las tres preguntas (las da un administrador), sin la declaración de quien mira. */
+function respuestasEmpresa(emp) {
+  const amb = parseJSON(emp.ambito) || parseJSON(emp.ambito_resultado) || {};
+  return !!(emp.ambito_confirmado_en && amb.puede_emitir);
+}
+
 async function paginaConfiguracion(ctx) {
-  const paso = PASOS_CONFIG.some(([k]) => k === ctx.params[0]) ? ctx.params[0] : 'empresa';
-  titulo(`Configuración · ${PASOS_CONFIG.find(([k]) => k === paso)[1]}`);
+  const pedido = PASOS_RENOMBRADOS[ctx.params[0]] || ctx.params[0];
+  const pasos = pasosConfig();
+  const paso = pasos.some(([k]) => k === pedido) ? pedido : (pedido === 'productor' ? 'produccion' : 'empresa');
+  titulo(`Configuración · ${pasos.find(([k]) => k === paso)[1]}`);
   const eid = app.empresaId;
   const [rEmp, rSeries, rCerts, rProd] = await Promise.allSettled([
     api(`/empresas/${enc(eid)}`),
@@ -1240,25 +1376,31 @@ async function paginaConfiguracion(ctx) {
   const prod = rProd.status === 'fulfilled' ? rProd.value : null;
   const amb = parseJSON(emp.ambito) || parseJSON(emp.ambito_resultado) || {};
   actualizarAvisos(emp);
+  if (!esAdmin()) {
+    // Un emisor o un lector no ve formularios que no puede usar: un resumen de solo lectura
+    titulo('Configuración');
+    montar(ctx, ...configuracionLectura(emp, series, prod));
+    return;
+  }
 
   const estadoPaso = {
     empresa: emp.razon_social && emp.domicilio ? 'ok' : 'pendiente',
-    ambito: emp.ambito_confirmado_en ? (amb.puede_emitir ? 'ok' : 'error') : 'pendiente',
-    autorizacion: emp.declaracion_autorizacion_en ? 'ok' : 'pendiente',
+    ambito: emp.ambito_confirmado_en ? (amb.puede_emitir ? (emp.declaracion_autorizacion_en ? 'ok' : 'pendiente') : 'error') : 'pendiente',
     series: series && series.some((s) => s.entorno === app.entorno && s.confirmada_en) ? 'ok' : 'pendiente',
-    certificados: app.entorno === 'simulador' ? 'na' : (certs && certs.some((c) => c.entorno === app.entorno && c.en_uso) ? 'ok' : 'pendiente'),
-    // El productor lo identifica el operador de la plataforma: no es una tarea pendiente de la empresa
-    productor: emp.productor && emp.productor.nif && emp.productor.confirmado_en ? 'ok' : (esSuperadmin() ? 'pendiente' : 'operador'),
+    // En el modo práctica no hace falta certificado; si ya hay uno guardado (empresa creada con él), se dice
+    certificados: app.entorno === 'simulador' ? (certs && certs.some((c) => c.en_uso) ? 'guardado' : 'na')
+      : (certs && certs.some((c) => (c.entorno === app.entorno || c.entorno === 'todos') && c.en_uso) ? 'ok' : 'pendiente'),
+    productor: emp.productor && emp.productor.nif && emp.productor.confirmado_en ? 'ok' : 'pendiente',
     produccion: prod && prod.habilitada ? 'ok' : 'pendiente',
     usuarios: 'opcional',
   };
   const textoEstado = {
-    ok: 'completado', pendiente: 'pendiente', error: 'no soportado', na: 'no necesario en el simulador', opcional: 'opcional',
-    operador: 'lo completa el operador de la plataforma',
+    ok: 'completado', pendiente: 'pendiente', error: 'no soportado', na: 'no hace falta en el modo práctica', opcional: 'opcional',
+    guardado: 'guardado (se usará al enviar a Hacienda)',
   };
-  const icono = { ok: '✓', pendiente: '○', error: '✗', na: '–', opcional: '+', operador: '–' };
-  const pasos = h('nav', { class: 'stepper', 'aria-label': 'Pasos de la configuración' },
-    h('ol', null, PASOS_CONFIG.map(([k, t], i) => h('li', { class: `paso paso-${estadoPaso[k]}` },
+  const icono = { ok: '✓', pendiente: '○', error: '✗', na: '–', opcional: '+', guardado: '✓' };
+  const stepper = h('nav', { class: 'stepper', 'aria-label': 'Pasos de la configuración' },
+    h('ol', null, pasos.map(([k, t], i) => h('li', { class: `paso paso-${estadoPaso[k]}` },
       h('a', { href: `#/configuracion/${k}`, 'aria-current': k === paso ? 'step' : null },
         h('span', { class: 'paso-icono', 'aria-hidden': 'true' }, icono[estadoPaso[k]]),
         h('span', { class: 'paso-texto' }, h('span', { class: 'paso-num' }, `${i + 1}. `), t,
@@ -1269,21 +1411,72 @@ async function paginaConfiguracion(ctx) {
   switch (paso) {
     case 'empresa': contenido = pasoEmpresa(emp, recargar); break;
     case 'ambito': contenido = pasoAmbito(emp, amb, recargar); break;
-    case 'autorizacion': contenido = pasoAutorizacion(emp, recargar); break;
     case 'series': contenido = pasoSeries(series, rSeries.reason, recargar); break;
     case 'certificados': contenido = pasoCertificados(certs, rCerts.reason, recargar); break;
     case 'productor': contenido = pasoProductor(emp, recargar); break;
     case 'usuarios': contenido = pasoUsuariosMU(emp, recargar); break;
     default: contenido = pasoProduccion(prod, rProd.reason, emp, recargar);
   }
-  const idx = PASOS_CONFIG.findIndex(([k]) => k === paso);
+  const idx = pasos.findIndex(([k]) => k === paso);
   const navPasos = h('div', { class: 'acciones acciones-entre' },
-    idx > 0 ? enlace(`← ${PASOS_CONFIG[idx - 1][1]}`, `#/configuracion/${PASOS_CONFIG[idx - 1][0]}`, { tipo: 'secundario' }) : h('span'),
-    idx < PASOS_CONFIG.length - 1 ? enlace(`${PASOS_CONFIG[idx + 1][1]} →`, `#/configuracion/${PASOS_CONFIG[idx + 1][0]}`, { tipo: 'secundario' }) : h('span'));
+    idx > 0 ? enlace(`← ${pasos[idx - 1][1]}`, `#/configuracion/${pasos[idx - 1][0]}`, { tipo: 'secundario' }) : h('span'),
+    idx < pasos.length - 1 ? enlace(`${pasos[idx + 1][1]} →`, `#/configuracion/${pasos[idx + 1][0]}`, { tipo: 'secundario' }) : h('span'));
   montar(ctx,
-    cabeceraPagina('Configuración', { meta: [h('span', null, `${emp.razon_social || ''} · NIF ${emp.nif || ''}`)] }),
+    cabeceraPagina('Configuración', {
+      meta: [h('span', null, `${emp.razon_social || ''} · NIF ${emp.nif || ''}`), emp.modo_practica ? pillModoPractica() : null],
+      acciones: tresPreguntasHechas(emp) ? [] : [enlace('Primeros pasos', '#/primeros-pasos', { tipo: 'secundario', pequeno: true })],
+    }),
     esAdmin() ? null : alerta('info', 'Solo un administrador de la empresa puede modificar la configuración. Puede consultarla.'),
-    h('div', { class: 'config' }, pasos, h('div', { class: 'config-contenido' }, contenido, navPasos)));
+    avisosConfiguracion(emp),
+    h('div', { class: 'config' }, stepper, h('div', { class: 'config-contenido' }, contenido, navPasos)));
+}
+
+/** Configuración vista por un emisor o un lector: lo esencial, sin acciones (solo un administrador la cambia). */
+function configuracionLectura(emp, series, prod) {
+  const propias = (series || []).filter((x) => x.entorno === app.entorno);
+  return [
+    cabeceraPagina('Configuración', {
+      meta: [h('span', null, `${emp.razon_social || ''} · NIF ${emp.nif || ''}`), emp.modo_practica ? pillModoPractica() : null],
+    }),
+    alerta('info', `Su papel en esta empresa es «${NOMBRE_ROL[rolActual()] || rolActual()}»: puede consultar la configuración. `
+      + 'Solo un administrador de la empresa puede cambiarla.'),
+    avisosConfiguracion(emp),
+    tarjeta('Datos de la empresa', kv([['Razón social', emp.razon_social || '—'], ['NIF', emp.nif || '—'], ['Domicilio fiscal', emp.domicilio || '—']])),
+    // Se juzgan las respuestas de la empresa (las da un administrador), no la declaración de quien mira; la suya, si falta,
+    // va aparte y solo importa para enviar a Hacienda
+    tarjeta('Tres preguntas sobre su empresa', [respuestasEmpresa(emp)
+      ? alerta('ok', 'Respondidas: la aplicación puede expedir las facturas de la empresa.')
+      : alerta('warn', 'Pendientes: un administrador de la empresa debe responderlas antes de emitir.'),
+    !emp.declaracion_autorizacion_en
+      ? h('p', { class: 'muted' }, 'No consta su propia declaración de autorización para actuar en nombre de la empresa. '
+        + 'No hace falta en el modo práctica; para enviar facturas a Hacienda, pídale a un administrador que le indique cómo darla.')
+      : null]),
+    tarjeta('Numeración de sus facturas', propias.length
+      ? h('ul', { class: 'lista-simple' }, propias.map((x) => h('li', null, h('strong', null, x.tipo === 'rectificativa' ? 'Correcciones: ' : 'Facturas: '),
+        h('span', { class: 'mono' }, textoNumeracion(x)), ' ', x.confirmada_en ? pill('Confirmada', 'ok') : pill('Sin confirmar', 'warn'))))
+      : h('p', { class: 'muted' }, 'Todavía no hay numeración: se propondrá al revisar la primera factura.')),
+    tarjeta('Empezar a enviar a Hacienda', prod && prod.habilitada
+      ? alerta('ok', 'Habilitado: las facturas emitidas en PRODUCCIÓN se envían a Hacienda.')
+      : h('p', null, emp.modo_practica ? 'La empresa trabaja en el modo práctica: no se envía nada a Hacienda.'
+        : 'Todavía no se envían facturas reales a Hacienda.')),
+    h('p', { class: 'ayuda' }, 'Para dejar de tener acceso a esta empresa, vaya a ', h('a', { href: '#/cuenta' }, 'Mi cuenta'), '.'),
+  ];
+}
+
+/** «F-2026/0240, F-2026/0241…»: los dos siguientes números de una serie, ya escritos con su patrón. */
+function textoNumeracion(x) {
+  const anio = x.anio_actual || anioMesHoy().anio;
+  const n = Number(x.siguiente_actual || x.siguiente_numero) || 1;
+  return `${x.siguiente_texto || formatearPatron(x.patron, n, anio)}, ${formatearPatron(x.patron, n + 1, anio)}…`;
+}
+
+const pillModoPractica = () => pill('Modo práctica: no se envía a Hacienda', 'info',
+  'La empresa se dio de alta sin certificado: no envía nada a Hacienda hasta cargar el certificado de la empresa.');
+
+/** Avisos de la configuración (caducidad del certificado). */
+function avisosConfiguracion(emp) {
+  const lista = Array.isArray(emp.avisos_configuracion) ? emp.avisos_configuracion : [];
+  return lista.length ? alerta('warn', lista.map((a) => h('p', null, String(a)))) : null;
 }
 
 function pasoEmpresa(emp, recargar) {
@@ -1292,17 +1485,29 @@ function pasoEmpresa(emp, recargar) {
   domicilio.value = emp.domicilio || '';
   const nif = entrada({ value: emp.nif || '', readOnly: true, class: 'mono' });
   const guardar = h('button', { type: 'submit', class: 'btn btn-primario', disabled: !esAdmin() }, 'Guardar datos');
+  const propuesta = h('div', { 'aria-live': 'polite' });
+  const tipo = (TIPOS_CONTRIBUYENTE.find(([k]) => k === emp.tipo_contribuyente) || [])[1];
   const form = h('form', { class: 'form' },
     campo('NIF', nif, { ayuda: 'El NIF identifica al obligado tributario y no se puede modificar.' }),
     campo('Razón social', razon, { ayuda: 'Debe coincidir con la que consta en la AEAT: se usará en los registros de facturación.' }),
     campo('Domicilio fiscal', domicilio),
-    alerta('info', 'Al guardar se vuelve a evaluar el ámbito del emisor y deberá confirmarlo de nuevo.'),
+    propuesta,
+    tipo ? h('p', { class: 'ayuda' }, `Tipo de contribuyente: ${tipo} (deducido del NIF).`) : null,
+    alerta('info', 'Al guardar se vuelven a evaluar las tres preguntas sobre su empresa y deberá confirmarlas de nuevo.'),
     h('div', { class: 'acciones' }, guardar));
+  // Domicilio leído en la primera factura de la empresa: se propone, nunca se aplica solo
+  if (esAdmin()) {
+    api(`/empresas/${enc(emp.id)}/datos-propuestos`).then((p) => {
+      if (!p || !p.domicilio || p.domicilio === (emp.domicilio || '').trim()) return;
+      propuesta.append(alerta('info', h('p', null, `Domicilio leído en su factura «${p.documento ? p.documento.nombre : ''}»: `,
+        h('strong', null, p.domicilio)), boton('Usar este domicilio', () => { domicilio.value = p.domicilio; domicilio.focus(); }, { pequeno: true })));
+    }).catch(() => { /* sin propuesta */ });
+  }
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     await conEspera(guardar, async () => {
       try {
-        await api(`/empresas/${enc(emp.id)}`, { metodo: 'PUT', json: cuerpoEmpresa(emp, { razon_social: razon.value.trim(), domicilio: domicilio.value.trim() }) });
+        await api(`/empresas/${enc(emp.id)}`, { metodo: 'PUT', json: { razon_social: razon.value.trim(), domicilio: domicilio.value.trim() } });
         const e2 = app.empresas.find((x) => String(x.id) === String(emp.id));
         if (e2) { e2.razon_social = razon.value.trim(); construirCabecera(); }
         notificar('Datos de la empresa guardados.', 'ok');
@@ -1310,120 +1515,102 @@ function pasoEmpresa(emp, recargar) {
       } catch (err) { notificar(err.message, 'danger'); }
     }, 'Guardando…');
   });
-  return tarjeta('Datos fiscales de la empresa', form);
+  return tarjeta('Datos fiscales de la empresa',
+    emp.alta_origen === 'certificado' ? h('p', { class: 'ayuda' }, 'El NIF y la razón social se tomaron del certificado de la empresa.') : null,
+    emp.modo_practica ? alerta('info', 'Modo práctica: los datos se tomaron de una factura. La empresa solo trabaja en el modo práctica '
+      + '(no se envía nada a Hacienda); para pasar a pruebas o a producción cargue el certificado de la empresa (paso «Certificado»).') : null,
+    form);
+}
+
+/**
+ * «Tres preguntas sobre su empresa»: territorio foral, SII y Canarias/Ceuta/Melilla, cada una con su respuesta expresa
+ * (ninguna marcada de antemano mientras no se hayan confirmado) y la declaración de autorización, en un solo paso.
+ */
+function formTresPreguntas(emp, { alGuardar, avisoOrigen = false } = {}) {
+  const dis = !esAdmin();
+  const confirmadas = !!emp.ambito_confirmado_en;
+  const previo = (v) => (confirmadas ? (Number(v) ? '1' : '0') : null);
+  const avisoTerritorio = h('div', { 'aria-live': 'polite' });
+  const avisoOrigenPdf = h('div', { 'aria-live': 'polite' });
+  const nota = h('textarea', { rows: 2, maxlength: 500, disabled: dis });
+  nota.value = emp.otras_exclusiones || '';
+  const relacion = selector(RELACIONES, emp.relacion_usuario || 'administrador', { disabled: dis });
+  const chk = h('input', { type: 'checkbox', id: uid('chk'), disabled: dis });
+  const guardar = h('button', { type: 'submit', class: 'btn btn-primario', disabled: true }, 'Guardar respuestas');
+  const form = h('form', { class: 'form tres-preguntas' },
+    grupoRadios('territorio_foral', '1. ¿Tributa la empresa en el País Vasco o en Navarra (territorio foral)?',
+      [['0', 'No'], ['1', 'Sí']], confirmadas ? (TERRITORIOS_FORALES.includes(emp.territorio) ? '1' : '0') : null,
+      { ayuda: 'Allí no se usa VERI*FACTU: tienen sus propios sistemas (TicketBAI, Navarra).' }),
+    avisoTerritorio,
+    grupoRadios('sii', '2. ¿Lleva los libros del IVA por el SII (Suministro Inmediato de Información)?', [['0', 'No'], ['1', 'Sí']],
+      emp.sii === null || emp.sii === undefined ? null : previo(emp.sii), { ayuda: 'Las empresas del SII no usan VERI*FACTU.' }),
+    grupoRadios('canarias_ceuta_melilla', '3. ¿Factura operaciones en Canarias, Ceuta o Melilla (IGIC o IPSI)?', [['0', 'No'], ['1', 'Sí']],
+      previo(emp.canarias_ceuta_melilla), { ayuda: 'La aplicación aún no expide esas facturas.' }),
+    avisoOrigenPdf,
+    h('details', { class: 'mas-opciones' }, h('summary', null, 'Más opciones (opcional)'),
+      campo('¿Algún caso especial? Nota para su empresa', nota,
+        { ayuda: 'No impide emitir: los casos que la aplicación no admite se detectan al revisar cada factura.' }),
+      campo('Su relación con la empresa', relacion)),
+    h('div', { class: 'casilla casilla-destacada' }, chk,
+      h('label', { for: chk.id }, `Declaro estar autorizado a actuar en nombre de ${emp.razon_social || 'esta empresa'}`)),
+    h('div', { class: 'acciones' }, guardar));
+  const listo = () => ['territorio_foral', 'sii', 'canarias_ceuta_melilla'].every((n) => valorRadio(form, n) !== null) && chk.checked;
+  const actualizar = () => { guardar.disabled = dis || !listo(); };
+  form.addEventListener('change', actualizar);
+  if (dis) form.querySelectorAll('input').forEach((x) => { x.disabled = true; });
+  actualizar();
+  // Avisos a partir de los documentos: territorio foral por el código postal y origen de los PDF (solo avisos)
+  api(`/empresas/${enc(emp.id)}/datos-propuestos`).then((p) => {
+    if (p && p.aviso_territorio) avisoTerritorio.append(alerta('warn', p.aviso_territorio));
+    if (avisoOrigen && p && p.origen_pdf && p.origen_pdf.valor === 'programa_facturacion') {
+      avisoOrigenPdf.append(alerta('info', `Sus PDF parecen generados por un programa (${p.origen_pdf.generador}). Si es un programa de `
+        + 'facturación, use esta aplicación para expedir las facturas y el programa solo para preparar borradores o proformas.'));
+    }
+  }).catch(() => { /* sin avisos */ });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!listo()) return;
+    await conEspera(guardar, async () => {
+      try {
+        const r = await api(`/empresas/${enc(emp.id)}/tres-preguntas`, {
+          metodo: 'POST',
+          json: {
+            territorio_foral: valorRadio(form, 'territorio_foral') === '1', sii: valorRadio(form, 'sii') === '1',
+            canarias_ceuta_melilla: valorRadio(form, 'canarias_ceuta_melilla') === '1', declaro: true,
+            nota: nota.value.trim(), relacion: relacion.value,
+          },
+        });
+        const amb = (r && r.ambito) || {};
+        if (amb.puede_emitir) notificar('Respuestas guardadas: la aplicación puede expedir sus facturas.', 'ok');
+        else notificar('Respuestas guardadas. Con estas respuestas la aplicación no puede expedir sus facturas: vea el motivo.', 'warn');
+        if (alGuardar) alGuardar(r);
+      } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+    }, 'Guardando…');
+  });
+  return form;
 }
 
 function pasoAmbito(emp, amb, recargar) {
-  const dis = !esAdmin();
-  let sucio = false;
-  const otras = h('textarea', { rows: 3, maxlength: 500, disabled: dis, name: 'otras' });
-  otras.value = emp.otras_exclusiones || '';
-  const detalle = entrada({ value: emp.origen_pdf_detalle || '', maxlength: 200, disabled: dis });
-  const guardar = h('button', { type: 'submit', class: 'btn btn-primario', disabled: dis }, 'Guardar y evaluar');
-  const siNo = [['0', 'No'], ['1', 'Sí']];
-  const valSii = emp.sii === null || emp.sii === undefined ? '' : String(Number(emp.sii));
-  const form = h('form', { class: 'form' },
-    grupoRadios('tipo_contribuyente', '¿Qué tipo de contribuyente es la empresa?', TIPOS_CONTRIBUYENTE, emp.tipo_contribuyente),
-    grupoRadios('territorio', '¿En qué territorio tributa?', TERRITORIOS, emp.territorio,
-      { ayuda: 'Los obligados de los territorios forales del País Vasco y Navarra tienen sus propios sistemas (TicketBAI, Navarra).' }),
-    grupoRadios('sii', '¿Lleva los libros registro del IVA mediante el SII (Suministro Inmediato de Información)?', siNo, valSii,
-      { ayuda: 'Las empresas acogidas al SII están excluidas de VERI*FACTU.' }),
-    grupoRadios('canarias_ceuta_melilla', '¿Realiza operaciones en Canarias, Ceuta o Melilla (IGIC / IPSI)?', siNo, String(Number(emp.canarias_ceuta_melilla || 0))),
-    campo('Otras exclusiones o particularidades (opcional)', otras,
-      { ayuda: 'Por ejemplo: regímenes especiales, inversión del sujeto pasivo, operaciones no sujetas… (las operaciones exentas E1–E4 y E6 sí están soportadas: se indican en el desglose de cada factura). Déjelo vacío si no hay ninguna.' }),
-    grupoRadios('origen_pdf', '¿Cómo se generan los PDF que va a importar?', ORIGENES_PDF, emp.origen_pdf,
-      { ayuda: 'Si proceden de un programa de facturación, ese programa podría ser por sí mismo un sistema de facturación sujeto al reglamento.' }),
-    campo('Detalle del origen (programa, plantilla…)', detalle),
-    h('div', { class: 'acciones' }, guardar));
-  form.addEventListener('input', () => { sucio = true; actualizarConfirmacion(); });
-  form.addEventListener('change', () => { sucio = true; actualizarConfirmacion(); });
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const sii = valorRadio(form, 'sii');
-    const cambios = {
-      tipo_contribuyente: valorRadio(form, 'tipo_contribuyente'),
-      territorio: valorRadio(form, 'territorio'),
-      sii: sii === null ? null : Number(sii),
-      canarias_ceuta_melilla: Number(valorRadio(form, 'canarias_ceuta_melilla') || 0),
-      otras_exclusiones: otras.value.trim(),
-      origen_pdf: valorRadio(form, 'origen_pdf'),
-      origen_pdf_detalle: detalle.value.trim(),
-    };
-    await conEspera(guardar, async () => {
-      try {
-        await api(`/empresas/${enc(emp.id)}`, { metodo: 'PUT', json: cuerpoEmpresa(emp, cambios) });
-        notificar('Respuestas guardadas. Revise la evaluación del ámbito.', 'ok');
-        recargar();
-      } catch (err) { notificar(err.message, 'danger'); }
-    }, 'Guardando…');
-  });
-
   const motivos = Array.isArray(amb.motivos) ? amb.motivos : [];
-  const confirmarBtn = boton('Confirmar ámbito', async () => {
-    await conEspera(confirmarBtn, async () => {
-      try {
-        await api(`/empresas/${enc(emp.id)}/ambito/confirmar`, { metodo: 'POST', json: {} });
-        notificar('Ámbito confirmado.', 'ok');
-        recargar();
-      } catch (err) { notificar(err.message, 'danger'); }
-    });
-  }, { tipo: 'primario', disabled: dis });
-  const avisoSucio = h('p', { class: 'ayuda', 'aria-live': 'polite' });
-  function actualizarConfirmacion() {
-    confirmarBtn.disabled = dis || sucio || !emp.ambito;
-    avisoSucio.textContent = sucio ? 'Hay respuestas sin guardar: guárdelas antes de confirmar el ámbito.' : '';
-  }
-  actualizarConfirmacion();
-  const evaluado = emp.ambito || emp.ambito_resultado;
-  const resultado = tarjeta('Evaluación del ámbito',
-    !evaluado ? h('p', { class: 'vacio' }, 'Responda las preguntas y guarde para evaluar el ámbito.')
-      : [
-        amb.puede_emitir
-          ? alerta('ok', h('strong', null, 'Supuesto soportado: '), 'la aplicación puede expedir facturas para este emisor.')
-          : alerta('danger', h('strong', null, 'Supuesto no soportado: '), 'la aplicación no expedirá facturas para este emisor mientras se mantengan estas circunstancias.'),
-        motivos.length ? h('ul', { class: 'lista-motivos' }, motivos.map((m) => h('li', { class: /^AVISO/i.test(m) ? 'motivo-aviso' : null }, m))) : null,
-        emp.ambito_confirmado_en
-          ? alerta('ok', `Ámbito confirmado el ${fmtFechaHora(emp.ambito_confirmado_en)}.`)
-          : h('div', null,
-            h('p', null, 'Al confirmar declara que las respuestas son correctas. Si cambia alguna, deberá confirmarlo de nuevo.'),
-            h('div', { class: 'acciones' }, confirmarBtn), avisoSucio),
-      ]);
+  const evaluado = emp.ambito_confirmado_en;
+  const resultado = evaluado ? tarjeta('Resultado',
+    amb.puede_emitir
+      ? alerta('ok', h('strong', null, 'Supuesto soportado: '), 'la aplicación puede expedir facturas para su empresa.')
+      : alerta('danger', h('strong', null, 'Supuesto no soportado: '), 'la aplicación no expedirá facturas para su empresa mientras se mantengan estas circunstancias.'),
+    motivos.length ? h('ul', { class: 'lista-motivos' }, motivos.map((m) => h('li', { class: /^(AVISO|NOTA)/i.test(m) ? 'motivo-aviso' : null }, m))) : null,
+    h('p', { class: 'ayuda' }, `Respondidas el ${fmtFechaHora(emp.ambito_confirmado_en)}`
+      + (emp.declaracion_autorizacion_en ? `; declaración de autorización registrada el ${fmtFechaHora(emp.declaracion_autorizacion_en)}.` : '.'))) : null;
   const casos = Array.isArray(emp.casos_soportados) ? emp.casos_soportados : [];
   const tarjetaCasos = casos.length ? tarjeta('Casos que la aplicación puede expedir',
     h('ul', { class: 'lista-motivos' }, casos.map((c) => h('li', null, String(c)))),
     h('p', { class: 'ayuda' }, 'Cualquier otro supuesto (operaciones no sujetas, inversión del sujeto pasivo, recargo de equivalencia, suplidos, '
       + 'regímenes especiales, entregas intracomunitarias exentas —E5—…) se bloquea al revisar el borrador.')) : null;
-  return [tarjeta('Preguntas sobre el ámbito del emisor', form), resultado, tarjetaCasos];
-}
-
-function pasoAutorizacion(emp) {
-  const rel = selector(RELACIONES, emp.relacion_usuario || 'administrador', { required: true });
-  const chk = h('input', { type: 'checkbox', id: uid('chk'), required: true });
-  const guardar = h('button', { type: 'submit', class: 'btn btn-primario', disabled: true }, 'Registrar declaración');
-  chk.addEventListener('change', () => { guardar.disabled = !chk.checked; });
-  const form = h('form', { class: 'form' },
-    campo('Su relación con la empresa', rel),
-    h('div', { class: 'casilla casilla-destacada' }, chk, h('label', { for: chk.id }, 'Declaro estar autorizado a actuar en nombre de esta empresa')),
-    h('div', { class: 'acciones' }, guardar));
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (!chk.checked) return;
-    await conEspera(guardar, async () => {
-      try {
-        await api(`/empresas/${enc(emp.id)}/autorizacion-usuario`, { metodo: 'POST', json: { relacion: rel.value, declaro: true } });
-        notificar('Declaración registrada.', 'ok');
-        enrutar({ forzar: true });
-      } catch (err) { notificar(err.message, 'danger'); }
-    }, 'Registrando…');
-  });
-  const relTexto = (RELACIONES.find(([k]) => k === emp.relacion_usuario) || [])[1] || emp.relacion_usuario;
-  return tarjeta('Autorización del usuario',
-    h('p', null, 'La aplicación expide facturas y remite registros de facturación en nombre de la empresa. Solo deben usarla personas autorizadas por ella. '
-      + 'Su declaración queda registrada en el registro de actividad.'),
-    emp.declaracion_autorizacion_en
-      ? alerta('ok', `Declaración registrada el ${fmtFechaHora(emp.declaracion_autorizacion_en)}${relTexto ? ` como «${relTexto}»` : ''}.`)
-      : alerta('warn', 'Aún no ha declarado estar autorizado para actuar en nombre de esta empresa.'),
-    form);
+  return [
+    tarjeta('Tres preguntas sobre su empresa',
+      h('p', null, 'Con ellas se comprueba que VERI*FACTU se aplica a su empresa y que la aplicación puede expedir sus facturas. '
+        + 'Responda cada una: ninguna está marcada de antemano.'),
+      formTresPreguntas(emp, { alGuardar: recargar, avisoOrigen: true })),
+    resultado, tarjetaCasos];
 }
 
 function ejemploPatron(patron, numero) {
@@ -1556,6 +1743,22 @@ function pasoSeries(series, error, recargar) {
       } catch (err) { resultadoPrueba.append(alerta('danger', err.message)); }
     });
   });
+  if (!modoAvanzado()) {
+    // Lo esencial: los siguientes números de cada serie de este entorno; el editor del patrón, «Probar un número», los
+    // contadores por año y «Avanzar contador…» siguen en el modo avanzado
+    const propias = (series || []).filter((x) => x.entorno === app.entorno);
+    return [tarjeta('Numeración de sus facturas',
+      h('p', null, 'La numeración se propone sola a partir de su primera factura: la confirma en la pantalla de revisión, con una pregunta. '
+        + 'Después, cada factura lleva el número siguiente.'),
+      error ? cajaError(error) : (propias.length
+        ? h('ul', { class: 'lista-numeracion' }, propias.map((x) => h('li', null,
+          h('strong', null, x.tipo === 'rectificativa' ? 'Correcciones (rectificativas): ' : 'Facturas: '),
+          h('span', { class: 'mono' }, textoNumeracion(x)), ' ',
+          x.confirmada_en ? pill('Confirmada', 'ok')
+            : [pill('Sin confirmar', 'warn'), ' ', boton('Confirmar', (ev) => confirmarSerie(x, ev.currentTarget), { pequeno: true, disabled: dis })])))
+        : h('p', { class: 'muted' }, 'Todavía no hay numeración: se propondrá al revisar su primera factura.')),
+      h('p', { class: 'ayuda' }, 'Editor del patrón, «Probar un número», «Contadores por año» y «Avanzar contador…»: ', botonModoAvanzado()))];
+  }
   return [
     tarjeta('Series de numeración', h('p', null, 'Cada entorno tiene sus propias series. El número de cada factura debe corresponder a una serie confirmada y ser el siguiente correlativo.'), listado),
     tarjeta('Nueva serie', formAlta),
@@ -1574,30 +1777,23 @@ function resumenLegitimacion(leg) {
     l.detalle ? h('span', { class: 'bloque' }, l.detalle) : null);
 }
 
-function pasoCertificados(certs, error, recargar) {
-  const dis = !esAdmin();
-  const listado = error ? cajaError(error)
-    : tabla([
-      { titulo: 'Entorno', celda: (c) => badgeEntorno(c.entorno) },
-      { titulo: 'Origen', celda: origenCertC },
-      { titulo: 'Sujeto', celda: (c) => h('span', { class: 'valor-largo' }, c.sujeto || '—') },
-      { titulo: 'Titular', celda: (c) => h('span', { class: 'mono' }, c.titular_nif || '—') },
-      { titulo: 'Representado', celda: (c) => h('span', { class: 'mono' }, c.representado_nif || '—') },
-      { titulo: 'Tipo', celda: (c) => TIPOS_CERTIFICADO[c.tipo] || c.tipo || '—' },
-      { titulo: 'Válido hasta', celda: (c) => fmtFechaHora(c.valido_hasta) },
-      { titulo: 'Legitimación', celda: (c) => resumenLegitimacion(c.legitimacion) },
-      { titulo: 'Activo', celda: (c) => (c.activo === 0 || c.activo === false ? pill('Sustituido', 'neutral') : pill('Activo', 'ok')) },
-    ], certs || [], { vacio: 'No hay certificados cargados.', leyenda: 'Certificados' });
+/** Entorno de un certificado cargado para la empresa («todos»: pruebas y producción). */
+function entornoCertC(ent) {
+  return ent === 'todos' ? pill('Pruebas y producción', 'info') : badgeEntorno(ent);
+}
+
+/** Formulario de carga de un certificado de la empresa: sin `entornos`, uno solo para pruebas y producción. */
+function formCargaCertificadoC({ dis, recargar, entornos = null }) {
   const archivo = h('input', { type: 'file', accept: '.p12,.pfx,application/x-pkcs12', required: true, disabled: dis });
   const clave = entrada({ type: 'password', required: true, autocomplete: 'off', disabled: dis });
-  const entorno = selector([['pruebas', ENTORNOS.pruebas.corto], ['produccion', ENTORNOS.produccion.corto]], app.entorno === 'produccion' ? 'produccion' : 'pruebas', { disabled: dis });
+  const entorno = entornos ? selector(entornos.map((k) => [k, ENTORNOS[k].corto]), app.entorno === 'produccion' ? 'produccion' : 'pruebas', { disabled: dis }) : null;
   const resultado = h('div', { 'aria-live': 'polite' });
-  const subir = h('button', { type: 'submit', class: 'btn btn-primario', disabled: dis }, 'Cargar certificado');
+  const subir = h('button', { type: 'submit', class: 'btn btn-primario', disabled: dis }, entornos ? 'Cargar para este entorno' : 'Cargar el certificado');
   const form = h('form', { class: 'form' },
     campo('Archivo del certificado (.p12 o .pfx)', archivo),
     h('div', { class: 'fila-campos' },
       campo('Contraseña del certificado', clave, { ayuda: 'Se usa para abrir el archivo. Se guarda cifrada en el servidor y nunca se vuelve a mostrar.' }),
-      campo('Entorno', entorno)),
+      entorno ? campo('Entorno', entorno) : null),
     h('div', { class: 'acciones' }, subir), resultado);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1606,33 +1802,51 @@ function pasoCertificados(certs, error, recargar) {
     const fd = new FormData();
     fd.append('archivo', archivo.files[0], archivo.files[0].name);
     fd.append('clave', clave.value);
-    fd.append('entorno', entorno.value);
+    fd.append('entorno', entorno ? entorno.value : 'todos');
     clave.value = '';
     await conEspera(subir, async () => {
       try {
         const r = await api(`/empresas/${enc(app.empresaId)}/certificados`, { metodo: 'POST', form: fd });
         archivo.value = '';
-        resultado.append(alerta('ok', h('strong', null, 'Certificado cargado. '), 'Compruebe que los datos corresponden a la empresa:'),
-          kv([
-            ['Sujeto', h('span', { class: 'valor-largo' }, r.sujeto || '—')],
-            ['NIF del titular', r.titular_nif || '—'],
-            ['NIF del representado', r.representado_nif || '—'],
-            ['Tipo', TIPOS_CERTIFICADO[r.tipo] || r.tipo || '—'],
-            ['Válido hasta', fmtFechaHora(r.valido_hasta)],
-            ['Legitimación', resumenLegitimacion(r.legitimacion)],
-          ]),
-          boton('Actualizar listado', recargar, { pequeno: true }));
+        const t = r.titular || {};
+        resultado.append(alerta(r.legitimacion && r.legitimacion.ok ? 'ok' : 'warn',
+          h('p', null, h('strong', null, 'Certificado cargado: '), `${t.nombre || '—'} · NIF ${t.nif || '—'}; válido hasta ${fmtDia(r.valido_hasta)}.`),
+          r.legitimacion && r.legitimacion.detalle ? h('p', null, r.legitimacion.detalle) : null,
+          r.aviso_caducidad ? h('p', null, r.aviso_caducidad) : null),
+        boton('Actualizar', recargar, { pequeno: true }));
       } catch (err) { resultado.append(alerta('danger', err.message)); }
     }, 'Cargando…');
   });
+  return form;
+}
+
+function pasoCertificados(certs, error, recargar) {
+  const dis = !esAdmin();
+  const listado = error ? cajaError(error)
+    : tabla([
+      { titulo: 'Entorno', celda: (c) => entornoCertC(c.entorno) },
+      { titulo: 'Origen', celda: origenCertC },
+      { titulo: 'Titular', celda: titularCertC },
+      { titulo: 'Tipo', celda: (c) => TIPOS_CERTIFICADO[c.tipo] || c.tipo || '—' },
+      { titulo: 'Válido hasta', celda: (c) => [fmtDia(c.valido_hasta), c.aviso_caducidad ? h('span', { class: 'bloque' }, pill('Caduca pronto', 'warn', c.aviso_caducidad)) : null] },
+      { titulo: 'Legitimación', celda: (c) => resumenLegitimacion(c.legitimacion) },
+      { titulo: 'Activo', celda: (c) => (c.activo === 0 || c.activo === false ? pill('Sustituido', 'neutral') : pill('Activo', 'ok')) },
+    ], certs || [], { vacio: 'No hay certificados cargados.', leyenda: 'Certificados' });
   return [
     tarjetaCertificadoEnUsoC(certs, recargar),
-    tarjeta('Certificados electrónicos',
-      h('p', null, 'Para remitir registros a la AEAT (pruebas o producción) se necesita un certificado de la empresa, de un representante o de alguien apoderado. El simulador local no necesita certificado.'),
-      listado),
-    tarjeta('Cargar certificado', form),
-    tarjetaMisCertificadosEmpresaC(recargar),
-    tarjetaLegitimacionC(recargar),
+    tarjeta('Certificado de la empresa',
+      h('p', null, 'Cárguelo una vez: sirve para el entorno de pruebas de la AEAT y para producción. En el modo práctica no hace falta.'),
+      dis ? alerta('info', 'Solo un administrador de la empresa puede cargar el certificado.') : null,
+      formCargaCertificadoC({ dis, recargar })),
+    modoAvanzado()
+      ? h('details', { class: 'avanzado', open: true },
+        h('summary', null, 'Opciones avanzadas: certificado de su gestoría o asesor, «Mis certificados», un certificado por entorno'),
+        tarjeta('Certificados cargados', listado),
+        tarjeta('Cargar un certificado para un solo entorno', formCargaCertificadoC({ dis, recargar, entornos: ['pruebas', 'produccion'] })),
+        tarjetaMisCertificadosEmpresaC(recargar),
+        tarjetaLegitimacionC(recargar))
+      : h('p', { class: 'ayuda' }, '¿Usa el certificado de su gestoría o asesor, o uno de «Mis certificados»? Opciones avanzadas: ',
+        botonModoAvanzado('Mostrar las opciones avanzadas')),
   ];
 }
 
@@ -1690,33 +1904,45 @@ const ROLES = [
 ];
 
 function listaRequisitos(requisitos) {
+  // El detalle se muestra en lo pendiente (qué falta) y en el certificado (cuál se usará); lo cumplido no necesita explicación
   return h('ul', { class: 'requisitos' }, requisitos.map((r) => h('li', { class: r.cumplido ? 'req-ok' : 'req-no' },
     h('span', { class: 'req-icono', 'aria-hidden': 'true' }, r.cumplido ? '✓' : '✗'),
     h('div', null,
       h('span', { class: 'req-texto' }, r.texto),
       ' ', r.cumplido ? pill('Cumplido', 'ok') : pill('Pendiente', 'danger'),
-      r.detalle ? h('span', { class: 'muted bloque' }, String(r.detalle)) : null))));
+      r.detalle && (!r.cumplido || r.clave === 'certificado') ? h('span', { class: 'muted bloque' }, String(r.detalle)) : null))));
 }
 
 function pasoProduccion(prod, error, emp) {
-  if (error) return tarjeta('Paso a producción', cajaError(error, () => enrutar({ forzar: true })));
+  if (error) return tarjeta('Empezar a enviar a Hacienda', cajaError(error, () => enrutar({ forzar: true })));
+  // La empresa ve sus propios requisitos; lo que depende de la plataforma (productor, declaración responsable, esquemas,
+  // interruptores del servidor) se resume en una línea. El operador de la plataforma ve el detalle.
+  const op = esSuperadmin();
+  const visibles = (lista) => (op ? lista : lista.filter((r) => r.de !== 'plataforma'));
+  const lineaPlataforma = (pl) => (!op && pl && !pl.lista ? alerta('info', pl.texto) : null);
   const requisitos = comoLista(prod && prod.requisitos);
-  const lista = listaRequisitos(requisitos);
+  const lista = listaRequisitos(visibles(requisitos));
   const reqPruebas = comoLista(prod && prod.requisitos_pruebas);
   const resumen = prod && prod.resumen_primer_envio;
   const otrosPendientes = requisitos.filter((r) => !r.cumplido && r.clave !== 'autorizacion_primer_envio');
   const autorizado = requisitos.some((r) => r.clave === 'autorizacion_primer_envio' && r.cumplido);
-  const tarjetas = [tarjeta('Requisitos para emitir en producción',
+  const tarjetas = [tarjeta('Para enviar facturas reales a Hacienda (producción)',
     prod && prod.habilitada
       ? alerta('ok', h('strong', null, 'Producción habilitada. '), 'Las facturas expedidas en PRODUCCIÓN son reales y se remiten a la AEAT.')
       : alerta('warn', 'La producción no está habilitada: deben cumplirse todos los requisitos.'),
+    lineaPlataforma(prod && prod.plataforma),
     requisitos.length ? lista : h('p', { class: 'vacio' }, 'Sin información de requisitos.'))];
   if (reqPruebas.length) {
-    tarjetas.unshift(tarjeta('Requisitos para el entorno de pruebas de la AEAT',
+    tarjetas.unshift(tarjeta('Para probar con el entorno de pruebas de la AEAT',
       prod.pruebas_habilitadas
         ? alerta('ok', 'El entorno de pruebas de la AEAT está habilitado para esta empresa.')
         : alerta('info', 'Antes de producción debe superarse al menos un envío aceptado en el entorno de pruebas de la AEAT.'),
-      listaRequisitos(reqPruebas)));
+      lineaPlataforma(prod.plataforma_pruebas),
+      listaRequisitos(visibles(reqPruebas))));
+  }
+  if (prod && prod.modo_practica) {
+    tarjetas.unshift(alerta('info', h('strong', null, 'Modo práctica: '), 'su empresa solo trabaja en el modo práctica (no se envía nada a '
+      + 'Hacienda). Para pasar a pruebas o a producción, cargue el certificado de la empresa en el paso «Certificado».'));
   }
   if (resumen) {
     const frase = (typeof resumen === 'object' && (resumen.texto_confirmacion_requerido || resumen.texto_requerido))
@@ -1745,11 +1971,16 @@ function pasoProduccion(prod, error, emp) {
         } catch (err) { notificar(err.message, 'danger'); }
       }, 'Registrando…');
     });
-    tarjetas.push(tarjeta('Autorización del primer envío real',
+    const cuerpo = [
       h('p', null, 'Antes de la primera comunicación real a la AEAT debe revisar qué se va a enviar y autorizarlo expresamente.'),
       renderResumenPrimerEnvio(resumen),
       autorizado ? alerta('ok', 'Ya consta una autorización del primer envío real. Puede registrar otra si lo necesita.') : null,
-      form));
+      form];
+    // Mientras falte algo más, la autorización queda plegada: no es lo siguiente que hay que hacer
+    tarjetas.push(otrosPendientes.length && !autorizado
+      ? h('details', { class: 'avanzado' }, h('summary', null, 'Autorización del primer envío real (cuando todo lo demás esté listo)'),
+        tarjeta('Autorización del primer envío real', cuerpo))
+      : tarjeta('Autorización del primer envío real', cuerpo));
   }
   return tarjetas;
 }
@@ -2017,10 +2248,12 @@ function pestanas(defs) {
 
 function etiquetaClasificacion(doc) {
   const c = CLASIFICACIONES[doc.clasificacion];
-  const ref = doc.bloqueo_emision ? h('span', { class: 'bloque' }, pill('Referencia: no emitible fuera del simulador', 'danger', doc.bloqueo_emision)) : null;
+  const ref = doc.bloqueo_emision ? h('span', { class: 'bloque' }, pill('Referencia: solo para el modo práctica', 'danger', doc.bloqueo_emision)) : null;
   if (!doc.clasificacion) return h('span', null, pill('Sin clasificar', 'warn'), ref);
-  return h('span', null, pill(c ? c.etiqueta : doc.clasificacion, c ? c.tono : 'neutral'),
-    doc.clasificacion_confirmada_en ? null : h('span', { class: 'muted bloque' }, 'Sugerida, sin confirmar'), ref);
+  if (doc.clasificacion === 'pendiente_confirmar') return h('span', null, pill('Pendiente de revisar', 'warn'), ref);
+  const simple = CLASIFICACION_SIMPLE[doc.clasificacion];
+  return h('span', null, pill(simple ? simple.etiqueta : doc.clasificacion, c ? c.tono : 'neutral'),
+    doc.clasificacion_confirmada_en ? null : h('span', { class: 'muted bloque' }, 'Propuesta: falta su respuesta'), ref);
 }
 
 async function paginaImportar(ctx) {
@@ -2071,7 +2304,8 @@ async function paginaImportar(ctx) {
         } else {
           const dupF = comoLista(x.duplicados_fiscales);
           estado = h('div', null, pill('Importado', 'ok'), ' ', x.estado ? pillDe(ESTADO_DOCUMENTO, x.estado) : null, ' ',
-            id ? enlace('Abrir y clasificar', `#/documento/${enc(id)}`) : null,
+            x.borrador_id ? [h('span', null, 'Tratado como proforma. '), enlace('Revisar y emitir', `#/borrador/${enc(x.borrador_id)}`)]
+              : (id ? enlace('Abrir', `#/documento/${enc(id)}`) : null),
             dupF.length ? alerta('warn', h('strong', null, 'Posible duplicado fiscal: '), 'el mismo emisor y número figuran en ',
               dupF.map((d, i) => [i ? ', ' : '', d.tipo === 'factura'
                 ? enlace(`la factura ${d.num_serie || d.id}`, `#/factura/${enc(d.id)}`)
@@ -2080,6 +2314,9 @@ async function paginaImportar(ctx) {
         return h('li', null, h('span', { class: 'nombre-archivo' }, x.nombre || '—'), estado);
       }))));
       cargarLista();
+      // Un solo PDF importado: se abre directamente su borrador (proforma clara) o la pregunta sobre el documento
+      const unico = r.length === 1 && !r[0].error && !r[0].duplicado && r[0].documento_id ? r[0] : null;
+      if (unico) irA(unico.borrador_id ? `/borrador/${enc(unico.borrador_id)}` : `/documento/${enc(unico.documento_id)}`);
     } catch (err) {
       aviso.remove();
       if (err.estado !== 401) resultados.append(cajaError(err));
@@ -2111,7 +2348,8 @@ async function paginaImportar(ctx) {
 
   // Filtros
   const q = entrada({ type: 'search', placeholder: 'Nombre, número, cliente…', value: ctx.query.get('q') || '' });
-  const clas = selector([['', 'Todas'], ...Object.entries(CLASIFICACIONES).map(([k, c]) => [k, c.etiqueta])], ctx.query.get('clasificacion') || '');
+  const clas = selector([['', 'Todas'], ...Object.entries(CLASIFICACION_SIMPLE).map(([k, c]) => [k, c.etiqueta]), ['pendiente_confirmar', 'Pendiente de revisar']],
+    ctx.query.get('clasificacion') || '');
   let temporizador = null;
   q.addEventListener('input', () => { window.clearTimeout(temporizador); temporizador = window.setTimeout(cargarLista, 300); });
   clas.addEventListener('change', cargarLista);
@@ -2144,9 +2382,9 @@ async function paginaImportar(ctx) {
           titulo: 'Siguiente paso',
           celda: (d) => {
             if (d.factura_id) return enlace('Ver factura', `#/factura/${enc(d.factura_id)}`);
-            if (d.borrador_id) return enlace('Revisar borrador', `#/borrador/${enc(d.borrador_id)}`);
-            if (d.clasificacion === 'preparatorio' && d.clasificacion_confirmada_en) return enlace('Crear borrador', `#/documento/${enc(d.id)}`);
-            if (!d.clasificacion_confirmada_en) return enlace('Clasificar', `#/documento/${enc(d.id)}`);
+            if (d.borrador_id) return enlace('Revisar y emitir', `#/borrador/${enc(d.borrador_id)}`);
+            if (d.clasificacion === 'preparatorio' && d.clasificacion_confirmada_en) return enlace('Preparar para emitir', `#/documento/${enc(d.id)}`);
+            if (!d.clasificacion_confirmada_en) return enlace('Responder una pregunta', `#/documento/${enc(d.id)}`);
             return enlace('Ver', `#/documento/${enc(d.id)}`);
           },
         },
@@ -2156,9 +2394,14 @@ async function paginaImportar(ctx) {
     }
   }
 
+  // Quien solo consulta (lector) no ve la subida: no podría usarla
   montar(ctx,
-    cabeceraPagina('Documentos', { meta: [h('span', null, 'Suba PDF → revise los datos → confirme la emisión → descargue el PDF definitivo y consulte el estado en la AEAT.')] }),
-    tarjeta('Importar PDF', zona, resultados),
+    cabeceraPagina('Documentos', { meta: [h('span', null, puedeEmitirRol()
+      ? 'Suba una factura o proforma en PDF, revise sus datos en una sola pantalla y emítala.'
+      : 'Documentos de la empresa (solo consulta).')] }),
+    puedeEmitirRol() ? tarjeta('Subir facturas o proformas (PDF)', zona, resultados)
+      : alerta('info', `Su papel en esta empresa («${NOMBRE_ROL[rolActual()] || rolActual()}») permite consultar documentos y facturas, `
+        + 'pero no subirlos ni emitirlos. Si lo necesita, pídaselo a un administrador de la empresa.'),
     tarjeta('Documentos importados',
       h('form', { class: 'filtros', role: 'search', onsubmit: (e) => { e.preventDefault(); cargarLista(); } },
         campo('Buscar', q), campo('Clasificación', clas)),
@@ -2243,65 +2486,91 @@ async function paginaDocumento(ctx) {
   });
   visor.setCajas(cajas);
 
-  // --- Clasificación
+  // --- Clasificación: una pregunta en lenguaje llano (la nota es opcional; quién y cuándo quedan registrados)
   const confirmada = !!doc.clasificacion_confirmada_en;
-  // clasificacion_motivo guarda la sugerencia (JSON) y, tras confirmar, la confirmación con su motivo.
-  const motivoConfirmado = (sug.confirmacion && sug.confirmacion.motivo)
-    || (typeof doc.clasificacion_motivo === 'string' && !parseJSON(doc.clasificacion_motivo) ? doc.clasificacion_motivo : '');
-  const bloqueadaReclasificacion = !!(borradorId || doc.factura_id);
+  const confClas = sug.confirmacion && typeof sug.confirmacion === 'object' ? sug.confirmacion : {};
+  const conFactura = !!(r.factura_id || doc.factura_id);
   const sugerida = sug.sugerida;
-  const etiquetaSug = CLASIFICACIONES[sugerida] ? CLASIFICACIONES[sugerida].etiqueta : (sugerida === 'pendiente_confirmar' ? 'Requiere su decisión' : (sugerida || '—'));
-  const preseleccion = confirmada ? doc.clasificacion : (CLASIFICACIONES[sugerida] ? sugerida : null);
+  const qrTributario = (Array.isArray(insp.qr) ? insp.qr : []).some((q) => q && q.tributario);
+  const puede = puedeEmitirRol() && !conFactura;
+
+  async function clasificar(btn, c, { crear = false, nota = '' } = {}) {
+    await conEspera(btn, async () => {
+      try {
+        const rr = await api(`/documentos/${enc(did)}/clasificacion`, { metodo: 'POST', json: { clasificacion: c, motivo: nota, crear_borrador: crear } });
+        if (crear && rr.borrador_id) { irA(`/borrador/${enc(rr.borrador_id)}`); return; }
+        notificar('Clasificación guardada.', 'ok');
+        enrutar({ forzar: true });
+      } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+    }, 'Guardando…');
+  }
+  const opcion = (texto, c, { crear = false, tipo = 'secundario' } = {}) => {
+    const btn = boton(texto, () => clasificar(btn, c, { crear }), { tipo, disabled: !puede });
+    return btn;
+  };
+
+  // «Otra situación…»: las cuatro opciones, con una nota opcional
   const radios = grupoRadios('clasificacion', '¿Qué es este documento?',
-    Object.entries(CLASIFICACIONES).map(([k, c]) => [k, c.etiqueta, c.explicacion]), preseleccion);
-  const motivo = h('textarea', { rows: 2, maxlength: 500, required: true, placeholder: 'Por qué lo clasifica así (queda registrado)' });
-  const confirmarBtn = h('button', { type: 'submit', class: 'btn btn-primario' }, confirmada ? 'Cambiar clasificación' : 'Confirmar clasificación');
-  const formClas = h('form', { class: 'form' }, radios, campo('Motivo', motivo), h('div', { class: 'acciones' }, confirmarBtn));
-  if (bloqueadaReclasificacion || !puedeEmitirRol()) formClas.querySelectorAll('input,textarea,button').forEach((x) => { x.disabled = true; });
-  formClas.addEventListener('submit', async (e) => {
+    Object.entries(CLASIFICACION_SIMPLE).map(([k, c]) => [k, c.etiqueta, c.explicacion]), confirmada ? doc.clasificacion : null);
+  const notaClas = h('input', { type: 'text', maxlength: 500, placeholder: 'Nota (opcional)' });
+  const guardarOtra = h('button', { type: 'submit', class: 'btn btn-secundario' }, 'Guardar');
+  const formClas = h('form', { class: 'form' }, radios, campo('Nota (opcional)', notaClas), h('div', { class: 'acciones' }, guardarOtra));
+  if (!puede) formClas.querySelectorAll('input,textarea,button').forEach((x) => { x.disabled = true; });
+  formClas.addEventListener('submit', (e) => {
     e.preventDefault();
     const valor = valorRadio(formClas, 'clasificacion');
-    if (!valor) { notificar('Elija una clasificación.', 'warn'); return; }
-    if (!motivo.value.trim()) { notificar('Indique el motivo de la clasificación.', 'warn'); motivo.focus(); return; }
-    await conEspera(confirmarBtn, async () => {
-      try {
-        await api(`/documentos/${enc(did)}/clasificacion`, { metodo: 'POST', json: { clasificacion: valor, motivo: motivo.value.trim() } });
-        notificar('Clasificación confirmada.', 'ok');
-        enrutar({ forzar: true });
-      } catch (err) { notificar(err.message, 'danger'); }
-    }, 'Guardando…');
+    if (!valor) { notificar('Elija una opción.', 'warn'); return; }
+    clasificar(guardarOtra, valor, { crear: valor === 'preparatorio', nota: notaClas.value.trim() });
   });
+  const otra = h('details', { class: 'ayuda-plegable' }, h('summary', null, confirmada ? 'Cambiar la clasificación' : 'Otra situación…'), formClas);
 
-  let accionBorrador = null;
-  if (borradorId) {
-    accionBorrador = h('div', { class: 'acciones' }, enlace('Abrir el borrador', `#/borrador/${enc(borradorId)}`, { tipo: 'primario' }));
-  } else if (confirmada && doc.clasificacion === 'preparatorio') {
-    const crear = boton('Crear borrador', async () => {
-      await conEspera(crear, async () => {
-        try {
-          const rb = await api(`/documentos/${enc(did)}/borrador`, { metodo: 'POST', json: {} });
-          irA(`/borrador/${enc(rb.borrador_id)}`);
-        } catch (err) { notificar(err.message, 'danger'); }
-      }, 'Creando…');
-    }, { tipo: 'primario', disabled: !puedeEmitirRol() });
-    accionBorrador = h('div', null,
-      h('p', null, 'Se creará un borrador editable con los datos leídos. Nada tiene efectos fiscales hasta que lo emita.'),
-      h('div', { class: 'acciones' }, crear));
+  let pregunta;
+  if (confirmada) {
+    const et = (CLASIFICACION_SIMPLE[doc.clasificacion] || {}).etiqueta || doc.clasificacion;
+    let accion = null;
+    if (borradorId) accion = enlace('Revisar y emitir', `#/borrador/${enc(borradorId)}`, { tipo: 'primario' });
+    else if (doc.clasificacion === 'preparatorio' && puede) {
+      const crear = boton('Preparar para emitir', async () => {
+        await conEspera(crear, async () => {
+          try { irA(`/borrador/${enc((await api(`/documentos/${enc(did)}/borrador`, { metodo: 'POST', json: {} })).borrador_id)}`); } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+        }, 'Preparando…');
+      }, { tipo: 'primario' });
+      accion = crear;
+    }
+    pregunta = [alerta('ok', h('strong', null, et), confClas.automatica ? ' (clasificado automáticamente)' : '', ` · ${fmtFechaHora(doc.clasificacion_confirmada_en)}`,
+      confClas.motivo && !confClas.automatica ? h('span', { class: 'bloque' }, `Nota: ${confClas.motivo}`) : null),
+    accion ? h('div', { class: 'acciones' }, accion) : null];
+  } else if (!puedeEmitirRol()) {
+    // Quien solo consulta no ve botones que no puede usar
+    pregunta = [h('p', { class: 'pregunta-titulo' }, 'Pendiente de revisar'),
+      h('p', { class: 'ayuda' }, 'Un emisor o un administrador de la empresa indicará qué es este documento y, si procede, lo emitirá.')];
+  } else if (qrTributario) {
+    pregunta = [h('p', { class: 'pregunta-titulo' }, 'Este documento ya es una factura emitida: lleva el código QR de Hacienda.'),
+      h('div', { class: 'acciones' }, sugerida === 'recibida' ? opcion('Guardarla como factura de un proveedor', 'recibida', { tipo: 'primario' })
+        : opcion('Archivarla (ya la entregué a mi cliente)', 'emitida_propia', { tipo: 'primario' }))];
+  } else if (sugerida === 'recibida') {
+    pregunta = [h('p', { class: 'pregunta-titulo' }, 'Parece una factura que le ha enviado un proveedor.'),
+      h('div', { class: 'acciones' }, opcion('Sí, guardarla como factura de un proveedor', 'recibida', { tipo: 'primario' }))];
+  } else if (sugerida === 'desconocido') {
+    pregunta = [h('p', { class: 'pregunta-titulo' }, 'No se reconoce a su empresa como emisora ni como cliente de este documento.'),
+      h('div', { class: 'acciones' }, opcion('Archivarlo sin procesar', 'desconocido'))];
+  } else if (sugerida === 'preparatorio') {
+    pregunta = [h('p', { class: 'pregunta-titulo' }, '¿Es una proforma o un presupuesto que todavía no ha entregado a su cliente?'),
+      h('div', { class: 'acciones' }, opcion('Sí: prepararla para emitir', 'preparatorio', { crear: true, tipo: 'primario' }),
+        opcion('No, ya la entregué: solo archivarla', 'emitida_propia'))];
+  } else {
+    // «Requiere su decisión» (la empresa emite un documento titulado «factura») o una factura propia firmada o duplicada
+    pregunta = [h('p', { class: 'pregunta-titulo' }, '¿Ya entregó esta factura a su cliente?'),
+      h('div', { class: 'acciones' }, opcion('No, todavía no: prepararla para emitir', 'preparatorio', { crear: true, tipo: sugerida === 'emitida_propia' ? 'secundario' : 'primario' }),
+        opcion('Sí, ya la entregué: solo archivarla', 'emitida_propia', { tipo: sugerida === 'emitida_propia' ? 'primario' : 'secundario' })),
+      h('p', { class: 'ayuda' }, 'Una factura ya entregada no se vuelve a emitir: solo se archiva.')];
   }
 
-  const cardClas = tarjeta('Clasificación',
-    h('div', { class: 'sugerencia' },
-      h('p', null, h('strong', null, 'Sugerencia automática: '), etiquetaSug,
-        typeof sug.confianza === 'number' ? h('span', { class: 'muted' }, ` (confianza ${fmtPct(sug.confianza)})`) : null),
-      Array.isArray(sug.motivos) && sug.motivos.length ? h('ul', { class: 'lista-motivos' }, sug.motivos.map((m) => h('li', null, m))) : null),
-    confirmada
-      ? alerta('ok', h('strong', null, 'Clasificación confirmada: '), (CLASIFICACIONES[doc.clasificacion] || {}).etiqueta || doc.clasificacion,
-        ` — ${fmtFechaHora(doc.clasificacion_confirmada_en)}`, motivoConfirmado ? h('span', { class: 'bloque' }, `Motivo: ${motivoConfirmado}`) : null)
-      : alerta('warn', 'La clasificación no está confirmada. Debe confirmarla antes de procesar el documento.'),
-    confirmada && CLASIFICACIONES[doc.clasificacion] ? h('p', { class: 'explicacion' }, CLASIFICACIONES[doc.clasificacion].explicacion) : null,
-    bloqueadaReclasificacion ? h('p', { class: 'muted' }, 'Ya existe un borrador o una factura a partir de este documento: la clasificación no se puede cambiar.') : formClas,
-    accionBorrador);
-
+  const cardClas = h('section', { class: 'card card-clasificacion' }, h('h2', { class: 'card-titulo' }, confirmada ? 'Qué es este documento' : 'Una pregunta sobre este documento'),
+    h('div', { class: 'pregunta' }, pregunta),
+    Array.isArray(sug.motivos) && sug.motivos.length && !confirmada ? h('details', { class: 'ayuda-plegable' }, h('summary', null, 'Por qué se pregunta'),
+      h('ul', { class: 'lista-motivos' }, sug.motivos.map((m) => h('li', null, m)))) : null,
+    conFactura ? h('p', { class: 'muted' }, 'Este documento ya dio lugar a una factura emitida: su clasificación no se puede cambiar.') : (puede ? otra : null));
   const duplicados = comoLista(r.duplicados_fiscales);
   const cardDup = duplicados.length ? tarjeta('Posibles duplicados fiscales',
     alerta('warn', 'Existen facturas con datos fiscales coincidentes (número o importe y destinatario). Compruebe que no va a expedir la misma factura dos veces.'),
@@ -2317,7 +2586,8 @@ async function paginaDocumento(ctx) {
     }))) : null;
 
   let cardBloqueo = null;
-  if (esAdmin() || doc.bloqueo_emision) {
+  // La marca de referencia es una herramienta del administrador (modo avanzado); si el documento ya la tiene, se ve siempre
+  if ((esAdmin() && modoAvanzado()) || doc.bloqueo_emision) {
     const motivoBloq = entrada({ maxlength: 300, placeholder: 'p. ej. Factura de referencia ya expedida por otro sistema', disabled: !esAdmin() });
     const accion = async (btn, motivo) => {
       await conEspera(btn, async () => {
@@ -2338,10 +2608,10 @@ async function paginaDocumento(ctx) {
       const ok = await confirmar({ titulo: 'Quitar la marca de referencia', texto: 'El documento volverá a poder usarse para expedir facturas en cualquier entorno habilitado.', textoBoton: 'Quitar la marca' });
       if (ok) accion(btn, '');
     }, { pequeno: true, disabled: !esAdmin() });
-    cardBloqueo = tarjeta('Referencia – no emitible fuera del simulador',
+    cardBloqueo = tarjeta('Referencia: solo para el modo práctica',
       doc.bloqueo_emision
         ? [alerta('danger', h('strong', null, 'Marcado como referencia: '), doc.bloqueo_emision),
-          h('p', { class: 'ayuda' }, 'Solo puede usarse para pruebas en el simulador local.'), esAdmin() ? h('div', { class: 'acciones' }, quitar) : null]
+          h('p', { class: 'ayuda' }, 'Solo puede usarse para practicar en el modo práctica (no se envía a Hacienda).'), esAdmin() ? h('div', { class: 'acciones' }, quitar) : null]
         : [h('p', { class: 'ayuda' }, 'Marque los documentos de referencia (por ejemplo, facturas reales ya expedidas usadas como modelo) para que nunca puedan expedirse '
           + 'en el entorno de pruebas de la AEAT ni en producción. Solo administradores.'),
         campo('Motivo', motivoBloq), h('div', { class: 'acciones' }, marcar)]);
@@ -2393,53 +2663,54 @@ async function paginaDocumento(ctx) {
  * Borrador: revisión, edición con motivo, incidencias y emisión
  * ====================================================================================== */
 
-const NIVEL_TEXTO = { bloqueo: 'Bloqueo', confirmar: 'Requiere confirmación', aviso: 'Aviso' };
+const NIVEL_TEXTO = { bloqueo: 'Hay que corregirlo', confirmar: 'Compruébelo', aviso: 'Aviso' };
 
+// Pantalla única de revisión: «Cliente», «Factura» e «Importes» siempre visibles; el resto, en «Más opciones»
 const SECCIONES_BORRADOR = [
   {
-    id: 'documento', titulo: 'Documento', campos: [
-      { ruta: 'num_serie', etiqueta: 'Número de factura (serie y número)', tipo: 'texto', max: 60, mono: true },
-      { ruta: 'fecha_documento', etiqueta: 'Fecha del documento', tipo: 'fecha' },
-      { ruta: 'fecha_operacion', etiqueta: 'Fecha de operación (si es distinta)', tipo: 'fecha' },
-      { ruta: 'descripcion_operacion', etiqueta: 'Descripción de la operación', tipo: 'area', max: 500 },
-    ],
-  },
-  {
-    id: 'emisor', titulo: 'Emisor', campos: [
-      { ruta: 'emisor.nombre', etiqueta: 'Razón social', tipo: 'texto', max: 120 },
-      { ruta: 'emisor.nif', etiqueta: 'NIF', tipo: 'nif', max: 20 },
-      { ruta: 'emisor.domicilio', etiqueta: 'Domicilio', tipo: 'area', max: 300, filas: 2 },
-    ],
-  },
-  {
-    id: 'destinatario', titulo: 'Destinatario', campos: [
-      { ruta: 'destinatario.nombre', etiqueta: 'Razón social', tipo: 'texto', max: 120 },
+    id: 'destinatario', titulo: 'Cliente', campos: [
+      { ruta: 'destinatario.nombre', etiqueta: 'Nombre o razón social', tipo: 'texto', max: 120 },
       { ruta: 'destinatario.nif', etiqueta: 'NIF', tipo: 'nif', max: 20 },
       { ruta: 'destinatario.domicilio', etiqueta: 'Domicilio', tipo: 'area', max: 300, filas: 2 },
     ],
   },
-  { id: 'lineas', titulo: 'Líneas de detalle', tabla: 'lineas' },
-  { id: 'desglose', titulo: 'Desglose de IVA', tabla: 'desglose' },
   {
-    id: 'totales', titulo: 'Totales', campos: [
+    id: 'documento', titulo: 'Factura', campos: [
+      { ruta: 'num_serie', etiqueta: 'Número de factura', tipo: 'texto', max: 60, mono: true },
+      { ruta: 'fecha_documento', etiqueta: 'Fecha del documento', tipo: 'fecha' },
+      { ruta: 'fecha_operacion', etiqueta: 'Fecha de la operación (si es distinta de la de hoy)', tipo: 'fecha' },
+      { ruta: 'descripcion_operacion', etiqueta: 'Descripción de la operación', tipo: 'area', max: 500 },
+    ],
+  },
+  { id: 'desglose', titulo: 'IVA', tabla: 'desglose' },
+  {
+    id: 'totales', titulo: 'Importes', campos: [
       { ruta: 'base_imponible', etiqueta: 'Base imponible', tipo: 'importe' },
-      { ruta: 'cuota_total', etiqueta: 'Cuota de IVA', tipo: 'importe' },
-      { ruta: 'importe_total', etiqueta: 'Importe total (bases + cuotas)', tipo: 'importe' },
+      { ruta: 'cuota_total', etiqueta: 'IVA', tipo: 'importe' },
+      { ruta: 'importe_total', etiqueta: 'Total de la factura', tipo: 'importe' },
       { ruta: 'retencion.porcentaje', etiqueta: 'Retención IRPF (%)', tipo: 'decimal' },
       { ruta: 'retencion.importe', etiqueta: 'Retención IRPF (importe)', tipo: 'importe' },
       { ruta: 'total_a_pagar', etiqueta: 'Total a pagar', tipo: 'importe' },
     ],
   },
-  { id: 'referencias', titulo: 'Referencias', referencias: true },
+  { id: 'lineas', titulo: 'Líneas de detalle', tabla: 'lineas', mas: true },
   {
-    id: 'pago', titulo: 'Pago', campos: [
+    id: 'emisor', titulo: 'Su empresa (emisor)', mas: true, campos: [
+      { ruta: 'emisor.nombre', etiqueta: 'Razón social', tipo: 'texto', max: 120 },
+      { ruta: 'emisor.nif', etiqueta: 'NIF', tipo: 'nif', max: 20 },
+      { ruta: 'emisor.domicilio', etiqueta: 'Domicilio', tipo: 'area', max: 300, filas: 2 },
+    ],
+  },
+  { id: 'referencias', titulo: 'Referencias', referencias: true, mas: true },
+  {
+    id: 'pago', titulo: 'Pago', mas: true, campos: [
       { ruta: 'forma_pago', etiqueta: 'Forma de pago', tipo: 'texto', max: 200 },
       { ruta: 'iban', etiqueta: 'IBAN', tipo: 'iban', max: 34 },
       { ruta: 'vencimiento', etiqueta: 'Vencimiento', tipo: 'fecha' },
     ],
   },
   {
-    id: 'observaciones', titulo: 'Observaciones', campos: [
+    id: 'observaciones', titulo: 'Observaciones', mas: true, campos: [
       { ruta: 'observaciones', etiqueta: 'Observaciones (aparecen en el PDF)', tipo: 'area', max: 1000 },
     ],
   },
@@ -2447,6 +2718,13 @@ const SECCIONES_BORRADOR = [
 
 const TIPOS_COL_LINEA = { concepto: 'area', cantidad: 'decimal', unidad: 'texto', precio: 'decimal', importe: 'importe' };
 const TIPOS_COL_DESGLOSE = { tipo_iva: 'decimal', base: 'importe', cuota: 'importe' };
+// Confirmaciones que no se dan con «He revisado los campos marcados»: se responden con su propia pregunta
+const CODIGOS_PREGUNTA = new Set(['FECHA_EXPEDICION', 'EXENTA_CAUSA']);
+const ORIGEN_CAMBIO_TEXTO = {
+  manual: 'Corrección manual', serie: 'Numeración de la serie', calculado: 'Calculado', certificado: 'Datos de la empresa',
+  ocr: 'Lectura del documento', pregunta: 'Respuesta a una pregunta',
+};
+const MOTIVOS_DESCARTE = ['Documento duplicado', 'No se va a facturar', 'Error al subir el archivo'];
 
 function seccionDe(ruta) {
   if (/^(num_serie|fecha_documento|fecha_operacion|descripcion_operacion)$/.test(ruta)) return 'documento';
@@ -2459,6 +2737,38 @@ function seccionDe(ruta) {
   if (/^(forma_pago|iban|vencimiento)$/.test(ruta)) return 'pago';
   if (ruta === 'observaciones') return 'observaciones';
   return null;
+}
+
+/** Mensaje de una incidencia en lenguaje llano, sin códigos internos. */
+function textoIncidencia(i) {
+  if (i.codigo === 'DUDOSO') {
+    return i.nivel === 'aviso' ? 'Compruebe este dato en el original (no impide emitir: no se comunica a Hacienda).'
+      : 'Compruebe este dato en el original.';
+  }
+  return i.mensaje || '';
+}
+
+/** Junto al campo: si la incidencia se resuelve con una pregunta de «Antes de emitir», se remite a ella (texto corto). */
+function textoIncidenciaCampo(i, conPreguntaSerie) {
+  if (i.confirmado) return textoIncidencia(i);
+  if (i.codigo === 'FECHA_EXPEDICION') return 'Responda arriba si la operación se realizó en esta fecha.';
+  if (i.codigo === 'EXENTA_CAUSA') return 'Confirme arriba la exención de esta base.';
+  if (i.codigo === 'SERIE_NO_CONFIRMADA' && conPreguntaSerie) return 'Confirme arriba la numeración.';
+  return textoIncidencia(i);
+}
+
+/**
+ * Valor de un campo editable tal como lo ve el usuario: importes y porcentajes con coma decimal («1.028,50», «21,00»), nunca
+ * con punto. Se guarda igual que antes: normalizarValor() admite coma y punto y compara los valores normalizados.
+ */
+function valorControl(tipo, v) {
+  const t = aTexto(v);
+  if ((tipo === 'importe' || tipo === 'decimal') && /^-?\d+(\.\d+)?$/.test(t)) {
+    const [ent, dec] = t.split('.');
+    const miles = tipo === 'importe' ? ent.replace(/\B(?=(\d{3})+(?!\d))/g, '.') : ent;
+    return dec !== undefined ? `${miles},${dec}` : miles;
+  }
+  return t;
 }
 
 function aTexto(v) {
@@ -2503,9 +2813,10 @@ async function paginaBorrador(ctx) {
   if (!ctx.vigente()) return;
 
   const pendientes = new Map();     // ruta → {crudo, valor, error, etiqueta, anterior, seccion}
-  const motivos = new Map();        // sección → motivo escrito
+  let nota = '';                    // nota opcional de los cambios sin guardar
   const refsExtra = new Set();
-  const barras = new Map();
+  let barra = null;
+  let masAbierto = false;
   let versionVista = Date.now();
   let visorVista = null;
   let mostrandoVista = false;
@@ -2524,6 +2835,7 @@ async function paginaBorrador(ctx) {
   const nivelVisible = (lista) => {
     if (lista.some((i) => i.nivel === 'bloqueo')) return 'bloqueo';
     if (lista.some((i) => i.nivel === 'confirmar' && !i.confirmado)) return 'confirmar';
+    if (lista.some((i) => i.nivel === 'aviso' && i.codigo === 'DUDOSO')) return 'confirmar';   // dudoso no fiscal: ámbar
     if (lista.some((i) => i.nivel === 'aviso')) return 'aviso';
     return null;
   };
@@ -2532,10 +2844,15 @@ async function paginaBorrador(ctx) {
     for (const c of Array.isArray(b.cambios) ? b.cambios : []) m.set(c.campo, c);
     return m;
   };
+  const sinConfirmar = () => incidencias().filter((i) => i.nivel === 'confirmar' && !i.confirmado);
+  const bloqueos = () => incidencias().filter((i) => i.nivel === 'bloqueo');
+  // La numeración nueva solo se pregunta si el número no está ya expedido ni pertenece (escrito de otra forma) a una serie
+  const preguntaSerie = () => !!(b.serie_propuesta && !b.serie_detectada && b.serie_propuesta.patron
+    && !incidencias().some((i) => i.campo === 'num_serie' && (i.codigo === 'DUPLICADA' || i.codigo === 'SERIE_FORMATO')));
 
-  titulo(`Borrador ${datos().num_serie || `#${b.id}`}`);
+  titulo(`Revisar ${datos().num_serie || `borrador #${b.id}`}`);
 
-  // --- Columna izquierda: original con recuadros / vista previa
+  // --- Columna izquierda: original con recuadros / vista previa (en el móvil, detrás de «Ver original»)
   const visorOriginal = b.documento_id ? crearVisor({
     numPaginas: Number(doc && doc.paginas) || Number(docInsp.paginas) || ((procExt || docExt || {}).paginas || []).length || 1,
     url: (n) => `/api/documentos/${enc(b.documento_id)}/paginas/${n}.png`,
@@ -2559,6 +2876,13 @@ async function paginaBorrador(ctx) {
   defsPestanas.push({ id: `vista-${bid}`, titulo: 'Vista previa', panel: contVista, alMostrar: () => { mostrandoVista = true; if (!visorVista) cargarVista(); } });
   const tabs = pestanas(defsPestanas);
   if (!visorOriginal) { mostrandoVista = true; cargarVista(); }
+  const colVisor = h('div', { class: 'col-visor plegado-movil', id: uid('visor') }, tabs.el);
+  const verOriginal = boton('Ver original', () => {
+    const plegado = colVisor.classList.toggle('plegado-movil');
+    verOriginal.textContent = plegado ? 'Ver original' : 'Ocultar original';
+    verOriginal.setAttribute('aria-expanded', plegado ? 'false' : 'true');
+    if (!plegado) colVisor.scrollIntoView({ block: 'start' });
+  }, { class: 'btn btn-secundario btn-pequeno solo-movil', 'aria-controls': colVisor.id, 'aria-expanded': 'false' });
 
   function actualizarCajas() {
     if (!visorOriginal) return;
@@ -2585,20 +2909,21 @@ async function paginaBorrador(ctx) {
       || todos.find((el) => el.dataset.campo.startsWith(`${ruta}.`))
       || [...panel.querySelectorAll('[data-seccion]')].find((el) => el.dataset.seccion === seccionDe(ruta));
     if (!objetivo) return;
+    for (let d = objetivo.closest('details'); d; d = d.parentElement && d.parentElement.closest('details')) d.open = true;
     const control = objetivo.matches('input,textarea,select') ? objetivo : objetivo.querySelector('input,textarea,select,h2');
     objetivo.scrollIntoView({ block: 'center', behavior: reducirMovimiento() ? 'auto' : 'smooth' });
     (control || objetivo).focus({ preventScroll: true });
   }
 
   function mensajesIncidencia(lista) {
-    return lista.map((i) => h('p', { class: `msg-inc msg-${i.nivel}${i.confirmado ? ' msg-confirmado' : ''}`, id: uid('inc') },
-      h('span', { class: 'msg-nivel' }, `${i.confirmado ? 'Confirmado' : NIVEL_TEXTO[i.nivel] || i.nivel}: `), i.mensaje || '', ' ',
-      i.codigo ? h('code', null, i.codigo) : null));
+    return lista.map((i) => h('p', { class: `msg-inc msg-${i.nivel === 'aviso' && i.codigo === 'DUDOSO' ? 'confirmar' : i.nivel}${i.confirmado ? ' msg-confirmado' : ''}`, id: uid('inc'), title: i.codigo === 'DUDOSO' ? i.mensaje : null },
+      i.confirmado ? h('span', { class: 'msg-nivel' }, 'Revisado: ') : null, textoIncidenciaCampo(i, preguntaSerie())));
   }
 
   function chipEditado(c) {
     if (!c) return null;
-    return h('span', { class: 'chip chip-editado', title: `Editado el ${fmtFechaHora(c.en)}${c.usuario ? ` por ${textoValor(c.usuario)}` : ''}${c.motivo ? `. Motivo: ${c.motivo}` : ''}` }, 'Editado');
+    const origen = ORIGEN_CAMBIO_TEXTO[c.origen] || 'Editado';
+    return h('span', { class: 'chip chip-editado', title: `${origen} el ${fmtFechaHora(c.en)}${c.usuario ? ` por ${textoValor(c.usuario)}` : ''}${c.nota ? `. Nota: ${c.nota}` : ''}` }, 'Editado');
   }
 
   function registrarCambio(ruta, tipo, etiqueta, control, original, errorEl, contenedor) {
@@ -2610,7 +2935,7 @@ async function paginaBorrador(ctx) {
     if (sinCambio) pendientes.delete(ruta);
     else pendientes.set(ruta, { crudo: control.value, valor: n.ok ? n.valor : null, error: n.ok ? null : n.error, etiqueta, anterior: original, seccion: seccionDe(ruta) });
     contenedor.classList.toggle('modificado', !sinCambio);
-    actualizarBarra(seccionDe(ruta));
+    actualizarBarra();
     renderAcciones();
   }
 
@@ -2626,26 +2951,30 @@ async function paginaBorrador(ctx) {
     });
   }
 
+  function notaEmisor(ruta) {
+    // El NIF del emisor se comprueba con el de la empresa (determinista): no hace falta confirmarlo
+    if (ruta === 'emisor.nif' && b.emisor_es_empresa) return h('p', { class: 'ayuda ok-texto' }, 'Comprobado: es el NIF de su empresa.');
+    return null;
+  }
+
   function filaCampo(def, cambios) {
     const original = obtener(datos(), def.ruta);
     const p = pendientes.get(def.ruta);
     const control = crearControl(def.tipo, def);
     control.id = uid('bf');
-    control.value = p ? p.crudo : aTexto(original);
+    control.value = p ? p.crudo : valorControl(def.tipo, original);
     control.disabled = !editable();
     const incs = incidenciasDe(def.ruta);
     const nivel = nivelVisible(incs);
     const info = proc.get(def.ruta);
     const msgs = mensajesIncidencia(incs);
     const error = h('p', { class: 'error-campo', id: `${control.id}-err`, 'aria-live': 'polite' });
-    const avisos = info && Array.isArray(info.avisos) && info.avisos.length && tonoConfianza(info) !== 'ok'
-      ? h('p', { class: 'ayuda', id: `${control.id}-av` }, info.avisos.join(' · ')) : null;
-    control.setAttribute('aria-describedby', [...msgs.map((m) => m.id), avisos && avisos.id, error.id].filter(Boolean).join(' '));
+    control.setAttribute('aria-describedby', [...msgs.map((m) => m.id), error.id].filter(Boolean).join(' '));
     if (nivel === 'bloqueo') control.setAttribute('aria-invalid', 'true');
     const cont = h('div', { class: ['campo-b', nivel && `inc-${nivel}`, p && 'modificado'], dataset: { campo: def.ruta } },
       h('div', { class: 'campo-b-cab' }, h('label', { for: control.id }, def.etiqueta),
-        h('span', { class: 'chips' }, chipProcedencia(info), chipEditado(cambios.get(def.ruta)))),
-      control, avisos, msgs, error);
+        h('span', { class: 'chips' }, chipEditado(cambios.get(def.ruta)))),
+      control, notaEmisor(def.ruta), msgs, error);
     control.addEventListener('input', () => registrarCambio(def.ruta, def.tipo, def.etiqueta, control, original, error, cont));
     if (p && p.error) { error.textContent = p.error; control.setAttribute('aria-invalid', 'true'); }
     return cont;
@@ -2656,15 +2985,14 @@ async function paginaBorrador(ctx) {
     const p = pendientes.get(ruta);
     const control = crearControl(tipo, { filas: 2 });
     control.id = uid('bc');
-    control.value = p ? p.crudo : aTexto(original);
+    control.value = p ? p.crudo : valorControl(tipo, original);
     control.disabled = !editable();
     control.setAttribute('aria-label', etiqueta);
     const info = proc.get(ruta);
     const incs = incidenciasDe(ruta);
     const nivel = nivelVisible(incs);
-    const titulo = [info ? `Procedencia: ${[info.pagina ? `p. ${info.pagina}` : null, METODOS[info.metodo] || info.metodo, typeof info.confianza === 'number' ? fmtPct(info.confianza) : null].filter(Boolean).join(' · ')}` : null,
-      textoProcedencia(info), cambios.get(ruta) ? `Editado${cambios.get(ruta).motivo ? `: ${cambios.get(ruta).motivo}` : ''}` : null,
-      ...incs.map((i) => `${NIVEL_TEXTO[i.nivel]}: ${i.mensaje}`)].filter(Boolean).join('\n');
+    const titulo = [cambios.get(ruta) ? `Editado${cambios.get(ruta).nota ? `: ${cambios.get(ruta).nota}` : ''}` : null,
+      ...incs.map((i) => textoIncidencia(i))].filter(Boolean).join('\n');
     if (titulo) control.title = titulo;
     if (nivel === 'bloqueo') control.setAttribute('aria-invalid', 'true');
     const error = h('span', { class: 'error-campo', 'aria-live': 'polite' });
@@ -2674,40 +3002,35 @@ async function paginaBorrador(ctx) {
     return td;
   }
 
-  function barraPendientes(secId) {
+  // --- Cambios sin guardar: una sola barra para toda la pantalla, con una nota opcional
+  function crearBarra() {
     const lista = h('ul', { class: 'pend-lista' });
-    const titulo = h('p', { class: 'pend-titulo' });
-    const motivoId = uid('mot');
-    const motivo = h('input', { type: 'text', id: motivoId, maxlength: 300, placeholder: 'p. ej. «Error de lectura OCR: el NIF correcto es…»' });
-    motivo.value = motivos.get(secId) || '';
-    motivo.addEventListener('input', () => motivos.set(secId, motivo.value));
+    const tituloEl = h('p', { class: 'pend-titulo' });
+    const notaId = uid('nota');
+    const notaEl = h('input', { type: 'text', id: notaId, maxlength: 280, placeholder: 'p. ej. «El NIF correcto es el del contrato»' });
+    notaEl.value = nota;
+    notaEl.addEventListener('input', () => { nota = notaEl.value; });
     const err = h('p', { class: 'error-campo', role: 'alert' });
-    const guardar = boton('Guardar cambios', () => guardarSeccion(secId), { tipo: 'primario', pequeno: true });
-    motivo.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); guardar.click(); } });
-    const cont = h('div', { class: 'barra-pendientes', hidden: true },
-      titulo, lista,
-      h('div', { class: 'pend-motivo' }, h('label', { for: motivoId }, 'Motivo del cambio (obligatorio)'), motivo),
+    const guardar = boton('Guardar cambios', () => guardarCambios(), { tipo: 'primario', pequeno: true });
+    notaEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); guardar.click(); } });
+    const cont = h('div', { class: 'barra-pendientes barra-fija', hidden: true },
+      tituloEl, lista,
+      h('div', { class: 'pend-motivo' }, h('label', { for: notaId }, 'Nota (opcional)'), notaEl,
+        h('p', { class: 'ayuda' }, 'El historial guarda quién hizo el cambio, cuándo, el valor anterior y el nuevo.')),
       err,
-      h('div', { class: 'acciones' }, guardar, boton('Descartar cambios', () => descartarSeccion(secId), { pequeno: true })));
-    barras.set(secId, { cont, lista, titulo, motivo, err, guardar });
+      h('div', { class: 'acciones' }, guardar, boton('Deshacer los cambios', () => { pendientes.clear(); nota = ''; renderPanel(); }, { pequeno: true })));
+    barra = { cont, lista, titulo: tituloEl, err, guardar };
     return cont;
   }
 
-  function actualizarBarra(secId) {
-    const bar = barras.get(secId);
-    if (!bar) return;
-    const items = [...pendientes].filter(([, p]) => p.seccion === secId);
-    bar.cont.hidden = items.length === 0;
-    bar.titulo.textContent = items.length === 1 ? '1 cambio sin guardar' : `${items.length} cambios sin guardar`;
-    vaciar(bar.lista).append(...items.map(([, p]) => h('li', null,
+  function actualizarBarra() {
+    if (!barra) return;
+    const items = [...pendientes];
+    barra.cont.hidden = items.length === 0;
+    barra.titulo.textContent = items.length === 1 ? '1 cambio sin guardar' : `${items.length} cambios sin guardar`;
+    vaciar(barra.lista).append(...items.map(([, p]) => h('li', null,
       h('span', { class: 'pend-campo' }, `${p.etiqueta}: `), h('span', { class: 'pend-ant' }, textoCorto(p.anterior)), ' → ',
       h('span', { class: p.error ? 'pend-nuevo pend-error' : 'pend-nuevo' }, p.error ? `${textoCorto(p.crudo)} (no válido)` : textoCorto(p.valor)))));
-  }
-
-  function descartarSeccion(secId) {
-    for (const [r, p] of [...pendientes]) if (p.seccion === secId) pendientes.delete(r);
-    motivos.delete(secId);
-    renderPanel();
   }
 
   async function aplicarBorrador(r) {
@@ -2719,48 +3042,56 @@ async function paginaBorrador(ctx) {
     if (visorVista) { if (mostrandoVista) cargarVista(); else { visorVista = null; vaciar(contVista); } }
   }
 
-  function enfocarSeccion(secId) {
-    const s = [...panel.querySelectorAll('[data-seccion]')].find((x) => x.dataset.seccion === secId);
-    const h2 = s && s.querySelector('h2');
-    if (h2) h2.focus({ preventScroll: true });
+  /** Guarda cambios en el borrador. `origen`: procedencia del valor (manual, serie, pregunta…), que queda en el historial. */
+  async function patch(cambios, origen = 'manual', notaTexto = '') {
+    const r = await api(`/borradores/${enc(bid)}?entorno=${enc(app.entorno)}`, {
+      metodo: 'PATCH', json: { cambios: cambios.map(([campo, valor]) => ({ campo, valor, origen, motivo: notaTexto })) },
+    });
+    await aplicarBorrador(r);
   }
 
-  async function guardarSeccion(secId) {
-    const bar = barras.get(secId);
-    const items = [...pendientes].filter(([, p]) => p.seccion === secId);
-    if (!items.length || !bar) return;
-    bar.err.textContent = '';
+  async function guardarCambios() {
+    const items = [...pendientes];
+    if (!items.length || !barra) return;
+    barra.err.textContent = '';
     const malos = items.filter(([, p]) => p.error);
-    if (malos.length) { bar.err.textContent = `Corrija los valores no válidos: ${malos.map(([, p]) => p.etiqueta).join(', ')}.`; return; }
-    const motivo = bar.motivo.value.trim();
-    if (!motivo) { bar.err.textContent = 'Indique el motivo del cambio: queda registrado en el historial.'; bar.motivo.focus(); return; }
-    await conEspera(bar.guardar, async () => {
+    if (malos.length) { barra.err.textContent = `Corrija los valores no válidos: ${malos.map(([, p]) => p.etiqueta).join(', ')}.`; return; }
+    await conEspera(barra.guardar, async () => {
       try {
-        const r = await api(`/borradores/${enc(bid)}`, { metodo: 'PATCH', json: { cambios: items.map(([campo, p]) => ({ campo, valor: p.valor, motivo })) } });
-        items.forEach(([campo]) => pendientes.delete(campo));
-        motivos.delete(secId);
-        await aplicarBorrador(r);
+        const copia = items.map(([campo, p]) => [campo, p.valor]);
+        const n = nota.trim();
+        pendientes.clear();
+        nota = '';
+        await patch(copia, 'manual', n);
         notificar('Cambios guardados.', 'ok');
-        enfocarSeccion(secId);
       } catch (err) {
-        if (err.estado !== 401) bar.err.textContent = err.message;
+        for (const [campo, p] of items) pendientes.set(campo, p);
+        renderPanel();
+        if (err.estado !== 401 && barra) barra.err.textContent = err.message;
       }
     }, 'Guardando…');
   }
 
-  async function cambioEstructural(secId, ruta, nuevaLista, textoTitulo) {
-    if ([...pendientes.values()].some((p) => p.seccion === secId)) {
-      notificar('Guarde o descarte primero los cambios pendientes de esta sección.', 'warn');
-      return;
-    }
-    const motivo = await pedirTexto({ titulo: textoTitulo, etiqueta: 'Motivo del cambio (obligatorio)', textoBoton: 'Guardar', multilinea: false });
-    if (!motivo) return;
+  async function cambioEstructural(secId, ruta, nuevaLista) {
+    if (pendientes.size) { notificar('Guarde o deshaga primero los cambios pendientes.', 'warn'); return; }
     try {
-      const r = await api(`/borradores/${enc(bid)}`, { metodo: 'PATCH', json: { cambios: [{ campo: ruta, valor: nuevaLista, motivo }] } });
-      await aplicarBorrador(r);
+      await patch([[ruta, nuevaLista]]);
       notificar('Cambio guardado.', 'ok');
-      enfocarSeccion(secId);
     } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+  }
+
+  async function confirmarClaves(claves, texto) {
+    if (pendientes.size) { notificar('Guarde o deshaga primero los cambios pendientes.', 'warn'); return; }
+    let r;
+    try {
+      // Se confirman los valores que se están mostrando (versión): si otra persona u otra pestaña cambió el borrador, 409
+      r = await api(`/borradores/${enc(bid)}/confirmaciones?entorno=${enc(app.entorno)}`, { metodo: 'POST', json: { claves, version_vista: b.version } });
+    } catch (err) {
+      if (borradorCambiado(err)) await aplicarBorrador(await leerBorrador());
+      throw err;
+    }
+    await aplicarBorrador(r);
+    if (texto) notificar(texto, 'ok');
   }
 
   function copiaLista(ruta) {
@@ -2772,39 +3103,44 @@ async function paginaBorrador(ctx) {
     const esLineas = sec.tabla === 'lineas';
     const filas = Array.isArray(datos()[sec.tabla]) ? datos()[sec.tabla] : [];
     const cols = esLineas ? Object.keys(COLUMNAS_LINEA) : Object.keys(COLUMNAS_DESGLOSE);
-    const nombres = esLineas ? COLUMNAS_LINEA : COLUMNAS_DESGLOSE;
+    const nombres = esLineas ? COLUMNAS_LINEA : { tipo_iva: 'Tipo de IVA (%)', base: 'Base', cuota: 'IVA' };
     const tipos = esLineas ? TIPOS_COL_LINEA : TIPOS_COL_DESGLOSE;
     const nombreFila = esLineas ? 'Línea' : 'Tipo';
     const cabecera = h('tr', null, h('th', { scope: 'col', class: 'col-num' }, '#'),
       cols.map((c) => h('th', { scope: 'col', class: tipos[c] === 'area' ? 'col-ancha' : (tipos[c] === 'texto' ? null : 'num') }, nombres[c])),
-      esLineas ? null : h('th', { scope: 'col' }, 'Calificación'),
       editable() ? h('th', { scope: 'col' }, h('span', { class: 'sr-only' }, 'Acciones')) : null);
-    const cuerpo = filas.map((f, i) => h('tr', null,
-      h('td', { class: 'col-num' }, String(i + 1), (() => {
-        const info = proc.get(`${sec.tabla}.${i}.${esLineas ? 'importe' : 'cuota'}`) || proc.get(`${sec.tabla}.${i}.${esLineas ? 'concepto' : 'tipo_iva'}`);
-        return info && info.pagina ? h('span', { class: 'muted bloque' }, `p. ${info.pagina}`) : null;
-      })()),
-      cols.map((c) => (esLineas ? null : celdaSinIvaDesglose(f, c)) || celdaEditable(`${sec.tabla}.${i}.${c}`, tipos[c], `${nombreFila} ${i + 1}: ${nombres[c]}`, cambios)),
-      esLineas ? null : celdaCalificacionDesglose(f, i, {
+    // IVA: la elección «con IVA o exenta» (selector y mención) va en una segunda fila a todo el ancho, para que la tabla
+    // quepa en el panel lateral y en el móvil sin cortar «Quitar» ni el selector
+    const nCols = cols.length + 1 + (editable() ? 1 : 0);
+    const cuerpo = filas.map((f, i) => {
+      const fila = h('tr', { class: esLineas ? null : 'fila-desglose-importes' },
+        h('td', { class: 'col-num' }, String(i + 1)),
+        cols.map((c) => (esLineas ? null : celdaSinIvaDesglose(f, c)) || celdaEditable(`${sec.tabla}.${i}.${c}`, tipos[c], `${nombreFila} ${i + 1}: ${nombres[c]}`, cambios)),
+        editable() ? h('td', { class: 'col-quitar' }, boton('Quitar', () => {
+          const lista = copiaLista(sec.tabla);
+          lista.splice(i, 1);
+          cambioEstructural(sec.id, sec.tabla, lista);
+        }, { pequeno: true, tipo: 'enlace', 'aria-label': `Quitar ${nombreFila.toLowerCase()} ${i + 1}` })) : null);
+      if (esLineas) return fila;
+      const cal = celdaCalificacionDesglose(f, i, {
         editable: editable(), cambios, celda: celdaEditable, lista: () => copiaLista(sec.tabla),
-        cambiar: (lista, t) => cambioEstructural(sec.id, sec.tabla, lista, t),
-      }),
-      editable() ? h('td', null, boton('Quitar', () => {
-        const lista = copiaLista(sec.tabla);
-        lista.splice(i, 1);
-        cambioEstructural(sec.id, sec.tabla, lista, `Quitar ${nombreFila.toLowerCase()} ${i + 1}`);
-      }, { pequeno: true, tipo: 'enlace', 'aria-label': `Quitar ${nombreFila.toLowerCase()} ${i + 1}` })) : null));
+        cambiar: (lista) => cambioEstructural(sec.id, sec.tabla, lista),
+      });
+      cal.colSpan = nCols;
+      cal.prepend(h('span', { class: 'etiqueta-calificacion' }, 'Con IVA o exenta:'));
+      return [fila, h('tr', { class: 'fila-desglose-calificacion' }, cal)];
+    });
     const anadirBtn = editable() ? boton(esLineas ? 'Añadir línea' : 'Añadir tipo de IVA', () => {
       const lista = copiaLista(sec.tabla);
       lista.push(esLineas ? { concepto: null, cantidad: null, unidad: null, precio: null, importe: null }
         : { tipo_iva: null, base: null, cuota: null, calificacion: 'S1', clave_regimen: '01', impuesto: '01' });
-      cambioEstructural(sec.id, sec.tabla, lista, esLineas ? 'Añadir línea' : 'Añadir tipo de IVA');
+      cambioEstructural(sec.id, sec.tabla, lista);
     }, { pequeno: true }) : null;
     return [
       filas.length
-        ? h('div', { class: 'tabla-wrap' }, h('table', { class: 'tabla tabla-editable' }, h('caption', { class: 'sr-only' }, sec.titulo), h('thead', null, cabecera), h('tbody', null, cuerpo)))
-        : h('p', { class: 'vacio' }, esLineas ? 'No se han identificado líneas de detalle.' : 'No se ha identificado el desglose por tipo de IVA.'),
-      esLineas ? null : h('p', { class: 'ayuda' }, AYUDA_DESGLOSE_EXENTAS),
+        ? h('div', { class: 'tabla-wrap' }, h('table', { class: esLineas ? 'tabla tabla-editable' : 'tabla tabla-editable tabla-desglose' }, h('caption', { class: 'sr-only' }, sec.titulo), h('thead', null, cabecera), h('tbody', null, cuerpo)))
+        : h('p', { class: 'vacio' }, esLineas ? 'No se han identificado líneas de detalle.' : 'No se ha identificado el IVA por tipos.'),
+      esLineas ? null : h('details', { class: 'ayuda-plegable' }, h('summary', null, '¿Con IVA o exenta?'), h('p', { class: 'ayuda' }, AYUDA_DESGLOSE_EXENTAS)),
       anadirBtn ? h('div', { class: 'acciones' }, anadirBtn) : null,
     ];
   }
@@ -2831,7 +3167,7 @@ async function paginaBorrador(ctx) {
       clave.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); anadirRef(); } });
       alta = h('div', { class: 'alta-referencia' }, campo('Añadir otra referencia (nombre)', clave), boton('Añadir', anadirRef, { pequeno: true }), err);
     }
-    return [h('p', { class: 'ayuda' }, 'Las referencias aparecen en el PDF; no se comunican a la AEAT.'), h('div', { class: 'rejilla-campos' }, campos), alta];
+    return [h('p', { class: 'ayuda' }, 'Las referencias aparecen en el PDF; no se comunican a Hacienda.'), h('div', { class: 'rejilla-campos' }, campos), alta];
   }
 
   function seccionBorrador(sec, cambios) {
@@ -2841,138 +3177,222 @@ async function paginaBorrador(ctx) {
     else if (sec.referencias) {
       rutasCampos = clavesReferencias().map((k) => `referencias.${k}`);
       cuerpo = seccionReferencias(cambios);
-    }
-    else {
-      rutasCampos = sec.campos.map((c) => c.ruta);
-      cuerpo = h('div', { class: sec.campos.length > 2 ? 'rejilla-campos' : null }, sec.campos.map((c) => filaCampo(c, cambios)));
+    } else {
+      // Sin retención, sus campos y el total a pagar se ocultan (se añaden desde «Más opciones» si hace falta)
+      const conRet = !!(datos().retencion && (datos().retencion.importe || datos().retencion.porcentaje));
+      const defs = sec.campos.filter((c) => conRet || masAbierto || !/^(retencion\.|total_a_pagar$)/.test(c.ruta)
+        || incidenciasDe(c.ruta).length || pendientes.has(c.ruta));
+      rutasCampos = defs.map((c) => c.ruta);
+      cuerpo = h('div', { class: defs.length > 2 ? 'rejilla-campos' : null }, defs.map((c) => filaCampo(c, cambios)));
     }
     if (sec.id === 'documento') {
-      const sd = b.serie_detectada;
       const d = datos();
-      cuerpo = [cuerpo,
-        h('div', { class: 'info-serie' },
-          h('p', null, h('strong', null, 'Tipo de factura: '), d.tipo_factura === 'F1' || !d.tipo_factura ? 'F1 — factura completa' : `${d.tipo_factura} — factura rectificativa`),
-          sd && typeof sd === 'object'
-            ? h('p', null, h('strong', null, 'Serie detectada: '),
-              [sd.codigo ? `código ${sd.codigo}` : null, sd.patron ? `patrón ${sd.patron}` : null,
-                (sd.numero_detectado ?? sd.numero) !== undefined && (sd.numero_detectado ?? sd.numero) !== null ? `número ${sd.numero_detectado ?? sd.numero}` : null,
-                sd.siguiente_numero ? `siguiente esperado ${sd.siguiente_numero}` : null, sd.entorno ? `entorno ${(ENTORNOS[sd.entorno] || {}).corto || sd.entorno}` : null]
-                .filter(Boolean).join(' · '))
-            : avisoSinSerie(b.serie_propuesta),
-          h('p', { class: 'ayuda' }, `La factura se expedirá con fecha de hoy (${fmtFecha(hoyISO())}). Si la operación se realizó en otra fecha, indíquela como fecha de operación.`))];
+      cuerpo = [cuerpo, h('p', { class: 'ayuda' }, `La factura se expedirá con fecha de hoy (${fmtFecha(hoyISO())}).`
+        + (d.tipo_factura && d.tipo_factura !== 'F1' ? ` Tipo: ${d.tipo_factura} (rectificativa).` : ''))];
     }
     // Incidencias de la sección que no corresponden a un campo concreto mostrado
     const incSec = incidencias().filter((i) => seccionDe(i.campo || '') === sec.id
       && (sec.tabla || !rutasCampos.some((r) => incidenciasDe(r).includes(i))));
-    const nivel = nivelVisible(incSec);
+    const nivel = nivelVisible(incSec.concat(...rutasCampos.map(incidenciasDe)));
     const idTitulo = uid('sec');
-    return h('section', { class: ['card', 'seccion-b', nivel && `sec-inc-${nivel}`], dataset: { seccion: sec.id }, 'aria-labelledby': idTitulo },
+    return h('section', { class: ['card', 'seccion-b', nivel && nivel !== 'aviso' && `sec-inc-${nivel}`], dataset: { seccion: sec.id }, 'aria-labelledby': idTitulo },
       h('h2', { class: 'card-titulo', id: idTitulo, tabindex: '-1' }, sec.titulo),
       incSec.length ? h('div', { class: 'inc-seccion' }, mensajesIncidencia(incSec)) : null,
-      cuerpo,
-      barraPendientes(sec.id));
+      cuerpo);
   }
 
-  function cardIncidencias() {
-    const incs = incidencias();
-    const bloq = incs.filter((i) => i.nivel === 'bloqueo');
-    const conf = incs.filter((i) => i.nivel === 'confirmar');
-    const avis = incs.filter((i) => i.nivel === 'aviso');
-    const irBtn = (i) => (i.campo && seccionDe(i.campo) ? boton('Ir al campo', () => irAlCampo(i.campo), { tipo: 'enlace', pequeno: true }) : null);
-    const item = (i) => h('li', { class: `inc-item inc-item-${i.nivel}` },
-      h('div', { class: 'inc-texto' }, h('span', null, i.mensaje || ''),
-        h('span', { class: 'inc-meta' }, i.codigo ? h('code', null, i.codigo) : null, i.campo ? ` · ${etiquetaCampo(i.campo)}` : null)),
-      irBtn(i));
+  // --- «Antes de emitir»: bloqueos con su arreglo, preguntas y campos en ámbar
+  function botonIr(i) {
+    return i.campo && seccionDe(i.campo) ? boton('Ir al campo', () => irAlCampo(i.campo), { tipo: 'enlace', pequeno: true }) : null;
+  }
+
+  function botonArreglo(i) {
+    const a = i.arreglo;
+    if (!a || !editable() || !a.campo) return null;
+    const btn = boton(a.texto || 'Corregir', async () => {
+      if (pendientes.size) { notificar('Guarde o deshaga primero los cambios pendientes.', 'warn'); return; }
+      await conEspera(btn, async () => {
+        try { await patch([[a.campo, a.valor]], a.origen || 'manual'); notificar('Número corregido. Compruébelo en el resumen.', 'ok'); } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+      }, 'Corrigiendo…');
+    }, { tipo: 'primario', pequeno: true });
+    return btn;
+  }
+
+  function preguntaSerieEl() {
+    const p = b.serie_propuesta;
+    const rect = p.tipo === 'rectificativa';
+    const ejemplos = (Array.isArray(p.ejemplos) && p.ejemplos.length ? p.ejemplos : [datos().num_serie]).join(', ');
+    const arreglo = (incidencias().find((i) => i.codigo === 'SERIE_NO_CONFIRMADA' && i.arreglo) || null);
     const partes = [];
-    if (!incs.length) partes.push(alerta('ok', 'Sin incidencias: el borrador supera todas las validaciones.'));
+    if (arreglo) {
+      partes.push(h('p', null, `Este número no sigue la numeración de su serie. ${rect ? '' : 'Si el documento es una proforma o un presupuesto, su número no suele ser el de la factura.'}`),
+        h('div', { class: 'acciones' }, botonArreglo(arreglo)));
+    }
+    const titulo = arreglo ? '¿O es una numeración nueva?' : (rect ? 'Numeración de las facturas rectificativas' : 'Numeración de sus facturas');
+    let acciones;
+    if (!editable()) acciones = null;
+    else if (!esAdmin()) acciones = h('p', { class: 'muted' }, 'Pida a un administrador de la empresa que confirme la numeración.');
+    else {
+      const si = boton('Sí, es correcta', async () => {
+        if (pendientes.size) { notificar('Guarde o deshaga primero los cambios pendientes.', 'warn'); return; }
+        await conEspera(si, async () => {
+          try {
+            const r = await api(`/borradores/${enc(bid)}/serie`, { metodo: 'POST', json: { entorno: app.entorno, patron: p.patron, siguiente_numero: p.numero } });
+            await aplicarBorrador(r);
+            notificar('Numeración confirmada.', 'ok');
+          } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+        }, 'Confirmando…');
+      }, { tipo: arreglo ? 'secundario' : 'primario', pequeno: true });
+      const qs = new URLSearchParams({ patron: p.patron, siguiente: String(p.numero || 1) });
+      if (p.anio) qs.set('anio', String(p.anio));
+      acciones = h('div', { class: 'acciones' }, si, enlace('No, configurarla de otra forma', `#/configuracion/series?${qs}`, { tipo: 'secundario', pequeno: true }));
+    }
+    return h('div', { class: 'pregunta', dataset: { pregunta: 'serie' } },
+      partes,
+      h('p', { class: 'pregunta-titulo' }, titulo),
+      h('p', null, `Esta será la numeración: ${ejemplos}… ¿Es correcta?`),
+      h('p', { class: 'ayuda' }, 'Compruebe que no ha expedido fuera de esta aplicación facturas con números posteriores de esta numeración.'),
+      acciones);
+  }
+
+  function preguntaFecha(i) {
+    const d = datos();
+    const q = d.fecha_operacion || d.fecha_documento;
+    const btnSi = boton(`Sí, el ${fmtFecha(q)}`, async () => {
+      if (pendientes.size) { notificar('Guarde o deshaga primero los cambios pendientes.', 'warn'); return; }
+      await conEspera(btnSi, async () => {
+        try { await patch([['fecha_operacion', q]], 'pregunta'); } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+      });
+    }, { tipo: 'primario', pequeno: true });
+    const btnHoy = boton('No, es de hoy', async () => {
+      await conEspera(btnHoy, async () => {
+        try {
+          if (d.fecha_operacion) { if (pendientes.size) { notificar('Guarde o deshaga primero los cambios pendientes.', 'warn'); return; } await patch([['fecha_operacion', null]], 'pregunta'); }
+          else await confirmarClaves([i.clave]);
+        } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+      });
+    }, { pequeno: true });
+    return h('div', { class: 'pregunta', dataset: { pregunta: 'fecha' } },
+      d.fecha_operacion && d.fecha_documento && d.fecha_operacion !== d.fecha_documento
+        ? h('p', null, `El documento está fechado el ${fmtFecha(d.fecha_documento)}.`) : null,
+      h('p', { class: 'pregunta-titulo' }, `¿La operación (el trabajo o la entrega) se realizó el ${fmtFecha(q)}?`),
+      h('p', { class: 'ayuda' }, `La factura llevará la fecha de hoy (${fmtFecha(hoyISO())}); si la operación fue otro día, se indica como fecha de operación.`),
+      editable() ? h('div', { class: 'acciones' }, btnSi, btnHoy,
+        boton('Otra fecha', () => irAlCampo('fecha_operacion'), { tipo: 'enlace', pequeno: true })) : null);
+  }
+
+  function preguntaExencion(i) {
+    const m = /^desglose\.(\d+)$/.exec(i.campo || '');
+    const fila = m ? (datos().desglose || [])[Number(m[1])] || {} : {};
+    const causa = CAUSAS_EXENCION_UI[fila.operacion_exenta] || null;
+    const si = boton('Sí, es correcta', async () => {
+      await conEspera(si, async () => {
+        try { await confirmarClaves([i.clave], 'Exención confirmada.'); } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+      });
+    }, { tipo: 'primario', pequeno: true });
+    return h('div', { class: 'pregunta', dataset: { pregunta: 'exencion' } },
+      h('p', { class: 'pregunta-titulo' }, `¿Esta base de ${fmtImporte(fila.base)} está exenta de IVA${causa ? ` por el ${causa.nombre}` : ''}?`),
+      fila.motivo_exencion ? h('p', null, 'En la factura se imprimirá: ', h('q', null, fila.motivo_exencion)) : null,
+      h('details', { class: 'ayuda-plegable' }, h('summary', null, 'Más detalles'), h('p', { class: 'ayuda' }, i.mensaje || '')),
+      editable() ? h('div', { class: 'acciones' }, si, boton('No, cambiarla', () => irAlCampo(i.campo), { pequeno: true })) : null);
+  }
+
+  function cardRevision() {
+    const partes = [];
+    const bloq = bloqueos().filter((i) => !(preguntaSerie() && i.codigo === 'SERIE_NO_CONFIRMADA'));
+    const pend = sinConfirmar();
+    const ambar = pend.filter((i) => !CODIGOS_PREGUNTA.has(i.codigo));
+    const preguntas = pend.filter((i) => CODIGOS_PREGUNTA.has(i.codigo));
     if (bloq.length) {
       partes.push(h('div', { class: 'grupo-inc grupo-bloqueo' },
-        h('h3', null, pill(`Bloqueos (${bloq.length})`, 'danger'), ' Impiden emitir hasta que se corrijan'),
-        h('ul', { class: 'lista-inc' }, bloq.map(item))));
+        h('h3', null, bloq.length === 1 ? '1 cosa que corregir' : `${bloq.length} cosas que corregir`),
+        h('ul', { class: 'lista-inc' }, bloq.map((i) => h('li', { class: 'inc-item inc-item-bloqueo' },
+          h('div', { class: 'inc-texto' }, h('span', null, textoIncidencia(i)),
+            i.campo && seccionDe(i.campo) ? h('span', { class: 'inc-meta' }, etiquetaCampo(i.campo)) : null),
+          h('div', { class: 'acciones' }, botonArreglo(i), botonIr(i)))))));
     }
-    if (conf.length) {
-      const sinConfirmar = conf.filter((i) => !i.confirmado);
-      const registrar = boton('Registrar confirmaciones', async () => {
-        const claves = [...formConf.querySelectorAll('input[type="checkbox"]:checked:not(:disabled)')].map((x) => x.value);
-        if (!claves.length) { notificar('Marque los puntos que confirma.', 'warn'); return; }
-        await conEspera(registrar, async () => {
-          try {
-            const r = await api(`/borradores/${enc(bid)}/confirmaciones`, { metodo: 'POST', json: { claves } });
-            await aplicarBorrador(r);
-            notificar('Confirmaciones registradas.', 'ok');
-          } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
-        }, 'Registrando…');
-      }, { tipo: 'primario', pequeno: true, disabled: true });
-      const formConf = h('div', { class: 'lista-confirmar' }, conf.map((i) => {
-        const id = uid('cf');
-        const chk = h('input', { type: 'checkbox', id, value: i.clave || `${i.codigo}:${i.campo}`, checked: !!i.confirmado, disabled: !!i.confirmado || !editable() });
-        chk.addEventListener('change', () => { registrar.disabled = !formConf.querySelector('input[type="checkbox"]:checked:not(:disabled)'); });
-        return h('div', { class: `inc-item inc-item-confirmar${i.confirmado ? ' confirmado' : ''}` },
-          h('div', { class: 'casilla' }, chk, h('label', { for: id }, i.mensaje || '',
-            h('span', { class: 'inc-meta' }, i.codigo ? h('code', null, i.codigo) : null, i.campo ? ` · ${etiquetaCampo(i.campo)}` : null,
-              i.confirmado ? ' · Confirmado' : null))),
-          irBtn(i));
-      }));
-      partes.push(h('div', { class: 'grupo-inc grupo-confirmar' },
-        h('h3', null, pill(`Requieren confirmación (${sinConfirmar.length} de ${conf.length} pendientes)`, 'warn')),
-        h('p', { class: 'ayuda' }, 'Revise cada punto en el documento. Si es correcto, márquelo y registre la confirmación; si no, corrija el dato.'),
-        formConf, editable() && sinConfirmar.length ? h('div', { class: 'acciones' }, registrar) : null));
+    if (preguntaSerie()) partes.push(preguntaSerieEl());
+    for (const i of preguntas) partes.push(i.codigo === 'FECHA_EXPEDICION' ? preguntaFecha(i) : preguntaExencion(i));
+    if (ambar.length) {
+      // Lo que se resuelve cambiando datos (y obliga a revisar de nuevo) va antes: arreglar los bloqueos de un campo y la fecha
+      const antes = bloq.some((i) => i.arreglo || seccionDe(i.campo || '')) || preguntas.some((i) => i.codigo === 'FECHA_EXPEDICION');
+      const revisado = boton('He revisado los campos marcados', async () => {
+        await conEspera(revisado, async () => {
+          try { await confirmarClaves(ambar.map((i) => i.clave), 'Campos revisados.'); } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+        }, 'Guardando…');
+      }, { tipo: 'primario', pequeno: true, disabled: !editable() || !!antes });
+      const vistos = new Set();
+      partes.push(h('div', { class: 'grupo-inc grupo-confirmar', dataset: { pregunta: 'ambar' } },
+        h('h3', null, ambar.length === 1 ? 'Compruebe el campo marcado en ámbar' : `Compruebe los ${ambar.length} campos marcados en ámbar`),
+        h('ul', { class: 'lista-inc' }, ambar.filter((i) => { const k = `${i.campo}|${textoIncidencia(i)}`; if (vistos.has(k)) return false; vistos.add(k); return true; })
+          .map((i) => h('li', { class: 'inc-item inc-item-confirmar' },
+            h('div', { class: 'inc-texto' }, h('strong', null, etiquetaCampo(i.campo || 'documento')), h('span', null, textoIncidencia(i))),
+            botonIr(i)))),
+        h('p', { class: 'ayuda' }, antes ? 'Primero resuelva lo anterior: si cambia algún dato, la revisión se repite.'
+          : 'Compárelos con el original. Si alguno está mal, corríjalo (al corregirlo deja de estar marcado); si están bien:'),
+        editable() ? h('div', { class: 'acciones' }, revisado) : null));
     }
-    if (avis.length) {
-      partes.push(h('div', { class: 'grupo-inc grupo-aviso' },
-        h('h3', null, pill(`Avisos (${avis.length})`, 'info'), ' No impiden emitir'),
-        h('ul', { class: 'lista-inc' }, avis.map(item))));
+    const avisos = incidencias().filter((i) => i.nivel === 'aviso');
+    if (avisos.length) {
+      partes.push(h('details', { class: 'ayuda-plegable avisos-borrador' }, h('summary', null, `${avisos.length} aviso(s) que no impiden emitir`),
+        h('ul', { class: 'lista-inc' }, avisos.map((i) => h('li', { class: 'inc-item inc-item-aviso' },
+          h('div', { class: 'inc-texto' }, i.campo && seccionDe(i.campo) ? h('strong', null, etiquetaCampo(i.campo)) : null, h('span', null, textoIncidencia(i))), botonIr(i))))));
     }
-    return tarjeta('Revisión', partes);
+    if (!bloq.length && !pend.length && !preguntaSerie()) partes.unshift(alerta('ok', 'Todo revisado: compruebe el resumen y emita la factura.'));
+    return h('section', { class: 'card card-revision' }, h('h2', { class: 'card-titulo' }, 'Antes de emitir'), partes);
   }
 
   function motivosNoEmision() {
-    const incs = incidencias();
-    const nb = incs.filter((i) => i.nivel === 'bloqueo').length;
-    const nc = incs.filter((i) => i.nivel === 'confirmar' && !i.confirmado).length;
+    const nb = bloqueos().length;
+    const nc = sinConfirmar().length;
     const disponibles = Array.isArray(b.entornos_disponibles) ? b.entornos_disponibles : null;
     const out = [];
     if (b.factura_id || b.estado === 'emitido') out.push('El borrador ya se ha emitido.');
     if (b.estado === 'descartado') out.push('El borrador está descartado.');
     if (!puedeEmitirRol()) out.push('Su rol en la empresa no permite emitir facturas.');
-    if (nb) out.push(`Hay ${nb} bloqueo(s) que deben corregirse.`);
-    if (nc) out.push(`Faltan ${nc} confirmación(es).`);
+    if (nb) out.push(nb === 1 ? 'Falta corregir 1 cosa (arriba).' : `Faltan por corregir ${nb} cosas (arriba).`);
+    if (nc) out.push(nc === 1 ? 'Falta 1 comprobación (arriba).' : `Faltan ${nc} comprobaciones (arriba).`);
     if (pendientes.size) out.push('Hay cambios sin guardar.');
-    if (b.entorno_validado && b.entorno_validado !== app.entorno) out.push('La validación mostrada corresponde a otro entorno; espere a que se actualice.');
+    if (b.entorno_validado && b.entorno_validado !== app.entorno) out.push('La revisión mostrada corresponde a otro entorno; espere a que se actualice.');
     if (disponibles && !disponibles.includes(app.entorno)) {
-      out.push(`El entorno seleccionado (${ENTORNOS[app.entorno].corto}) no está disponible para este borrador. Disponibles: ${disponibles.map((e) => (ENTORNOS[e] || {}).corto || e).join(', ') || 'ninguno'}.`);
+      out.push(`El entorno seleccionado (${ENTORNOS[app.entorno].corto}) no está disponible. Disponibles: ${disponibles.map((e) => (ENTORNOS[e] || {}).corto || e).join(', ') || 'ninguno'}.`);
     }
     if (!out.length && !b.puede_emitir) out.push('El servidor indica que el borrador todavía no se puede emitir.');
     return out;
   }
 
   function renderAcciones() {
+    if (!puedeEmitirRol()) {
+      // Quien solo consulta no ve el botón «Emitir»
+      vaciar(contAcciones).append(h('p', { class: 'muted' }, `Solo consulta: su papel en esta empresa («${NOMBRE_ROL[rolActual()] || rolActual()}») no permite emitir facturas.`));
+      return;
+    }
     const razones = motivosNoEmision();
-    const vista = boton('Vista previa', () => {
-      tabs.mostrar(`vista-${bid}`);
-      const col = tabs.el.closest('.col-visor');
-      if (col && !esEscritorio()) col.scrollIntoView({ block: 'start' });
-    });
-    const emitir = boton('Emitir factura…', abrirEmitir, { tipo: app.entorno === 'produccion' ? 'peligro' : 'primario', disabled: razones.length > 0 });
+    const real = app.entorno === 'produccion';
+    const emitir = boton(real ? 'Emitir factura REAL…' : 'Emitir', abrirEmitir, { tipo: real ? 'peligro' : 'primario', disabled: razones.length > 0 });
     if (razones.length) emitir.setAttribute('aria-describedby', 'razones-no-emision');
-    const descartar = editable() ? boton('Descartar borrador', descartarBorrador, { tipo: 'enlace' }) : null;
-    vaciar(contAcciones).append(
-      h('div', { class: 'acciones' }, vista, emitir, descartar),
-      h('p', { class: 'muted' }, 'Se emitirá en: ', badgeEntorno(app.entorno), ' (cámbielo en la barra superior).',
-        b.entorno_validado && b.entorno_validado !== app.entorno ? h('span', { class: 'bloque' }, 'Actualizando la validación para este entorno…') : null),
-      razones.length ? h('ul', { class: 'razones', id: 'razones-no-emision' }, razones.map((r) => h('li', null, r))) : alerta('ok', 'Listo para emitir.'));
+    anadir(vaciar(contAcciones), [
+      h('div', { class: 'acciones' }, emitir),
+      h('p', { class: 'muted' }, 'Se emitirá en: ', badgeEntorno(app.entorno),
+        b.entorno_validado && b.entorno_validado !== app.entorno ? h('span', { class: 'bloque' }, 'Actualizando la revisión para este entorno…') : null),
+      razones.length ? h('ul', { class: 'razones', id: 'razones-no-emision' }, razones.map((r) => h('li', null, r))) : null]);
   }
 
   function cardResumen() {
     const d = datos();
     const factura = b.factura_id ? alerta('info', 'Este borrador ya se ha emitido. ', enlace('Ver la factura', `#/factura/${enc(b.factura_id)}`)) : null;
     renderAcciones();
-    return tarjeta('Resumen',
+    const dest = d.destinatario || {};
+    return h('section', { class: 'card card-emitir' }, h('h2', { class: 'card-titulo' }, 'Resumen'),
       factura,
       kv([
-        ['Número', d.num_serie || '—'],
-        ['Destinatario', d.destinatario ? `${d.destinatario.nombre || '—'}${d.destinatario.nif ? ` · ${d.destinatario.nif}` : ''}` : '—'],
-        ['Importe total', fmtImporte(d.importe_total)],
+        ['Cliente', `${dest.nombre || '—'}${dest.nif ? ` · NIF ${dest.nif}` : ''}`],
+        ['Número', h('span', { class: 'mono' }, d.num_serie || '—')],
+        ['Fecha de la factura', `${fmtFecha(hoyISO())} (hoy)`],
+        d.fecha_operacion ? ['Fecha de la operación', fmtFecha(d.fecha_operacion)] : ['Fecha de la operación', undefined],
+        ['Base imponible', fmtImporte(d.base_imponible)],
+        ['IVA', fmtImporte(d.cuota_total)],
+        ['Total', h('strong', null, fmtImporte(d.importe_total))],
         d.retencion && d.retencion.importe ? ['Total a pagar', fmtImporte(d.total_a_pagar)] : ['Total a pagar', undefined],
       ]),
       contAcciones);
@@ -2982,76 +3402,159 @@ async function paginaBorrador(ctx) {
     const rect = datos().rectificativa;
     if (!rect || typeof rect !== 'object') return null;
     const orig = rect.importes_originales || {};
-    return tarjeta('Factura rectificativa',
+    return tarjeta('Corrección de una factura',
       kv([
-        ['Tipo', `${datos().tipo_factura || '—'} · ${rect.tipo_rectificativa === 'I' ? 'por diferencias' : rect.tipo_rectificativa || '—'}`],
-        ['Factura rectificada', `${rect.num_serie_rectificada || '—'} (${fmtFecha(rect.fecha_rectificada)})`],
+        ['Tipo', `${datos().tipo_factura || '—'} · por diferencias`],
+        ['Factura que corrige', `${rect.num_serie_rectificada || '—'} (${fmtFecha(rect.fecha_rectificada)})`],
         ['Motivo', rect.motivo || '—'],
-        ['Importes originales', `Base ${fmtImporte(orig.base)} · Cuota ${fmtImporte(orig.cuota)} · Total ${fmtImporte(orig.total)}`],
+        ['Importes originales', `Base ${fmtImporte(orig.base)} · IVA ${fmtImporte(orig.cuota)} · Total ${fmtImporte(orig.total)}`],
       ]),
-      h('p', { class: 'ayuda' }, 'Indique en el desglose las diferencias (positivas o negativas) respecto a la factura rectificada.'));
+      h('p', { class: 'ayuda' }, 'Indique en el IVA las diferencias (positivas o negativas) respecto a la factura que corrige.'));
   }
 
   function cardHistorial() {
     const cambios = Array.isArray(b.cambios) ? b.cambios : [];
-    return tarjeta('Historial de cambios', tabla([
+    return h('section', { class: 'card' }, h('h2', { class: 'card-titulo' }, 'Historial de cambios'), tabla([
       { titulo: 'Fecha', celda: (c) => fmtFechaHora(c.en) },
       { titulo: 'Usuario', celda: (c) => (c.usuario && typeof c.usuario === 'object' ? c.usuario.nombre || c.usuario.email : textoValor(c.usuario)) },
       { titulo: 'Campo', celda: (c) => etiquetaCampo(c.campo || '') },
       { titulo: 'Antes', celda: (c) => h('span', { class: 'valor-largo' }, textoCorto(valorHistorial(c.valor_anterior), 160)) },
       { titulo: 'Después', celda: (c) => h('span', { class: 'valor-largo' }, textoCorto(valorHistorial(c.valor_nuevo), 160)) },
-      { titulo: 'Motivo', celda: (c) => c.motivo || '—' },
+      { titulo: 'Procedencia', celda: (c) => ORIGEN_CAMBIO_TEXTO[c.origen] || 'Corrección manual' },
+      { titulo: 'Nota', celda: (c) => c.nota || c.motivo || '—' },
     ], [...cambios].reverse(), { vacio: 'Sin cambios: los datos son los leídos del documento.', leyenda: 'Historial de cambios' }));
   }
 
+  function cardDatosLeidos() {
+    if (!proc.size) return null;
+    return h('section', { class: 'card' }, h('h2', { class: 'card-titulo' }, 'Datos leídos del documento'),
+      h('p', { class: 'ayuda' }, 'Procedencia de cada dato: página, forma de lectura y confianza.'),
+      h('ul', { class: 'lista-datos' }, [...proc].map(([ruta, info]) => h('li', { class: 'dato', tabindex: info.bbox ? '0' : null, dataset: { campo: `leido.${ruta}` } },
+        h('span', { class: 'dato-etiqueta' }, etiquetaCampo(ruta)), h('span', { class: 'dato-valor' }, textoValor(info.valor)), chipProcedencia(info)))));
+  }
+
+  function cardOtros() {
+    const d = datos();
+    return h('section', { class: 'card' }, h('h2', { class: 'card-titulo' }, 'Tipo de factura y borrador'),
+      kv([
+        ['Tipo de factura', `${textoTipoFactura(d.tipo_factura)}${modoAvanzado() ? ` (${d.tipo_factura || 'F1'})` : ''}`],
+        ['Numeración', b.serie_detectada ? `Serie ${b.serie_detectada.codigo}${modoAvanzado() ? ` (${b.serie_detectada.patron})` : ''}` : 'Sin numeración confirmada'],
+        b.documento_id ? ['Documento de origen', enlace('Ver el documento', `#/documento/${enc(b.documento_id)}`)] : ['Documento de origen', undefined],
+      ]),
+      editable() ? h('div', { class: 'acciones' }, boton('Descartar este borrador…', descartarBorrador, { tipo: 'peligro', pequeno: true })) : null);
+  }
+
+  function lineaClasificacion() {
+    if (!b.clasificacion_automatica || !b.documento_id) return null;
+    return h('p', { class: 'linea-clasificacion' }, 'Tratado como proforma o presupuesto (aún no entregado al cliente) · ',
+      editable() ? boton('Cambiar', dialogoReclasificar, { tipo: 'enlace', pequeno: true }) : null);
+  }
+
+  function dialogoReclasificar() {
+    const opciones = [
+      ['preparatorio', 'Proforma o presupuesto (aún no entregada)', 'Se prepara para emitirla con esta aplicación.'],
+      ['emitida_propia', 'Factura que ya entregué a mi cliente', 'Solo se archiva: no se vuelve a emitir.'],
+      ['recibida', 'Factura de un proveedor', 'Se conserva como factura recibida.'],
+      ['desconocido', 'Otro documento', 'Se archiva sin más efectos.'],
+    ];
+    const form = h('form', { class: 'form' }, grupoRadios('reclas', '¿Qué es este documento?', opciones, 'preparatorio'),
+      h('p', { class: 'ayuda' }, 'Si no es una proforma, este borrador se descarta (el documento original se conserva).'));
+    const ok = boton('Guardar', async () => {
+      const c = valorRadio(form, 'reclas');
+      if (!c || c === 'preparatorio') { dlg.close(); return; }
+      await conEspera(ok, async () => {
+        try {
+          await api(`/documentos/${enc(b.documento_id)}/clasificacion`, { metodo: 'POST', json: { clasificacion: c } });
+          pendientes.clear();
+          dlg.close();
+          notificar('Clasificación cambiada. El borrador se ha descartado.', 'ok');
+          irA(`/documento/${enc(b.documento_id)}`);
+        } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+      });
+    }, { tipo: 'primario' });
+    const dlg = dialogo({ titulo: 'Cambiar la clasificación', contenido: form, acciones: [boton('Cancelar', () => dlg.close()), ok] });
+  }
+
   function renderPanel() {
-    barras.clear();
     const cambios = ultimoCambio();
+    const masPrevio = panel.querySelector('details.mas-opciones');
+    if (masPrevio) masAbierto = masPrevio.open;
+    const lineasConInc = incidencias().some((i) => seccionDe(i.campo || '') === 'lineas' && i.nivel !== 'aviso');
+    // Se abre sola si algo de lo que contiene impide emitir (p. ej. falta el domicilio de su empresa o las líneas no cuadran)
+    const seccionesMas = new Set(SECCIONES_BORRADOR.filter((s) => s.mas).map((s) => s.id));
+    const necesitaMas = incidencias().some((i) => seccionesMas.has(seccionDe(i.campo || ''))
+      && (i.nivel === 'bloqueo' || (i.nivel === 'confirmar' && !i.confirmado)));
+    const mas = h('details', { class: 'card desplegable mas-opciones', open: masAbierto || necesitaMas },
+      h('summary', null, h('h2', { class: 'card-titulo' }, 'Más opciones')),
+      h('p', { class: 'ayuda' }, 'Líneas de detalle, datos de su empresa, referencias, pago, observaciones, tipo de factura, datos leídos, historial y descartar.'),
+      SECCIONES_BORRADOR.filter((s) => s.mas).map((s) => {
+        const sec = seccionBorrador(s, cambios);
+        if (s.id !== 'lineas') return sec;
+        // Las líneas, plegadas si cuadran con la base (se despliegan si tienen alguna incidencia)
+        return h('details', { class: 'plegable-seccion', open: lineasConInc }, h('summary', null, `Líneas de detalle (${(datos().lineas || []).length})`), sec);
+      }),
+      cardOtros(), cardDatosLeidos(), cardHistorial());
+    mas.addEventListener('toggle', () => { masAbierto = mas.open; });
     anadir(vaciar(panel), [
-      cardResumen(),
-      cardIncidencias(),
+      h('div', { class: 'cabecera-revision' }, lineaClasificacion(), visorOriginal ? verOriginal : null),
+      cardRevision(),
       cardRectificativa(),
-      SECCIONES_BORRADOR.map((s) => seccionBorrador(s, cambios)),
-      cardHistorial()]);
-    for (const s of SECCIONES_BORRADOR) actualizarBarra(s.id);
+      SECCIONES_BORRADOR.filter((s) => !s.mas).map((s) => seccionBorrador(s, cambios)),
+      crearBarra(),
+      cardResumen(),
+      mas]);
+    actualizarBarra();
     actualizarCajas();
-    titulo(`Borrador ${datos().num_serie || `#${b.id}`}`);
+    titulo(`Revisar ${datos().num_serie || `borrador #${b.id}`}`);
   }
 
   async function descartarBorrador() {
-    const motivo = await pedirTexto({
-      titulo: 'Descartar el borrador',
-      explicacion: 'El borrador quedará descartado y no se podrá emitir. El documento original se conserva.',
-      etiqueta: 'Motivo (obligatorio)', textoBoton: 'Descartar borrador', peligro: true,
-    });
-    if (!motivo) return;
-    try {
-      await api(`/borradores/${enc(bid)}/descartar`, { metodo: 'POST', json: { motivo } });
-      pendientes.clear();
-      notificar('Borrador descartado.', 'ok');
-      await aplicarBorrador(null);
-    } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+    const opciones = [...MOTIVOS_DESCARTE.map((m) => [m, m]), ['otro', 'Otro motivo']];
+    const otro = entrada({ maxlength: 280, placeholder: 'Escriba el motivo (opcional)' });
+    const form = h('form', { class: 'form' }, h('p', null, 'El borrador quedará descartado y no se podrá emitir. El documento original se conserva.'),
+      grupoRadios('desc', 'Motivo', opciones, MOTIVOS_DESCARTE[0]), campo('Detalle (opcional)', otro));
+    const cancelar = boton('Cancelar', () => dlg.close());
+    const ok = boton('Descartar borrador', async () => {
+      const m = valorRadio(form, 'desc');
+      const motivo = m === 'otro' ? (otro.value.trim() || 'Otro motivo') : `${m}${otro.value.trim() ? `: ${otro.value.trim()}` : ''}`;
+      await conEspera(ok, async () => {
+        try {
+          await api(`/borradores/${enc(bid)}/descartar`, { metodo: 'POST', json: { motivo } });
+          pendientes.clear();
+          dlg.close();
+          notificar('Borrador descartado.', 'ok');
+          await aplicarBorrador(null);
+        } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+      });
+    }, { tipo: 'peligro' });
+    const dlg = dialogo({ titulo: 'Descartar el borrador', contenido: form, acciones: [cancelar, ok] });
+    cancelar.focus();
   }
 
   function abrirEmitir() {
-    if (pendientes.size) { notificar('Guarde o descarte los cambios pendientes antes de emitir.', 'warn'); return; }
+    if (pendientes.size) { notificar('Guarde o deshaga los cambios pendientes antes de emitir.', 'warn'); return; }
     if (motivosNoEmision().length) { renderAcciones(); return; }
     const entorno = app.entorno;
     const ent = ENTORNOS[entorno];
+    const real = entorno === 'produccion';
     const emp = empresaActual() || {};
     const d = datos();
     const num = String(d.num_serie || '').trim();
     const clave = nuevoUUID();   // una sola clave por diálogo: reintentar no duplica la factura
+    const version = b.version;   // versión de los datos que muestra el diálogo: el servidor solo emite esa
     let enCurso = false;
-    const chk = h('input', { type: 'checkbox', id: uid('chk') });
-    const confirmaNum = entrada({ autocomplete: 'off', spellcheck: 'false', class: 'mono' });
+    // En producción, una única confirmación fuerte: escribir el número de la factura. En el simulador y en pruebas, el
+    // resumen y el botón «Emitir» (la emisión sigue siendo una acción expresa; el foco empieza en «Cancelar»)
+    const confirmaNum = real ? entrada({ autocomplete: 'off', spellcheck: 'false', class: 'mono' }) : null;
     const error = h('div', { 'aria-live': 'assertive' });
-    const emitirBtn = boton(entorno === 'produccion' ? 'Emitir factura REAL' : 'Emitir factura', enviar, { tipo: entorno === 'produccion' ? 'peligro' : 'primario', disabled: true });
+    const textoBoton = real ? 'Emitir factura REAL' : 'Emitir';
+    const emitirBtn = boton(textoBoton, enviar, { tipo: real ? 'peligro' : 'primario', disabled: real });
     const cancelar = boton('Cancelar', () => { if (!enCurso) dlg.close(); });
-    const actualizar = () => { emitirBtn.disabled = enCurso || !chk.checked || confirmaNum.value.trim() !== num; };
-    chk.addEventListener('change', actualizar);
-    confirmaNum.addEventListener('input', actualizar);
-    confirmaNum.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (!emitirBtn.disabled) enviar(); } });
+    const actualizar = () => { emitirBtn.disabled = enCurso || (real && confirmaNum.value.trim() !== num); };
+    if (confirmaNum) {
+      confirmaNum.addEventListener('input', actualizar);
+      confirmaNum.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (!emitirBtn.disabled) enviar(); } });
+    }
 
     async function enviar() {
       if (enCurso || emitirBtn.disabled) return;
@@ -3062,74 +3565,73 @@ async function paginaBorrador(ctx) {
       emitirBtn.setAttribute('aria-busy', 'true');
       vaciar(error);
       try {
-        const r = await api(`/borradores/${enc(bid)}/emitir`, { metodo: 'POST', json: { entorno, clave_idempotencia: clave, confirmo: true } });
+        const r = await api(`/borradores/${enc(bid)}/emitir`, { metodo: 'POST', json: { entorno, clave_idempotencia: clave, confirmo: true, version_vista: version } });
         pendientes.clear();
         enCurso = false;
         dlg.close();
-        notificar(`Factura ${num} emitida en ${ent.corto}.`, 'ok');
+        notificar(`Factura ${num} emitida (${ent.corto}).`, 'ok');
         irA(`/factura/${enc(r.factura_id)}`);
       } catch (err) {
         enCurso = false;
         cancelar.disabled = false;
-        emitirBtn.textContent = entorno === 'produccion' ? 'Emitir factura REAL' : 'Emitir factura';
+        emitirBtn.textContent = textoBoton;
         emitirBtn.removeAttribute('aria-busy');
         actualizar();
         if (err.estado === 401) { dlg.close(); return; }
+        if (borradorCambiado(err)) {
+          // No se emitió nada: se cierra el diálogo (mostraba los datos anteriores) y se vuelve a pintar la revisión
+          dlg.close();
+          try { await aplicarBorrador(await leerBorrador()); } catch { /* el aviso basta */ }
+          notificar(err.message, 'warn');
+          return;
+        }
         const extra = detalleExtra(err);
         error.append(alerta('danger', h('strong', null, 'No se ha emitido. '), err.message,
-          extra ? h('ul', { class: 'lista-simple' }, extra.map((i) => h('li', null, `${i.codigo ? `${i.codigo}: ` : ''}${i.mensaje || ''}`))) : null,
+          extra ? h('ul', { class: 'lista-simple' }, extra.map((i) => h('li', null, textoIncidencia(i)))) : null,
           err.estado === 0 ? h('p', null, 'Si se perdió la conexión, puede reintentar con seguridad: la misma solicitud nunca genera dos facturas.') : null));
       }
     }
 
     const ret = d.retencion && d.retencion.importe;
     const dlg = dialogo({
-      titulo: 'Confirmar la emisión de la factura',
+      titulo: real ? 'Emitir una factura REAL' : `Emitir la factura ${num}`,
       clase: `dialogo-emitir dialogo-${ent.tono}`,
       contenido: [
         h('div', { class: 'emitir-entorno' }, badgeEntorno(entorno, true)),
-        entorno === 'produccion'
-          ? alerta('danger', h('strong', null, 'Facturación REAL. '), 'La factura tendrá plenos efectos fiscales y su registro se remitirá a la AEAT.')
+        real
+          ? alerta('danger', h('strong', null, 'Facturación REAL. '), 'La factura tendrá plenos efectos fiscales y se enviará a Hacienda (AEAT) automáticamente.')
           : entorno === 'pruebas'
-            ? alerta('warn', h('strong', null, 'Entorno de pruebas de la AEAT. '), 'Sin efectos fiscales; el registro se envía al servicio de preproducción.')
-            : alerta('info', h('strong', null, 'Simulador local. '), 'No se envía nada a la AEAT; la factura no tiene efectos fiscales.'),
+            ? alerta('warn', h('strong', null, 'Entorno de pruebas de la AEAT. '), 'Sin efectos fiscales; se envía al servicio de pruebas.')
+            : alerta('info', h('strong', null, 'Modo práctica. '), 'No se envía nada a Hacienda; la factura no tiene efectos fiscales.'),
         kv([
-          ['Entorno', ent.corto],
           ['Empresa emisora', `${emp.razon_social || (d.emisor || {}).nombre || '—'} · NIF ${emp.nif || (d.emisor || {}).nif || '—'}`],
-          ['Número de factura', h('strong', { class: 'mono' }, num || '—')],
-          ['Fecha de expedición', `${fmtFecha(hoyISO())} (hoy)`],
           ['Cliente', `${(d.destinatario || {}).nombre || '—'} · NIF ${(d.destinatario || {}).nif || '—'}`],
+          ['Número', h('strong', { class: 'mono' }, num || '—')],
+          ['Fecha de la factura', `${fmtFecha(hoyISO())} (hoy)`],
+          d.fecha_operacion ? ['Fecha de la operación', fmtFecha(d.fecha_operacion)] : ['Fecha de la operación', undefined],
           ['Base imponible', fmtImporte(d.base_imponible)],
-          ['Cuota de IVA', fmtImporte(d.cuota_total)],
-          ['Importe total', h('strong', null, fmtImporte(d.importe_total))],
+          ['IVA', fmtImporte(d.cuota_total)],
+          ['Total', h('strong', null, fmtImporte(d.importe_total))],
           ret ? ['Retención', fmtImporte(d.retencion.importe)] : ['Retención', undefined],
           ret ? ['Total a pagar', fmtImporte(d.total_a_pagar)] : ['Total a pagar', undefined],
         ]),
-        h('p', null, 'Al confirmar se expedirá la factura y se generará su ', h('strong', null, 'registro de facturación (alta)'),
-          ', con huella encadenada al registro anterior, que se remitirá ', h('strong', null, ent.destino), '. ',
-          'Se generará el PDF definitivo con el código QR. La factura expedida no se puede modificar ni borrar: '
-          + 'cualquier corrección posterior requerirá una factura rectificativa o, si no debió expedirse, la anulación de su registro.'),
-        h('div', { class: 'casilla casilla-destacada' }, chk, h('label', { for: chk.id },
-          `He revisado los datos y confirmo la emisión de la factura ${num} en el entorno ${ent.corto}.`)),
-        campo(`Para confirmar, escriba el número de la factura: ${num}`, confirmaNum),
+        h('p', null, 'Una vez emitida, la factura no se puede modificar ni borrar: para corregirla se emite una factura rectificativa. '
+          + 'Se generará el PDF definitivo con el código QR.'),
+        real ? campo(`Para confirmar, escriba el número de la factura: ${num}`, confirmaNum) : null,
         error,
       ],
       acciones: [cancelar, emitirBtn],
     });
     dlg.addEventListener('cancel', (e) => { if (enCurso) e.preventDefault(); });
-    chk.focus();
+    (real ? confirmaNum : cancelar).focus();
   }
 
   // --- Montaje
   const meta = [pillDe(ESTADO_BORRADOR, b.estado)];
-  if (b.documento_id) meta.push(enlace('Documento de origen', `#/documento/${enc(b.documento_id)}`));
   if (b.factura_id) meta.push(enlace('Factura emitida', `#/factura/${enc(b.factura_id)}`));
   const ok = montar(ctx,
-    cabeceraPagina(`Borrador ${datos().num_serie || `#${b.id}`}`, {
-      volver: ['#/importar', 'Documentos'], meta,
-      acciones: b.documento_id ? [enlace('Descargar original (PDF)', `/api/documentos/${enc(b.documento_id)}/original`, { tipo: 'secundario', descarga: true })] : [],
-    }),
-    h('div', { class: 'split' }, h('div', { class: 'col-visor' }, tabs.el), panel));
+    cabeceraPagina(`Revisar y emitir ${datos().num_serie || `(borrador #${b.id})`}`, { volver: ['#/importar', 'Documentos'], meta }),
+    h('div', { class: 'split' }, colVisor, panel));
   if (!ok) return;
   renderPanel();
 
@@ -3147,11 +3649,10 @@ async function paginaBorrador(ctx) {
  * Facturas expedidas (historial)
  * ====================================================================================== */
 
-function pillEnvio(estado, texto) {
-  const p = pillDe(ESTADO_ENVIO, estado);
-  if (texto && ESTADO_ENVIO[estado] && texto !== ESTADO_ENVIO[estado][0]) return h('span', null, p, h('span', { class: 'muted bloque' }, texto));
-  if (!ESTADO_ENVIO[estado] && texto) return pill(texto, 'neutral');
-  return p;
+/** Estado del envío en lenguaje llano; con el entorno, «Aceptada en la simulación» o «Aceptada por Hacienda». */
+function pillEnvio(estado, texto, entorno) {
+  if (!ESTADO_ENVIO[estado]) return pill(texto || (estado ? humanizar(estado) : '—'), 'neutral');
+  return pill(textoEstadoEnvio(estado, entorno), ESTADO_ENVIO[estado][1]);
 }
 
 async function paginaFacturas(ctx) {
@@ -3164,7 +3665,7 @@ async function paginaFacturas(ctx) {
     desde: entrada({ type: 'date', value: q.get('desde') || '' }),
     hasta: entrada({ type: 'date', value: q.get('hasta') || '' }),
     estado: selector([['', 'Todos'], ...['emitida', 'anulada', 'rectificada'].map((k) => [k, ESTADO_FACTURA[k][0]])], q.get('estado') || ''),
-    envio: selector([['', 'Todos'], ...Object.entries(ESTADO_ENVIO).map(([k, v]) => [k, v[0]])], q.get('envio') || ''),
+    envio: selector([['', 'Todos'], ...Object.entries(ESTADO_ENVIO).map(([k, v]) => [k, v[0]])], q.get('envio') || ''),   // «Aceptada» (en el entorno elegido)
     entorno: selector([['todos', 'Todos'], ...Object.keys(ENTORNOS).map((k) => [k, ENTORNOS[k].corto])], q.get('entorno') || app.entorno),
   };
   const seleccion = new Set();
@@ -3217,8 +3718,8 @@ async function paginaFacturas(ctx) {
         { titulo: 'Cliente', celda: (f) => [h('span', { class: 'bloque' }, f.destinatario_nombre || '—'), h('span', { class: 'muted mono bloque' }, f.destinatario_nif || '')] },
         { titulo: 'Importe', clase: 'num', celda: (f) => fmtImporte(f.importe_total) },
         { titulo: 'Estado de la factura', celda: (f) => pillDe(ESTADO_FACTURA, f.estado) },
-        { titulo: 'Estado de la comunicación', celda: (f) => pillEnvio(f.estado_envio, f.estado_envio_texto) },
-        { titulo: 'Entorno', celda: (f) => badgeEntorno(f.entorno) },
+        { titulo: 'Envío a Hacienda', celda: (f) => pillEnvio(f.estado_envio, f.estado_envio_texto, f.entorno) },
+        { titulo: 'Dónde', celda: (f) => badgeEntorno(f.entorno) },
         { titulo: 'PDF', celda: (f) => enlace('PDF', `/api/facturas/${enc(f.id)}/pdf`, { descarga: true, 'aria-label': `Descargar el PDF de la factura ${f.num_serie}` }) },
       ];
       vaciar(listado).append(h('p', { class: 'muted' }, `${facturas.length} factura(s)`),
@@ -3230,7 +3731,7 @@ async function paginaFacturas(ctx) {
 
   const form = h('form', { class: 'filtros filtros-facturas', role: 'search' },
     campo('Número', filtros.q), campo('Cliente', filtros.cliente), campo('Desde', filtros.desde), campo('Hasta', filtros.hasta),
-    campo('Estado de la factura', filtros.estado), campo('Estado de la comunicación', filtros.envio), campo('Entorno', filtros.entorno),
+    campo('Estado de la factura', filtros.estado), campo('Envío a Hacienda', filtros.envio), campo('Dónde', filtros.entorno),
     h('div', { class: 'filtros-acciones' }, h('button', { type: 'submit', class: 'btn btn-primario' }, 'Buscar'),
       boton('Limpiar', () => {
         ['q', 'cliente', 'desde', 'hasta', 'estado', 'envio'].forEach((k) => { filtros[k].value = ''; });
@@ -3250,6 +3751,14 @@ async function paginaFacturas(ctx) {
 /* ======================================================================================
  * Factura: PDF, registros, envíos y acciones
  * ====================================================================================== */
+
+/** Tipo de factura en palabras (sin «F1» ni «R4» a la vista). */
+function textoTipoFactura(t) {
+  if (!t || t === 'F1') return 'Factura completa';
+  if (t === 'F2') return 'Factura simplificada';
+  if (/^R[1-5]$/.test(t)) return 'Factura rectificativa (corrige otra)';
+  return String(t);
+}
 
 function tipoAccion(s) {
   const t = String(s || '');
@@ -3301,13 +3810,20 @@ async function paginaFactura(ctx) {
   };
   const vistos = new Set();
   const botones = [];
-  for (const a of acciones) {
+  const visibles = new Set();   // tipos de acción con botón para este papel (la ayuda solo explica esos)
+  const avanzado = modoAvanzado();
+  // Cada papel ve solo lo que puede hacer: corregir y reintentar (emisor), anular y subsanar (administrador)
+  const ROL_ACCION = { rectificativa: 'emisor', reintentar: 'emisor', anular: 'admin', subsanar: 'admin' };
+  // «Reintentar envío» de un envío que solo está esperando su turno confunde: en el modo básico, solo si hay algo que reintentar
+  const esperando = (x) => x.tipo === 'reintentar' && !avanzado && ultimo && ultimo.estado_envio === 'pendiente';
+  for (const a of acciones.filter((x) => tieneRol(ROL_ACCION[x.tipo] || 'admin') && !esperando(x))) {
     const reg = a.tipo === 'subsanar' || a.tipo === 'reintentar' ? registroPara(a.tipo, a) : null;
     const clave = `${a.tipo}:${reg ? reg.id : ''}`;
     if (vistos.has(clave)) continue;
     vistos.add(clave);
+    if (a.tipo !== 'subsanar' && a.tipo !== 'reintentar' || reg) visibles.add(a.tipo);
     const sufijo = reg && registros.length > 1 ? ` (registro ${reg.secuencia ?? reg.id})` : '';
-    if (a.tipo === 'rectificativa') botones.push(boton('Emitir rectificativa…', () => dialogoRectificativa(f, num)));
+    if (a.tipo === 'rectificativa') botones.push(boton('Corregir esta factura…', () => dialogoRectificativa(f, num)));
     if (a.tipo === 'anular') botones.push(boton('Anular registro…', () => dialogoAnular(f, num, recargar), { tipo: 'peligro' }));
     if (a.tipo === 'subsanar' && reg) botones.push(boton(`Subsanar registro…${sufijo}`, () => dialogoSubsanar(reg, num, recargar)));
     if (a.tipo === 'reintentar' && reg) {
@@ -3331,10 +3847,10 @@ async function paginaFactura(ctx) {
     }
   }
 
-  const xmlUltimo = ultimo ? enlace('XML del registro', `/api/registros/${enc(ultimo.id)}/xml`, { tipo: 'secundario', descarga: true }) : null;
+  const xmlUltimo = ultimo && avanzado ? enlace('XML del registro', `/api/registros/${enc(ultimo.id)}/xml`, { tipo: 'secundario', descarga: true }) : null;
   const cabecera = cabeceraPagina(`Factura ${num}`, {
     volver: ['#/facturas', 'Facturas'],
-    meta: [pillDe(ESTADO_FACTURA, f.estado), badgeEntorno(f.entorno), ultimo ? pillEnvio(ultimo.estado_envio) : null],
+    meta: [pillDe(ESTADO_FACTURA, f.estado), badgeEntorno(f.entorno), ultimo ? pillEnvio(ultimo.estado_envio, null, f.entorno) : null],
     acciones: [enlace('Descargar PDF', `/api/facturas/${enc(fid)}/pdf`, { tipo: 'primario', descarga: true }), xmlUltimo],
   });
 
@@ -3343,7 +3859,7 @@ async function paginaFactura(ctx) {
   const rect = d.rectificativa && typeof d.rectificativa === 'object' ? d.rectificativa : null;
   const cardResumen = tarjeta('Datos de la factura', kv([
     ['Número', h('span', { class: 'mono' }, num)],
-    ['Tipo', f.tipo_factura || d.tipo_factura || '—'],
+    ['Tipo', textoTipoFactura(f.tipo_factura || d.tipo_factura)],
     ['Fecha de expedición', fmtFecha(f.fecha_expedicion || d.fecha_expedicion)],
     d.fecha_operacion ? ['Fecha de operación', fmtFecha(d.fecha_operacion)] : ['Fecha de operación', undefined],
     ['Emisor', `${emi.nombre || '—'} · NIF ${emi.nif || f.emisor_nif || '—'}`],
@@ -3353,29 +3869,42 @@ async function paginaFactura(ctx) {
     ['Importe total', h('strong', null, fmtImporte(f.importe_total || d.importe_total))],
     d.retencion && d.retencion.importe ? ['Total a pagar', fmtImporte(d.total_a_pagar)] : ['Total a pagar', undefined],
     rect ? ['Rectifica a', f.rectifica_factura_id ? enlace(rect.num_serie_rectificada || `Factura ${f.rectifica_factura_id}`, `#/factura/${enc(f.rectifica_factura_id)}`) : (rect.num_serie_rectificada || '—')] : ['Rectifica a', undefined],
-    ['Entorno', badgeEntorno(f.entorno)],
-    ['Expedida el', fmtFechaHora(f.creada_en)],
-    f.borrador_id ? ['Borrador de origen', enlace(`Borrador #${f.borrador_id}`, `#/borrador/${enc(f.borrador_id)}`)] : ['Borrador de origen', undefined],
+    ['Dónde', badgeEntorno(f.entorno)],
+    ['Emitida el', fmtFechaHora(f.creada_en)],
+    f.borrador_id ? ['Revisión de origen', enlace('Ver la revisión', `#/borrador/${enc(f.borrador_id)}`)] : ['Revisión de origen', undefined],
   ]));
 
   const copiar = boton('Copiar', async () => {
     try { await navigator.clipboard.writeText(urlQr); notificar('URL copiada.', 'ok'); } catch { notificar('No se pudo copiar; seleccione el texto manualmente.', 'warn'); }
   }, { pequeno: true });
+  // En el modo práctica el QR no se puede cotejar en la sede de la AEAT: no se ofrece el enlace
+  const simulada = f.entorno === 'simulador';
   const cardEstado = tarjeta('Estado',
     h('div', { class: 'estados-doble' },
       h('div', null, h('p', { class: 'etiqueta-estado' }, 'Estado de la factura'), pillDe(ESTADO_FACTURA, f.estado)),
-      h('div', null, h('p', { class: 'etiqueta-estado' }, 'Estado de la comunicación'),
-        ultimo ? pillEnvio(ultimo.estado_envio) : pill('Sin registros', 'neutral'),
-        ultimo && ultimo.codigo_error ? h('p', { class: 'error-oficial' }, h('code', null, ultimo.codigo_error), ' ', ultimo.descripcion_error || '') : null)),
-    urlQr ? h('div', { class: 'qr-url' },
-      h('p', { class: 'etiqueta-estado' }, 'URL del código QR (servicio de cotejo de la AEAT)'),
+      h('div', null, h('p', { class: 'etiqueta-estado' }, simulada ? 'Envío (modo práctica)' : 'Envío a Hacienda'),
+        ultimo ? pillEnvio(ultimo.estado_envio, null, f.entorno) : pill('Sin registros', 'neutral'),
+        ultimo && (ultimo.codigo_error || ultimo.descripcion_error) ? h('p', { class: 'error-oficial' },
+          avanzado && ultimo.codigo_error ? [h('code', null, ultimo.codigo_error), ' '] : null, ultimo.descripcion_error || 'Hacienda indicó un error en el envío.') : null)),
+    urlQr && simulada ? h('p', { class: 'ayuda' }, 'Factura del modo práctica: su código QR es de prueba y no se puede comprobar en la sede de Hacienda.') : null,
+    urlQr && (avanzado || !simulada) ? h('div', { class: 'qr-url' },
+      h('p', { class: 'etiqueta-estado' }, simulada ? 'URL del código QR (de prueba)' : 'URL del código QR (servicio de cotejo de la AEAT)'),
       h('code', { class: 'valor-largo' }, urlQr), ' ', copiar,
-      /^https:\/\//i.test(urlQr) ? h('p', null, h('a', { href: urlQr, target: '_blank', rel: 'noopener noreferrer' }, 'Abrir el cotejo en la sede de la AEAT')) : null) : null,
-    alerta('info', r.nota || NOTA_ACEPTACION));
+      !simulada && /^https:\/\//i.test(urlQr) ? h('p', null, h('a', { href: urlQr, target: '_blank', rel: 'noopener noreferrer' }, 'Abrir el cotejo en la sede de la AEAT')) : null) : null,
+    simulada ? null : alerta('info', r.nota || NOTA_ACEPTACION));
 
   const cardAcciones = tarjeta('Acciones',
-    botones.length ? h('div', { class: 'acciones' }, botones) : h('p', { class: 'muted' }, 'No hay acciones disponibles para esta factura en su estado actual.'),
-    h('p', { class: 'ayuda' }, 'La factura expedida es inmutable. Las correcciones se hacen con una factura rectificativa; la anulación del registro solo procede si la factura no debió expedirse.'));
+    botones.length ? h('div', { class: 'acciones' }, botones)
+      : h('p', { class: 'muted' }, acciones.length && !puedeEmitirRol()
+        ? `Su papel en esta empresa («${NOMBRE_ROL[rolActual()] || rolActual()}») solo permite consultar las facturas.`
+        : 'No hay acciones disponibles para esta factura en su estado actual.'),
+    // La ayuda explica solo los botones que este papel tiene (a un lector no se le explica cómo usar lo que no ve)
+    visibles.has('rectificativa') || visibles.has('anular')
+      ? h('p', { class: 'ayuda' }, 'La factura emitida no se puede modificar'
+        + (visibles.has('rectificativa') ? ': para corregirla se emite una factura rectificativa («Corregir esta factura»)' : '')
+        + (visibles.has('anular') ? `${visibles.has('rectificativa') ? '; la' : '. La'} anulación del registro solo procede si la factura no debió emitirse` : '')
+        + '.')
+      : null);
 
   const cardRegistros = tarjeta('Registros de facturación', tabla([
     {
@@ -3425,37 +3954,41 @@ async function paginaFactura(ctx) {
         ? kv(Object.entries(r.verificacion).map(([k, v]) => [ETIQUETAS_VERIFICACION[k] || humanizar(k), renderGenerico(v)]))
         : renderGenerico(r.verificacion)) : null;
 
+  // Huellas, CSV, XML, envíos y verificación del PDF: detalle técnico (modo avanzado)
+  const tecnico = avanzado ? [cardRegistros, cardEnvios, cardVerif]
+    : [h('p', { class: 'ayuda' }, 'Registros de facturación (huella, CSV y XML), envíos y verificación del PDF: ', botonModoAvanzado())];
   montar(ctx, cabecera,
     h('div', { class: 'split' },
       h('div', { class: 'col-visor' }, h('h2', { class: 'sr-only' }, 'Páginas del PDF definitivo'), visor.el),
-      h('div', { class: 'col-panel' }, cardEstado, cardAcciones, cardResumen, cardRegistros, cardEnvios, cardVerif)));
+      h('div', { class: 'col-panel' }, cardEstado, cardAcciones, cardResumen, tecnico)));
 }
 
 function dialogoRectificativa(f, num) {
-  const motivo = h('textarea', { rows: 3, maxlength: 400, required: true });
+  // «Corregir esta factura»: rectificativa por diferencias, R4 por defecto; el número sale de la serie de rectificativas
+  const motivo = h('textarea', { rows: 3, maxlength: 400, required: true, placeholder: 'p. ej. «Error en el precio de la línea 2»' });
+  const r1 = h('input', { type: 'checkbox', id: uid('chk') });
   const error = h('div', { 'aria-live': 'assertive' });
   const form = h('form', { class: 'form' },
-    h('p', null, `Se creará un borrador de factura rectificativa por diferencias de la factura ${num}. Deberá revisarlo y emitirlo como cualquier otra factura.`),
-    grupoRadios('tipo_rect', 'Tipo de rectificativa', [
-      ['R1', 'R1 — Error fundado en derecho y causas del art. 80.Uno, Dos y Seis de la Ley del IVA', 'Por ejemplo: devolución de envases, descuentos posteriores, resolución de la operación, impago en concurso.'],
-      ['R4', 'R4 — Resto de causas', 'Por ejemplo: errores en los datos o en los importes de la factura.'],
-    ], 'R4'),
-    campo('Motivo de la rectificación (obligatorio)', motivo),
+    h('p', null, `Se preparará una factura rectificativa de la ${num} para corregirla. Podrá revisarla antes de emitirla, como cualquier otra factura; `
+      + 'la factura original no se modifica.'),
+    campo('¿Qué hay que corregir? (se imprime en la factura)', motivo),
+    h('details', { class: 'ayuda-plegable' }, h('summary', null, 'Casos especiales del artículo 80 de la Ley del IVA'),
+      h('div', { class: 'casilla' }, r1, h('label', { for: r1.id }, 'Es un caso del art. 80.Uno, Dos o Seis de la Ley del IVA (devolución de envases, descuentos posteriores, '
+        + 'resolución de la operación, impago en concurso…): rectificativa R1. Si no está seguro, déjelo sin marcar (R4, resto de causas).'))),
     error);
-  const crear = boton('Crear borrador de rectificativa', async () => {
+  const crear = boton('Preparar la corrección', async () => {
     vaciar(error);
-    const tipo = valorRadio(form, 'tipo_rect');
-    if (!motivo.value.trim()) { error.append(alerta('danger', 'Indique el motivo.')); motivo.focus(); return; }
+    if (!motivo.value.trim()) { error.append(alerta('danger', 'Indique qué hay que corregir.')); motivo.focus(); return; }
     await conEspera(crear, async () => {
       try {
-        const r = await api(`/facturas/${enc(f.id)}/rectificativa`, { metodo: 'POST', json: { tipo, motivo: motivo.value.trim() } });
+        const r = await api(`/facturas/${enc(f.id)}/rectificativa`, { metodo: 'POST', json: { tipo: r1.checked ? 'R1' : 'R4', motivo: motivo.value.trim() } });
         dlg.close();
-        notificar('Borrador de rectificativa creado.', 'ok');
+        notificar('Corrección preparada: revísela y emítala.', 'ok');
         irA(`/borrador/${enc(r.borrador_id)}`);
       } catch (err) { if (err.estado !== 401) error.append(alerta('danger', err.message)); }
-    }, 'Creando…');
+    }, 'Preparando…');
   }, { tipo: 'primario' });
-  const dlg = dialogo({ titulo: `Rectificar la factura ${num}`, contenido: form, acciones: [boton('Cancelar', () => dlg.close()), crear] });
+  const dlg = dialogo({ titulo: `Corregir la factura ${num}`, contenido: form, acciones: [boton('Cancelar', () => dlg.close()), crear] });
   motivo.focus();
 }
 
@@ -3520,7 +4053,8 @@ function dialogoSubsanar(reg, num, recargar) {
     contenido: [
       h('p', null, 'La subsanación genera un nuevo registro de alta (Subsanación = S) con los mismos datos aprobados de la factura, para corregir un registro rechazado '
         + 'o aceptado con errores. No modifica la factura expedida.'),
-      reg.codigo_error ? alerta('warn', h('strong', null, 'Error comunicado: '), h('code', null, reg.codigo_error), ' ', reg.descripcion_error || '') : null,
+      reg.codigo_error || reg.descripcion_error ? alerta('warn', h('strong', null, 'Error comunicado: '),
+        modoAvanzado() && reg.codigo_error ? [h('code', null, reg.codigo_error), ' '] : null, reg.descripcion_error || '') : null,
       campo('Motivo (obligatorio)', motivo),
       h('div', { class: 'casilla casilla-destacada' }, chk, h('label', { for: chk.id }, 'Confirmo que quiero generar y remitir un registro de subsanación.')),
       error,
@@ -3541,7 +4075,8 @@ function cuantos(v) {
 }
 
 async function paginaRemision(ctx) {
-  titulo('Remisión');
+  titulo('Envíos a Hacienda');
+  const avanzado = modoAvanzado();
   const eid = app.empresaId;
   let entorno = ENTORNOS[ctx.query.get('entorno')] ? ctx.query.get('entorno') : app.entorno;
   const selEnt = selector(Object.keys(ENTORNOS).map((k) => [k, ENTORNOS[k].corto]), entorno);
@@ -3568,23 +4103,24 @@ async function paginaRemision(ctx) {
       tic();
       const porEstado = r.por_estado && typeof r.por_estado === 'object' ? Object.entries(r.por_estado) : [];
       const stat = (etq, valor, extra) => h('div', { class: 'stat' }, h('span', { class: 'stat-etq' }, etq), h('span', { class: 'stat-valor' }, valor), extra || null);
+      // Lo que exige actuar (bloqueados, sin confirmar, incidencia) se ve siempre; el detalle técnico, en el modo avanzado
       const listas = [];
-      for (const [k, etq] of [['pendientes', 'Registros pendientes'], ['sin_confirmar', 'Registros sin confirmar'], ['bloqueados', 'Registros bloqueados']]) {
+      for (const [k, etq] of [['pendientes', 'Facturas pendientes de enviar'], ['sin_confirmar', 'Facturas sin confirmar'], ['bloqueados', 'Facturas bloqueadas: requieren su acción']]) {
         if (Array.isArray(r[k]) && r[k].length) {
           listas.push(h('h3', null, etq), tabla([
             { titulo: 'Factura', celda: (x) => (x.factura_id ? enlace(x.num_serie || `#${x.factura_id}`, `#/factura/${enc(x.factura_id)}`) : (x.num_serie || '—')) },
-            { titulo: 'Secuencia', clase: 'num', celda: (x) => x.secuencia ?? '—' },
-            { titulo: 'Estado', celda: (x) => pillEnvio(x.estado_envio) },
-            { titulo: 'Intentos', clase: 'num', celda: (x) => x.intentos ?? 0 },
+            avanzado ? { titulo: 'Secuencia', clase: 'num', celda: (x) => x.secuencia ?? '—' } : null,
+            { titulo: 'Estado', celda: (x) => pillEnvio(x.estado_envio, null, entorno) },
+            avanzado ? { titulo: 'Intentos', clase: 'num', celda: (x) => x.intentos ?? 0 } : null,
             { titulo: 'Siguiente intento', celda: (x) => fmtFechaHora(x.siguiente_intento_en) },
-          ], r[k]));
+          ].filter(Boolean), r[k]));
         }
       }
       anadir(vaciar(estado), [
         h('div', { class: 'stats' },
-          stat('Próximo envío permitido', proximo ? fmtFechaHora(proximo) : 'Sin restricción', cuentaAtras),
-          stat('Tiempo de espera entre envíos', cf.tiempo_espera !== undefined && cf.tiempo_espera !== null ? `${cf.tiempo_espera} s` : '—',
-            h('span', { class: 'muted' }, 'Indicado por la AEAT en cada respuesta')),
+          avanzado ? stat('Próximo envío permitido', proximo ? fmtFechaHora(proximo) : 'Sin restricción', cuentaAtras) : null,
+          avanzado ? stat('Tiempo de espera entre envíos', cf.tiempo_espera !== undefined && cf.tiempo_espera !== null ? `${cf.tiempo_espera} s` : '—',
+            h('span', { class: 'muted' }, 'Indicado por la AEAT en cada respuesta')) : null,
           stat('Pendientes', String(cuantos(r.pendientes))),
           stat('Sin confirmar', String(cuantos(r.sin_confirmar))),
           stat('Bloqueados', String(cuantos(r.bloqueados)), cuantos(r.bloqueados) ? h('span', { class: 'muted' }, 'Requieren acción') : null)),
@@ -3592,21 +4128,23 @@ async function paginaRemision(ctx) {
         cf.incidencia_desde ? alerta('warn', h('strong', null, 'Remisión en incidencia '), `desde ${fmtFechaHora(cf.incidencia_desde)}. Los registros se conservan y se reintentarán automáticamente.`) : null,
         cf.bloqueo_hasta && new Date(cf.bloqueo_hasta) > new Date() ? alerta('info', `Envío en curso (${cf.bloqueado_por || 'remitente'}) hasta ${fmtFechaHora(cf.bloqueo_hasta)}.`) : null,
         cuantos(r.sin_confirmar) ? alerta('warn', 'Hay registros cuyo resultado no se ha podido confirmar (sin respuesta). Se consultará o reenviará su estado; no se generan duplicados.') : null,
-        porEstado.length ? h('div', { class: 'por-estado' }, h('span', { class: 'muted' }, 'Registros por estado: '),
-          porEstado.map(([k, n]) => h('span', { class: 'por-estado-item' }, pillDe(ESTADO_ENVIO, k), ` ${n}`))) : null,
+        avanzado && porEstado.length ? h('div', { class: 'por-estado' }, h('span', { class: 'muted' }, 'Registros por estado: '),
+          porEstado.map(([k, n]) => h('span', { class: 'por-estado-item' }, pill(textoEstadoEnvio(k, entorno), (ESTADO_ENVIO[k] || [])[1] || 'neutral'), ` ${n}`))) : null,
         listas,
         h('h3', null, 'Últimos envíos'),
         tabla([
           { titulo: 'Inicio', celda: (e) => fmtFechaHora(e.iniciado_en) },
-          { titulo: 'Fin', celda: (e) => fmtFechaHora(e.finalizado_en) },
-          { titulo: 'Registros', clase: 'num', celda: (e) => e.num_registros ?? '—' },
+          avanzado ? { titulo: 'Fin', celda: (e) => fmtFechaHora(e.finalizado_en) } : null,
+          { titulo: 'Facturas', clase: 'num', celda: (e) => e.num_registros ?? '—' },
           { titulo: 'Resultado', celda: (e) => (e.resultado ? pillDe(RESULTADO_ENVIO, e.resultado) : pill('En curso', 'info')) },
-          { titulo: 'HTTP', clase: 'num', celda: (e) => e.http_estado ?? '—' },
-          { titulo: 'CSV', celda: (e) => (e.csv ? h('span', { class: 'mono valor-largo' }, e.csv) : '—') },
-          { titulo: 'Espera (s)', clase: 'num', celda: (e) => e.tiempo_espera ?? '—' },
-          { titulo: 'Destino', celda: (e) => h('span', { class: 'valor-largo muted' }, e.destino || '—') },
-          { titulo: 'Error', celda: (e) => (e.error ? h('span', { class: 'valor-largo' }, e.error) : '—') },
-        ], comoLista(r.ultimos_envios), { vacio: 'Todavía no se ha realizado ningún envío en este entorno.', leyenda: 'Últimos envíos' }),
+          ...(avanzado ? [
+            { titulo: 'HTTP', clase: 'num', celda: (e) => e.http_estado ?? '—' },
+            { titulo: 'CSV', celda: (e) => (e.csv ? h('span', { class: 'mono valor-largo' }, e.csv) : '—') },
+            { titulo: 'Espera (s)', clase: 'num', celda: (e) => e.tiempo_espera ?? '—' },
+            { titulo: 'Destino', celda: (e) => h('span', { class: 'valor-largo muted' }, e.destino || '—') },
+            { titulo: 'Error', celda: (e) => (e.error ? h('span', { class: 'valor-largo' }, e.error) : '—') }] : []),
+        ].filter(Boolean), comoLista(r.ultimos_envios).slice(0, avanzado ? undefined : 10),
+        { vacio: entorno === 'simulador' ? 'Todavía no se ha enviado nada al simulador.' : 'Todavía no se ha enviado nada en este entorno.', leyenda: 'Últimos envíos' }),
         h('p', { class: 'muted' }, `Actualizado: ${ultimaCarga.toLocaleTimeString('es-ES', { timeZone: ZONA_HORARIA })}. Se actualiza cada 15 s.`)]);
       renderSimulador(r);
     } catch (err) {
@@ -3616,7 +4154,8 @@ async function paginaRemision(ctx) {
 
   let simuladorPintado = false;
   function renderSimulador(r) {
-    if (entorno !== 'simulador') { vaciar(simulador); simuladorPintado = false; return; }
+    // Los modos de fallo del simulador son una herramienta de prueba: solo en el modo avanzado
+    if (entorno !== 'simulador' || !avanzado) { vaciar(simulador); simuladorPintado = false; return; }
     const modoActual = (r.simulador && r.simulador.modo) || (r.modo_simulador && (r.modo_simulador.modo || r.modo_simulador)) || null;
     const veces = r.simulador && Number(r.simulador.veces);
     const textoModo = modoActual
@@ -3687,14 +4226,18 @@ async function paginaRemision(ctx) {
   const reloj = window.setInterval(tic, 1000);
   ctx.alSalir(() => { window.clearInterval(intervalo); window.clearInterval(reloj); });
 
+  const varios = entornosHabilitados().length > 1 || entorno !== 'simulador';
   montar(ctx,
-    cabeceraPagina('Remisión de registros', { acciones: [boton('Actualizar', () => cargar())] }),
-    tarjeta(null, h('div', { class: 'fila-entorno' }, campo('Entorno', selEnt), badge),
-      h('p', { class: 'ayuda' }, 'Los registros se remiten automáticamente respetando el control de flujo de la AEAT (tiempo de espera entre envíos y máximo de registros por envío).')),
-    tarjeta('Estado de la cola', estado),
-    tarjeta('Verificación independiente de la cadena',
+    cabeceraPagina('Envíos a Hacienda', { acciones: [boton('Actualizar', () => cargar())] }),
+    tarjeta(null, h('div', { class: 'fila-entorno' }, varios || avanzado ? campo('Entorno', selEnt) : null, badge),
+      h('p', { class: 'ayuda' }, entorno === 'simulador'
+        ? 'En el modo práctica las facturas se envían a un simulador: nada llega a Hacienda. Los envíos son automáticos.'
+        : 'Las facturas se envían solas a Hacienda, respetando los tiempos de espera que indica la AEAT.')),
+    tarjeta('Estado de los envíos', estado),
+    avanzado ? tarjeta('Verificación independiente de la cadena',
       h('p', null, 'Recalcula las huellas de todos los registros del entorno y comprueba su encadenamiento, la secuencia y la coherencia con el XML.'),
-      h('div', { class: 'acciones' }, auditar), resultadoAuditoria),
+      h('div', { class: 'acciones' }, auditar), resultadoAuditoria)
+      : h('p', { class: 'ayuda' }, 'Detalle técnico de los envíos y verificación de la cadena de registros: ', botonModoAvanzado()),
     simulador);
   cargar();
 }
@@ -3773,6 +4316,7 @@ function valorDetalle(k, x, o = {}) {
   }
   if (/^fecha/.test(k) && typeof x === 'string' && /^\d{2}-\d{2}-\d{4}$/.test(x)) return x.replace(/-/g, '/');   // fecha en el formato de la AEAT (solo en datos de fecha: un número de factura puede tener esa forma)
   if (k === 'entorno' && ENTORNOS[x]) return ENTORNOS[x].corto;
+  if (k === 'entorno' && x === 'todos') return 'Pruebas y producción';
   const mapa = VALORES_DETALLE[GRUPO_VALOR[k] || k];
   if (mapa && typeof x === 'string' && Object.prototype.hasOwnProperty.call(mapa, x)) return mapa[x];
   if (k === 'evidencia' && typeof x === 'string') {
@@ -3790,7 +4334,7 @@ function valorDetalle(k, x, o = {}) {
 function fmtHoraPeninsular(v) {
   const d = new Date(`${String(v).slice(0, 16)}:00Z`);
   if (Number.isNaN(d.getTime())) return String(v);
-  return d.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short', timeZone: 'UTC' });
+  return d.toLocaleString('es-ES', { ...FORMATO_FECHA_HORA, timeZone: 'UTC' });
 }
 
 /** Servicio al que se refiere un detalle de actividad (el simulador local o la AEAT), por su entorno o su servicio. */
@@ -3817,6 +4361,40 @@ function detalleActividad(v) {
 
 const objetoActividad = (o) => OBJETOS_ACTIVIDAD[o] || humanizar(o);
 
+/** Acciones del registro de actividad en palabras (sin códigos internos como «factura.expedida»). */
+const ACCIONES_ACTIVIDAD = {
+  'aeat.consulta': 'Consulta a Hacienda', 'borrador.confirmaciones': 'Datos comprobados', 'borrador.creado': 'Revisión creada',
+  'borrador.descartado': 'Revisión descartada', 'cadena.ancla_usada': 'Cadena: punto de partida usado',
+  'cadena.atrasada_aeat': 'Cadena atrasada respecto a Hacienda', 'cadena.atrasada_resuelta': 'Cadena al día',
+  'cadena.reanudada_aeat': 'Cadena reanudada', 'certificado.activado': 'Certificado de nuevo en uso',
+  'certificado.asignacion_retirada': 'Certificado retirado de la empresa', 'certificado.asignado': 'Certificado asignado',
+  'certificado.cargado': 'Certificado cargado', 'certificado.uso': 'Certificado usado',
+  'certificado_usuario.cargado': 'Certificado propio cargado', 'certificado_usuario.eliminado': 'Certificado propio eliminado',
+  'certificado_usuario.recargado': 'Certificado propio recargado', 'copia.diario_reproducido': 'Copia restaurada con el diario',
+  'copia.restaurada_sin_diario': 'Copia restaurada sin diario', 'diario.error': 'Error del diario de recuperación',
+  'diario.lineas_invalidas': 'Diario: líneas no válidas', 'documento.bloqueo': 'Marca de referencia',
+  'documento.clasificado': 'Documento clasificado', 'documento.importado': 'Documento subido',
+  'empresa.ambito_confirmado': 'Tres preguntas respondidas', 'empresa.configuracion': 'Configuración cambiada',
+  'empresa.creada': 'Empresa dada de alta', 'empresa.nif_no_ascii': 'NIF con caracteres no válidos',
+  'empresa.nif_verificacion_restaurada': 'Verificación del NIF restaurada', 'empresa.nif_verificacion_retirada': 'Verificación del NIF retirada',
+  'empresa.nif_verificado': 'NIF verificado', 'error.interno': 'Error interno', 'factura.anulada': 'Factura anulada',
+  'factura.expedida': 'Factura emitida', 'http.request': 'Petición', 'invitacion.creada': 'Invitación creada',
+  'invitacion.revocada': 'Invitación anulada', 'legitimacion.declarada': 'Legitimación declarada',
+  'legitimacion.evidencia_perdida': 'Legitimación: evidencia perdida', 'legitimacion.revocada': 'Legitimación revocada',
+  'miembro.alta': 'Persona añadida', 'miembro.baja': 'Persona quitada', 'plataforma.ajuste': 'Ajuste de la plataforma',
+  'plataforma.nif_no_ascii': 'NIF con caracteres no válidos', 'produccion.autorizada': 'Primer envío real autorizado',
+  'productor.confirmado': 'Productor confirmado', 'rectificativa.borrador': 'Corrección preparada',
+  'registro.conciliado_aeat': 'Registro conciliado', 'registro.reintento_manual': 'Envío reintentado',
+  'registro.subsanacion': 'Registro subsanado', 'remision.error': 'Error en un envío',
+  'remision.incidencia_cerrada': 'Incidencia de comunicación cerrada', 'serie.confirmada': 'Numeración confirmada',
+  'serie.contador_avanzado': 'Contador avanzado', 'serie.creada': 'Numeración creada', 'sesion.inicio': 'Inicio de sesión',
+  'simulador.modo': 'Modo del simulador', 'usuario.activado': 'Cuenta activada', 'usuario.clave_cambiada': 'Contraseña cambiada',
+  'usuario.clave_temporal': 'Contraseña temporal', 'usuario.clave_temporal_sustituida': 'Contraseña temporal sustituida',
+  'usuario.declaracion_autorizacion': 'Declaración de autorización', 'usuario.desactivado': 'Cuenta desactivada',
+  'usuario.registro': 'Cuenta creada',
+};
+const accionActividad = (a) => (a ? ACCIONES_ACTIVIDAD[a] || humanizar(String(a).replace(/[._]/g, ' ')) : '—');
+
 async function paginaActividad(ctx) {
   titulo('Actividad');
   const r = await api(`/empresas/${enc(app.empresaId)}/actividad`);
@@ -3828,11 +4406,11 @@ async function paginaActividad(ctx) {
   const usuarioDe = (e) => e.usuario_nombre || e.usuario_email || (e.usuario && typeof e.usuario === 'object' ? e.usuario.nombre || e.usuario.email : e.usuario) || (e.usuario_id ? `Usuario ${e.usuario_id}` : 'Sistema');
   function pintar() {
     const t = filtro.value.trim().toLowerCase();
-    const lista = t ? eventos.filter((e) => [e.accion, usuarioDe(e), e.objeto && objetoActividad(e.objeto), detalleActividad(e.detalle)].join(' ').toLowerCase().includes(t)) : eventos;
+    const lista = t ? eventos.filter((e) => [e.accion, accionActividad(e.accion), usuarioDe(e), e.objeto && objetoActividad(e.objeto), detalleActividad(e.detalle)].join(' ').toLowerCase().includes(t)) : eventos;
     vaciar(cont).append(h('p', { class: 'muted', 'aria-live': 'polite' }, `${lista.length} de ${eventos.length} evento(s)`), tabla([
       { titulo: 'Fecha', celda: (e) => fmtFechaHora(e.en) },
       { titulo: 'Usuario', celda: (e) => usuarioDe(e) },
-      { titulo: 'Acción', celda: (e) => h('code', null, e.accion || '—') },
+      { titulo: 'Acción', celda: (e) => h('span', { title: e.accion || '' }, accionActividad(e.accion)) },
       {
         titulo: 'Objeto',
         celda: (e) => (e.objeto && e.objeto_id && rutaObjeto[e.objeto]
@@ -3846,6 +4424,7 @@ async function paginaActividad(ctx) {
   pintar();
   montar(ctx,
     cabeceraPagina('Registro de actividad', { meta: [h('span', null, 'Registro de solo adición: las entradas no se modifican ni se borran.')] }),
+    avisoPantallaAvanzada(),
     tarjeta(null, h('div', { class: 'filtros' }, campo('Filtrar', filtro)), cont));
 }
 
@@ -3933,6 +4512,15 @@ async function iniciar() {
   if ('ResizeObserver' in window) new ResizeObserver(fijarAlto).observe(cab);
   window.addEventListener('resize', fijarAlto);
   window.addEventListener('hashchange', () => enrutar());
+  // «Más» se cierra al pulsar fuera de él o con Escape
+  document.addEventListener('click', (e) => {
+    const mas = document.querySelector('.nav-mas[open]');
+    if (mas && !mas.contains(e.target)) mas.open = false;
+  });
+  document.addEventListener('keydown', (e) => {
+    const mas = document.querySelector('.nav-mas[open]');
+    if (e.key === 'Escape' && mas) { mas.open = false; mas.querySelector('summary').focus(); }
+  });
   try {
     app.estado = await api('/estado', { sinRedireccion: true });
   } catch (err) {
@@ -3978,9 +4566,9 @@ function rutaInicioMU() {
 }
 
 function enlacesCuentaMU() {
+  // «Dar de alta otra empresa» está en «Más» y en «Mi cuenta»; aquí, solo lo de la cuenta
   return [
     esSuperadmin() ? enlace('Plataforma', '#/plataforma', { tipo: 'enlace', pequeno: true }) : null,
-    enlace('Nueva empresa', '#/empresa-nueva', { tipo: 'enlace', pequeno: true }),
     enlace('Mi cuenta', '#/cuenta', { tipo: 'enlace', pequeno: true }),
   ];
 }
@@ -3992,7 +4580,7 @@ function vistaSinEmpresaMU() {
       h('p', null, 'Para empezar, dé de alta la empresa (obligado tributario) cuyas facturas va a expedir. Quedará como su administrador.'),
       h('p', null, 'Si su empresa ya usa la aplicación, pida a uno de sus administradores que le invite.'),
       h('div', { class: 'acciones' },
-        enlace('Dar de alta una empresa', '#/empresa-nueva', { tipo: 'primario' }),
+        enlace('Dar de alta su empresa', '#/empresa-nueva', { tipo: 'primario' }),
         esSuperadmin() ? enlace('Panel de la plataforma', '#/plataforma', { tipo: 'secundario' }) : null)),
   ];
 }
@@ -4099,18 +4687,148 @@ async function paginaCuenta(ctx) {
         { titulo: 'Acciones', celda: (e) => botonQuitarMiembroMU(e, { id: u.id, email: u.email }, () => enrutar({ forzar: true })) },
       ], empresas, { vacio: 'Todavía no tiene acceso a ninguna empresa.', leyenda: 'Empresas' }),
       h('div', { class: 'acciones' }, enlace('Dar de alta una empresa', '#/empresa-nueva', { tipo: 'secundario' }))),
+    tarjetaPreferenciasMU(),
     tarjeta('Cambiar la contraseña', formClaveMU({
       alCambiar: async () => notificar('Contraseña cambiada. Sus demás sesiones se han cerrado.', 'ok'),
     })));
 }
 
+/** «Modo avanzado»: preferencia de la propia cuenta (desactivado por defecto). Solo cambia lo que se ve. */
+function tarjetaPreferenciasMU() {
+  const chk = h('input', { type: 'checkbox', id: uid('chk'), checked: modoAvanzado() });
+  chk.addEventListener('change', async () => {
+    chk.disabled = true;
+    try { await cambiarModoAvanzado(chk.checked); } finally { chk.disabled = false; }
+  });
+  return tarjeta('Preferencias',
+    h('div', { class: 'casilla' }, chk, h('label', { for: chk.id }, 'Modo avanzado: mostrar las herramientas técnicas')),
+    h('p', { class: 'ayuda' }, 'Editor del patrón de la numeración, «Probar un número», contadores por año y «Avanzar contador…»; detalle de los '
+      + 'envíos y verificación de la cadena; consulta a Hacienda y conciliación; actividad; huella, CSV y XML de cada registro; '
+      + 'códigos de incidencia; «Mis certificados» y la legitimación completa. No cambia sus permisos en ninguna empresa.'));
+}
+
+/** Tras crear la empresa: se elige, se relee la sesión y se sigue con los primeros pasos. */
+async function empresaCreadaMU(nueva, mensaje) {
+  if (nueva && nueva.id) guardarLS(LS_EMPRESA, String(nueva.id));
+  aplicarSesion(await api('/yo'));
+  notificar(mensaje, 'ok');
+  irA('/primeros-pasos');
+}
+
+/** «Empiece con el certificado de su empresa»: vista previa (sin guardar nada en claro) y «Crear la empresa con estos datos». */
+function tarjetaAltaCertificadoMU() {
+  const archivo = h('input', { type: 'file', accept: '.p12,.pfx,application/x-pkcs12', required: true });
+  const clave = entrada({ type: 'password', required: true, autocomplete: 'off' });
+  const ver = h('button', { type: 'submit', class: 'btn btn-primario' }, 'Ver los datos del certificado');
+  const zona = h('div', { 'aria-live': 'polite' });
+  const form = h('form', { class: 'form' },
+    h('div', { class: 'fila-campos' },
+      campo('Certificado de su empresa (.p12 o .pfx)', archivo),
+      campo('Contraseña del certificado', clave, { ayuda: 'Solo se envía al servidor, que guarda el certificado cifrado. Nunca se vuelve a mostrar.' })),
+    h('div', { class: 'acciones' }, ver), zona);
+  const pintar = (r) => {
+    vaciar(zona);
+    const e = r.empresa;
+    const crear = boton('Crear la empresa con estos datos', async () => {
+      await conEspera(crear, async () => {
+        try {
+          await empresaCreadaMU(await api('/alta/empresa', { metodo: 'POST', json: { previa: r.previa } }),
+            'Empresa creada con los datos de su certificado.');
+        } catch (err) { if (err.estado !== 401) zona.append(alerta('danger', err.message)); }
+      }, 'Creando…');
+    }, { tipo: 'primario' });
+    anadir(zona, [
+      e ? alerta(r.puede_crear ? 'ok' : 'warn', h('p', null, h('strong', null, `Empresa: ${e.razon_social} · NIF ${e.nif}`),
+        `; válido hasta ${fmtDia(r.valido_hasta)}.`),
+      r.representante ? h('p', null, `Certificado de representante: ${r.representante.nombre || '—'} (NIF ${r.representante.nif || '—'}).`) : null) : null,
+      (r.avisos || []).map((a) => alerta('warn', a)),
+      r.puede_crear ? h('p', { class: 'ayuda' }, r.nota) : null,
+      r.puede_crear ? h('div', { class: 'acciones' }, crear) : null]);
+    if (r.puede_crear) crear.focus();
+  };
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    vaciar(zona);
+    if (!archivo.files || !archivo.files[0]) { notificar('Seleccione el archivo del certificado.', 'danger'); return; }
+    const fd = new FormData();
+    fd.append('archivo', archivo.files[0], archivo.files[0].name);
+    fd.append('clave', clave.value);
+    clave.value = '';   // la contraseña no se queda en la página
+    await conEspera(ver, async () => {
+      try { pintar(await api('/alta/certificados', { metodo: 'POST', form: fd })); } catch (err) { if (err.estado !== 401) zona.append(alerta('danger', err.message)); }
+    }, 'Leyendo…');
+  });
+  return tarjeta('Empiece con el certificado de su empresa',
+    h('p', null, 'La aplicación lee del certificado el NIF y el nombre de su empresa: no tendrá que escribirlos. Servirá también para enviar a Hacienda.'),
+    form);
+}
+
+/** «Probar sin certificado»: la empresa se propone a partir del emisor de una factura suya; solo simulador. */
+function tarjetaAltaPracticaMU() {
+  const archivo = h('input', { type: 'file', accept: 'application/pdf,.pdf', required: true });
+  const leer = h('button', { type: 'submit', class: 'btn btn-secundario' }, 'Leer los datos de la factura');
+  const zona = h('div', { 'aria-live': 'polite' });
+  const form = h('form', { class: 'form' }, campo('Una factura o proforma de su empresa (PDF)', archivo),
+    h('div', { class: 'acciones' }, leer), zona);
+  const pintar = (r, fichero) => {
+    vaciar(zona);
+    const em = r.emisor || {};
+    const nif = entrada({ value: em.nif || '', required: true, maxlength: 20, class: 'mono mayus', spellcheck: 'false', autocomplete: 'off' });
+    const razon = entrada({ value: em.nombre || '', required: true, maxlength: 120 });
+    const dom = h('textarea', { rows: 2, maxlength: 300, required: true });
+    dom.value = em.domicilio || '';
+    const crear = h('button', { type: 'submit', class: 'btn btn-primario' }, 'Crear la empresa de práctica');
+    const error = h('div', { 'aria-live': 'assertive' });
+    const f2 = h('form', { class: 'form' },
+      h('p', null, 'Datos leídos del emisor de la factura. Compruebe que son los de SU empresa y corríjalos si hace falta:'),
+      h('div', { class: 'fila-campos' }, campo('NIF', nif), campo('Razón social', razon)),
+      campo('Domicilio fiscal', dom),
+      (r.avisos || []).map((a) => alerta('warn', a)),
+      error, h('div', { class: 'acciones' }, crear));
+    f2.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      vaciar(error);
+      await conEspera(crear, async () => {
+        try {
+          const nueva = await api('/empresas', {
+            metodo: 'POST',
+            json: { nif: nif.value.trim().toUpperCase(), razon_social: razon.value.trim(), domicilio: dom.value.trim(), modo: 'practica' },
+          });
+          // La misma factura queda en «Documentos» para revisarla y emitirla en el simulador
+          const fd = new FormData();
+          fd.append('archivos', fichero, fichero.name);
+          try { await api(`/empresas/${enc(nueva.id)}/documentos`, { metodo: 'POST', form: fd }); } catch { /* puede subirla después */ }
+          await empresaCreadaMU(nueva, 'Empresa creada en el modo práctica: no se envía nada a Hacienda.');
+        } catch (err) { if (err.estado !== 401) error.append(alerta('danger', err.message)); }
+      }, 'Creando…');
+    });
+    zona.append(f2);
+    (em.nif ? crear : nif).focus();
+  };
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    vaciar(zona);
+    const fichero = archivo.files && archivo.files[0];
+    if (!fichero) { notificar('Seleccione la factura en PDF.', 'danger'); return; }
+    const fd = new FormData();
+    fd.append('archivo', fichero, fichero.name);
+    await conEspera(leer, async () => {
+      try { pintar(await api('/alta/practica/documentos', { metodo: 'POST', form: fd }), fichero); } catch (err) { if (err.estado !== 401) zona.append(alerta('danger', err.message)); }
+    }, 'Leyendo la factura…');
+  });
+  return tarjeta('Probar sin certificado (no se envía a Hacienda)',
+    h('p', null, 'Suba una factura o proforma suya: la aplicación propone los datos de su empresa a partir de ella. Podrá practicar en el '
+      + 'simulador; el certificado se le pedirá cuando quiera pasar a pruebas o a producción.'),
+    form);
+}
+
 async function paginaEmpresaNueva(ctx) {
-  titulo('Nueva empresa');
+  titulo('Dar de alta su empresa');
   const nif = entrada({ required: true, maxlength: 20, class: 'mono mayus', spellcheck: 'false', autocomplete: 'off' });
   const razon = entrada({ required: true, maxlength: 120, autocomplete: 'organization' });
   const dom = h('textarea', { rows: 2, maxlength: 300, required: true });
   const error = h('div', { 'aria-live': 'assertive' });
-  const enviar = h('button', { type: 'submit', class: 'btn btn-primario' }, 'Dar de alta la empresa');
+  const enviar = h('button', { type: 'submit', class: 'btn btn-secundario' }, 'Dar de alta la empresa');
   const form = h('form', { class: 'form' },
     h('div', { class: 'fila-campos' }, campo('NIF', nif), campo('Razón social', razon)),
     campo('Domicilio fiscal', dom),
@@ -4122,22 +4840,124 @@ async function paginaEmpresaNueva(ctx) {
     await conEspera(enviar, async () => {
       try {
         const nueva = await api('/empresas', {
-          metodo: 'POST', json: { nif: nif.value.trim().toUpperCase(), razon_social: razon.value.trim(), domicilio: dom.value.trim() },
+          metodo: 'POST', json: { nif: nif.value.trim().toUpperCase(), razon_social: razon.value.trim(), domicilio: dom.value.trim(), modo: 'manual' },
         });
-        if (nueva && nueva.id) guardarLS(LS_EMPRESA, String(nueva.id));
-        aplicarSesion(await api('/yo'));
-        notificar('Empresa dada de alta. Complete su configuración.', 'ok');
-        irA('/configuracion/empresa');
+        await empresaCreadaMU(nueva, 'Empresa dada de alta.');
       } catch (err) { if (err.estado !== 401) error.append(alerta('danger', err.message)); }
     }, 'Creando…');
   });
   montar(ctx,
-    cabeceraPagina('Dar de alta una empresa'),
-    tarjeta(null,
-      h('p', null, 'Usted quedará como administrador de la empresa y podrá invitar a otras personas. Nadie más verá sus documentos ni sus facturas.'),
-      h('p', { class: 'ayuda' }, 'Cada empresa (NIF) solo puede darse de alta una vez en la aplicación: si ya lo está, pida a uno de sus administradores que le invite.'),
-      form));
-  nif.focus();
+    cabeceraPagina('Dar de alta su empresa', {
+      meta: [h('span', null, 'Usted quedará como administrador y podrá invitar a otras personas. Nadie más verá sus documentos ni sus facturas.')],
+    }),
+    tarjetaAltaCertificadoMU(),
+    tarjetaAltaPracticaMU(),
+    h('details', { class: 'avanzado' }, h('summary', null, 'Prefiero escribir los datos de la empresa'),
+      tarjeta(null,
+        h('p', { class: 'ayuda' }, 'Cada empresa (NIF) solo puede darse de alta una vez en la aplicación: si ya lo está, pida a uno de sus administradores que le invite.'),
+        form)));
+}
+
+/**
+ * Primeros pasos tras dar de alta la empresa, en una sola pantalla: 1) subir una factura o proforma reciente, 2) confirmar
+ * el domicilio fiscal (propuesto a partir de esa factura), 3) las tres preguntas con la declaración, 4) revisar y emitir.
+ */
+async function paginaPrimerosPasos(ctx) {
+  titulo('Primeros pasos');
+  const eid = app.empresaId;
+  const [emp, docs, prop, rSeries] = await Promise.all([api(`/empresas/${enc(eid)}`), api(`/empresas/${enc(eid)}/documentos`),
+    api(`/empresas/${enc(eid)}/datos-propuestos`).catch(() => ({})), api(`/empresas/${enc(eid)}/series`).catch(() => [])]);
+  if (!ctx.vigente()) return;
+  actualizarAvisos(emp);
+  const recargar = () => enrutar({ forzar: true });
+  const lista = comoLista(docs, 'documentos');
+  const hecho = (b) => (b ? pill('Hecho', 'ok') : null);
+  const dis = !esAdmin();
+
+  // 1. Una factura o proforma reciente: se sube al elegir el archivo (sin otro botón)
+  const archivo = h('input', { type: 'file', accept: 'application/pdf,.pdf', id: uid('f'), disabled: !puedeEmitirRol() });
+  const estadoSubida = h('div', { 'aria-live': 'polite' });
+  archivo.addEventListener('change', async () => {
+    if (!archivo.files || !archivo.files[0]) return;
+    const fd = new FormData();
+    fd.append('archivos', archivo.files[0], archivo.files[0].name);
+    vaciar(estadoSubida).append(cargando('Leyendo la factura…'));
+    try {
+      const r = comoLista(await api(`/empresas/${enc(eid)}/documentos`, { metodo: 'POST', form: fd }))[0] || {};
+      if (r.estado === 'error') vaciar(estadoSubida).append(alerta('danger', r.error || 'No se pudo leer el PDF.'));
+      else recargar();
+    } catch (err) { if (err.estado !== 401) vaciar(estadoSubida).append(alerta('danger', err.message)); }
+  });
+  const paso1 = tarjeta('1. Suba una factura o proforma reciente',
+    lista.length
+      ? [h('p', null, hecho(true), ` Ha subido «${lista[0].nombre_archivo}».`), campo('Subir otra (opcional)', archivo)]
+      : [h('p', null, 'De ella se leen el domicilio de su empresa y la numeración de sus facturas.'),
+        campo('Factura o proforma (PDF)', archivo)],
+    estadoSubida);
+
+  // 2. Datos de la empresa: el domicilio se propone a partir de la factura y el usuario lo confirma
+  const tipo = (TIPOS_CONTRIBUYENTE.find(([k]) => k === emp.tipo_contribuyente) || [])[1];
+  const dom = h('textarea', { rows: 2, maxlength: 300, disabled: dis });
+  dom.value = emp.domicilio || prop.domicilio || '';
+  const guardarDom = boton(emp.domicilio ? 'Guardar el domicilio' : (prop.domicilio ? 'Usar este domicilio' : 'Guardar el domicilio'), async () => {
+    if (!dom.value.trim()) { notificar('Escriba el domicilio fiscal.', 'danger'); dom.focus(); return; }
+    await conEspera(guardarDom, async () => {
+      try {
+        await api(`/empresas/${enc(eid)}`, { metodo: 'PUT', json: { domicilio: dom.value.trim() } });
+        notificar('Domicilio guardado.', 'ok');
+        recargar();
+      } catch (err) { if (err.estado !== 401) notificar(err.message, 'danger'); }
+    }, 'Guardando…');
+  }, { tipo: 'primario', disabled: dis });
+  const paso2 = tarjeta('2. Datos de su empresa',
+    kv([['Empresa', `${emp.razon_social} · NIF ${emp.nif}`], ['Tipo de contribuyente', tipo ? `${tipo} (deducido del NIF)` : undefined]]),
+    emp.domicilio
+      ? h('p', null, hecho(true), ` Domicilio fiscal: ${emp.domicilio}`)
+      : [prop.domicilio ? h('p', null, `Domicilio leído en su factura «${prop.documento ? prop.documento.nombre : ''}». Compruébelo:`)
+        : h('p', null, lista.length ? 'No se ha podido leer el domicilio de su empresa en la factura: escríbalo.' : 'Escriba el domicilio fiscal o suba antes una factura para leerlo.'),
+      campo('Domicilio fiscal', dom), h('div', { class: 'acciones' }, guardarDom)]);
+
+  // 3. Tres preguntas con la declaración
+  const paso3 = tarjeta('3. Tres preguntas sobre su empresa',
+    tresPreguntasHechas(emp)
+      ? h('p', null, hecho(true), ' Respondidas. ', enlace('Cambiar las respuestas', '#/configuracion/ambito'))
+      : [emp.ambito_confirmado_en && !(parseJSON(emp.ambito) || {}).puede_emitir
+        ? alerta('danger', 'Con las respuestas dadas, la aplicación no puede expedir las facturas de su empresa.') : null,
+      emp.domicilio ? null : h('p', { class: 'ayuda' }, 'Si el domicilio que guarde está en el País Vasco o en Navarra, se le volverán a hacer.'),
+      formTresPreguntas(emp, { alGuardar: recargar })]);
+
+  // 4. Revisar y emitir: la pantalla única de revisión (carril A). Si la factura subida ya se trata como proforma, se va
+  // directamente a su revisión; si hay que preguntar qué es, al documento. La numeración se propone desde esa factura y se
+  // confirma allí con una pregunta (no hace falta crearla en «Configuración»).
+  const listo = tresPreguntasHechas(emp) && emp.domicilio;
+  const doc = lista[0];
+  const serie = comoLista(rSeries).find((x) => x.entorno === app.entorno && x.tipo !== 'rectificativa' && x.confirmada_en);
+  let accion4;
+  if (!doc) accion4 = h('p', { class: 'muted' }, 'Suba primero una factura o proforma (paso 1).');
+  else if (doc.factura_id) {
+    accion4 = [h('p', null, hecho(true), ' Primera factura emitida. '),
+      h('div', { class: 'acciones' }, enlace('Ver la factura', `#/factura/${enc(doc.factura_id)}`, { tipo: 'secundario' }),
+        enlace('Subir la siguiente', '#/importar', { tipo: 'primario' }))];
+  } else {
+    const destino = doc.borrador_id ? `#/borrador/${enc(doc.borrador_id)}` : `#/documento/${enc(doc.id)}`;
+    accion4 = h('div', { class: 'acciones' }, enlace(`Revisar y emitir «${doc.nombre_archivo}»`, destino, { tipo: listo ? 'primario' : 'secundario' }));
+  }
+  const paso4 = tarjeta('4. Revise y emita su primera factura',
+    accion4,
+    h('p', { class: 'ayuda' }, serie
+      ? ['Numeración: ', h('span', { class: 'mono' }, textoNumeracion(serie)), ' ', hecho(true)]
+      : 'La numeración de sus facturas se propone a partir de esta factura: la confirmará en la misma pantalla de revisión.'),
+    h('p', { class: 'ayuda' }, emp.modo_practica || app.entorno === 'simulador'
+      ? 'En el modo práctica nada se envía a Hacienda: puede practicar sin miedo.'
+      : 'Revise los datos antes de emitir: la factura emitida no se puede modificar.'));
+
+  montar(ctx,
+    cabeceraPagina('Primeros pasos', {
+      meta: [h('span', null, `${emp.razon_social} · NIF ${emp.nif}`), emp.modo_practica ? pillModoPractica() : null],
+      acciones: [enlace('Ir a Configuración', '#/configuracion', { tipo: 'secundario', pequeno: true })],
+    }),
+    avisosConfiguracion(emp),
+    paso1, paso2, paso3, paso4);
 }
 
 async function paginaRegistro(ctx) {
@@ -4174,10 +4994,11 @@ async function paginaRegistro(ctx) {
         h('div', { class: 'acciones' }, enlace('Ir a la aplicación', `#${rutaInicioMU()}`, { tipo: 'primario' }))));
       return;
     }
+    const declaro = casillaDeclaracionMU(inv.empresa);
     const aceptar = boton('Aceptar la invitación', async () => {
       await conEspera(aceptar, async () => {
         try {
-          const r = await api('/invitaciones/aceptar', { metodo: 'POST', json: { token } });
+          const r = await api('/invitaciones/aceptar', { metodo: 'POST', json: { token, declaro: declaro.valor() } });
           if (r && r.empresa_id) guardarLS(LS_EMPRESA, String(r.empresa_id));
           aplicarSesion(await api('/yo'));
           notificar(`Ya tiene acceso a ${inv.empresa}.`, 'ok');
@@ -4189,6 +5010,7 @@ async function paginaRegistro(ctx) {
       alerta('info', textoInv),
       h('p', null, `Ha iniciado sesión como ${app.usuario.email}. Solo puede aceptarla la cuenta del correo al que se dirigió`
         + `${inv.email ? ` (${inv.email})` : ''}.`),
+      declaro.nodo,
       h('div', { class: 'acciones' }, aceptar, enlace('Ahora no', `#${rutaInicioMU()}`, { tipo: 'secundario' }))));
     return;
   }
@@ -4213,11 +5035,13 @@ async function paginaRegistro(ctx) {
   const clave2 = entrada({ type: 'password', required: true, minlength: 10, maxlength: 256, autocomplete: 'new-password' });
   const error = h('div', { 'aria-live': 'assertive' });
   const enviar = h('button', { type: 'submit', class: 'btn btn-primario' }, 'Crear la cuenta');
+  const declaro = inv && inv.empresa ? casillaDeclaracionMU(inv.empresa) : null;
   const form = h('form', { class: 'form' },
     campo('Nombre y apellidos', nombre),
     campo('Correo electrónico', email, { ayuda: inv && inv.email ? 'La invitación es para este correo.' : 'Será su usuario para entrar.' }),
     campo('Contraseña', clave, { ayuda: 'Al menos 10 caracteres.' }),
     campo('Repita la contraseña', clave2),
+    declaro ? declaro.nodo : null,
     error,
     h('div', { class: 'acciones' }, enviar));
   form.addEventListener('submit', async (e) => {
@@ -4229,7 +5053,10 @@ async function paginaRegistro(ctx) {
       try {
         const r = await api('/registro', {
           metodo: 'POST', sinRedireccion: true,
-          json: { email: email.value.trim(), nombre: nombre.value.trim(), clave: clave.value, invitacion: token || undefined },
+          json: {
+            email: email.value.trim(), nombre: nombre.value.trim(), clave: clave.value, invitacion: token || undefined,
+            declaro: declaro ? declaro.valor() : undefined,
+          },
         });
         clave.value = ''; clave2.value = '';
         aplicarSesion(r);
@@ -4249,6 +5076,16 @@ async function paginaRegistro(ctx) {
   nombre.focus();
 }
 
+/** Casilla (opcional) para declarar, al aceptar una invitación, que se está autorizado a actuar por la empresa. */
+function casillaDeclaracionMU(empresa) {
+  const chk = h('input', { type: 'checkbox', id: uid('chk') });
+  return {
+    nodo: h('div', { class: 'casilla' }, chk, h('label', { for: chk.id },
+      `Declaro estar autorizado a actuar en nombre de ${empresa || 'la empresa'} (puede hacerlo después en Configuración).`)),
+    valor: () => chk.checked,
+  };
+}
+
 /** Enlace de una invitación recién creada: se muestra una sola vez (el servidor solo guarda su resumen). */
 function cajaEnlaceMU(inv) {
   const url = `${window.location.origin}${inv.enlace}`;
@@ -4265,7 +5102,8 @@ function cajaEnlaceMU(inv) {
   return alerta('ok',
     h('p', null, h('strong', null, 'Invitación creada. '),
       `Envíe este enlace a ${inv.email || 'la persona invitada'} por un canal de confianza. Es de un solo uso, caduca el `
-      + `${fmtFechaHora(inv.expira_en)} y no volverá a mostrarse.`),
+      + `${fmtFechaHora(inv.expira_en)} y no volverá a mostrarse.`
+      + (inv.crea_cuenta === false ? '' : ' Con él crea su cuenta (o entra con la que ya tenga) y queda en la empresa: no necesita nada más.')),
     campoUrl,
     inv.crea_cuenta === false ? h('p', { class: 'ayuda' }, 'El registro está cerrado: este enlace solo sirve a quien ya tenga '
       + 'cuenta en la plataforma. Si la persona aún no la tiene, necesitará además una invitación del operador de la plataforma.') : null,
@@ -4351,8 +5189,8 @@ function pasoUsuariosMU(emp, recargar) {
   return [
     tarjeta(`Quién tiene acceso a ${emp.razon_social || 'esta empresa'}`, listas),
     tarjeta('Invitar a una persona',
-      h('p', null, 'La persona invitada crea su cuenta (o entra con la que ya tiene) desde el enlace y elige su propia contraseña: '
-        + 'nadie más la conoce. Hasta que acepte, no tiene acceso a la empresa.'),
+      h('p', null, 'La persona invitada crea su cuenta (o entra con la que ya tiene) desde un único enlace y elige su propia contraseña: '
+        + 'nadie más la conoce. Hasta que lo use, no tiene acceso a la empresa.'),
       dis ? alerta('info', 'Solo un administrador puede invitar.') : null,
       form),
     tarjeta('Otras empresas',
@@ -4492,8 +5330,8 @@ function ajusteInvitacionesEmpresaMU(p, recargar) {
   return [
     h('h3', null, 'Invitaciones de las empresas'),
     h('p', null, activo
-      ? 'Permitido: las invitaciones de los administradores de empresas también crean cuentas nuevas.'
-      : 'Solo cuentas existentes: las invitaciones de los administradores de empresas no crean cuentas nuevas (las suyas, como operador, sí).'),
+      ? 'Permitido (recomendado): la invitación de un administrador de empresa crea la cuenta de la persona invitada con un solo enlace, con los cupos de abajo.'
+      : 'Solo cuentas existentes: las invitaciones de los administradores de empresas no crean cuentas nuevas (las suyas, como operador, sí); la persona necesita además una invitación suya.'),
     h('p', { class: 'ayuda' }, `Cupos de los usuarios: ${c.invitaciones_pendientes_empresa ?? '—'} invitaciones pendientes por empresa, `
       + `${c.invitaciones_dia_usuario ?? '—'} invitaciones y ${c.empresas_dia_usuario ?? '—'} altas de empresas por persona y día.`),
     h('div', { class: 'acciones' }, btn),
@@ -4643,7 +5481,7 @@ function tablaActividadPlataformaMU(eventos, leyenda, vacio) {
   return tabla([
     { titulo: 'Fecha', celda: (e) => fmtFechaHora(e.en) },
     { titulo: 'Usuario', celda: (e) => e.usuario || 'Sistema' },
-    { titulo: 'Acción', celda: (e) => h('code', null, e.accion || '—') },
+    { titulo: 'Acción', celda: (e) => h('span', { title: e.accion || '' }, accionActividad(e.accion)) },
     { titulo: 'Detalle', celda: (e) => h('span', { class: 'valor-largo' }, detalleActividad(e.detalle) || '—') },
   ], eventos.slice(0, 100), { vacio, leyenda });
 }
@@ -4797,6 +5635,7 @@ async function paginaMisCertificados(ctx) {
   ], lista, { vacio: 'Todavía no ha cargado ningún certificado.', leyenda: 'Mis certificados' });
   montar(ctx,
     cabeceraPagina('Mis certificados', { meta: [h('span', null, 'Cárguelos una vez y úselos en las empresas que administra.')] }),
+    avisoPantallaAvanzada(),
     tarjeta('Cómo funciona',
       h('ul', { class: 'lista-simple' },
         h('li', null, 'Solo usted ve, asigna, retira y elimina sus certificados. Los administradores de cada empresa ven cuál se usa, pero no pueden descargarlo ni usarlo en otra empresa.'),
@@ -4897,13 +5736,18 @@ function tarjetaCertificadoEnUsoC(certs, recargar) {
   api(`/empresas/${enc(eid)}/certificados/seleccion`).then((sel) => {
     if (String(eid) !== String(app.empresaId)) return;
     vaciar(cont);
+    // El mismo certificado de la empresa para pruebas y producción se muestra una sola vez
+    const mismo = (a, b) => a && b && a.origen === b.origen && a.certificado_id === b.certificado_id && a.asignacion_id === b.asignacion_id;
+    const juntos = sel && mismo(sel.pruebas, sel.produccion) && sel.pruebas.entorno === 'todos';
     for (const ent of ENTORNOS_CERT_C) {
+      if (juntos && ent === 'produccion') continue;
       const c = sel && sel[ent];
-      const inactivos = (certs || []).filter((x) => x.origen === 'empresa' && x.entorno === ent && !x.en_uso && x.legitimacion && x.legitimacion.vigente);
+      const inactivos = (certs || []).filter((x) => x.origen === 'empresa' && (x.entorno === ent || x.entorno === 'todos') && !x.en_uso && x.legitimacion && x.legitimacion.vigente);
       if (!c && ent === 'simulador') continue;
       const noUtilizable = c && c.legitimacion && c.legitimacion.utilizable === false;
       cont.append(h('div', { class: 'card-seccion' },
-        h('h3', null, badgeEntorno(ent)),
+        h('h3', null, juntos && ent === 'pruebas' ? entornoCertC('todos') : badgeEntorno(ent)),
+        c && c.aviso_caducidad ? alerta('warn', c.aviso_caducidad) : null,
         c ? kv([
           ['Origen', origenCertC(c)],
           ['Titular', titularCertC(c)],
@@ -5058,7 +5902,7 @@ function tarjetaLegitimacionC(recargar) {
       } catch (err) { if (err.estado !== 401) resultado.append(alerta('danger', err.message)); }
     }, 'Guardando…');
   });
-  return tarjeta('Legitimación de un tercero (representante)',
+  return tarjeta('Uso el certificado de mi gestoría o asesor',
     h('p', null, 'Si el certificado no es de la empresa ni de su representante legal (por ejemplo, el de su gestoría), solo puede usarse si su titular '
       + 'está apoderado ante la AEAT o es colaborador social. Declárelo para ese titular aportando la evidencia: los envíos llevarán Cabecera/Representante.'),
     form, h('h3', null, 'Legitimaciones declaradas'), listado);
@@ -5102,13 +5946,13 @@ function celdaSinIvaDesglose(f, col) {
 function celdaCalificacionDesglose(f, i, ctx) {
   const clase = claseFilaDesglose(f);
   const valor = clase === 'exenta' ? `E:${f.operacion_exenta}` : (clase === 'sin_calificar' ? '' : clase);
-  const opciones = [['', '— Elija: sujeta a IVA o exenta —'], ['S1', 'Sujeta a IVA (S1, régimen general)']];
-  for (const [k, v] of Object.entries(CAUSAS_EXENCION_UI)) opciones.push([`E:${k}`, `Exenta — ${k}: ${v.nombre}`]);
+  const opciones = [['', '— Elija: con IVA o exenta —'], ['S1', 'Con IVA']];
+  for (const [k, v] of Object.entries(CAUSAS_EXENCION_UI)) opciones.push([`E:${k}`, `Sin IVA: exenta por ${v.nombre}`]);
   if (!opciones.some(([v]) => v === valor)) opciones.push([valor, `${valor.replace(/^E:/, '')} (no soportada)`]);
   const sel = selector(opciones, valor, { 'aria-label': `Fila ${i + 1} del desglose: sujeta o exenta`, disabled: !ctx.editable, class: 'sel-calificacion' });
   sel.addEventListener('change', () => {
     const elegido = sel.value;
-    sel.value = valor;   // el cambio se aplica al guardarlo (se pide el motivo); si se cancela, queda como estaba
+    sel.value = valor;   // el cambio se aplica al guardarlo (queda en el historial); si falla, queda como estaba
     const lista = ctx.lista();
     const fila = { ...(lista[i] && typeof lista[i] === 'object' ? lista[i] : {}) };
     let texto;
@@ -5129,14 +5973,14 @@ function celdaCalificacionDesglose(f, i, ctx) {
   let nota;
   if (clase === 'exenta') {
     const clave = f.clave_regimen || (info ? info.clave : '01');
-    nota = h('span', { class: 'muted bloque' }, `Exenta · clave de régimen ${clave}${clave === '02' ? ' (exportación)' : ''}`);
+    nota = h('span', { class: 'muted bloque' }, `Exenta${clave === '02' ? ' (exportación)' : ''}`);
   } else if (clase === 'sin_calificar') {
-    nota = h('span', { class: 'muted bloque' }, 'Sin IVA: elija la causa de exención o, si está sujeta, indique el tipo y la cuota.');
+    nota = h('span', { class: 'muted bloque' }, 'Sin IVA: elija por qué está exenta o, si lleva IVA, indique el tipo y el IVA.');
   } else {
-    nota = h('span', { class: 'muted bloque' }, `${clase} · ${f.clave_regimen || '01'}${clase === 'S1' ? ' · sujeta, régimen general' : ''}`);
+    nota = h('span', { class: 'muted bloque' }, clase === 'S1' ? 'Con IVA (régimen general)' : `${clase} · ${f.clave_regimen || '01'}`);
   }
   if (clase !== 'exenta') return h('td', { class: 'celda-calificacion' }, sel, nota);
-  // La mención se edita como las demás celdas: cambio pendiente con motivo y queda en el historial
+  // La mención se edita como las demás celdas: cambio pendiente que queda en el historial
   const td = ctx.celda(`desglose.${i}.motivo_exencion`, 'area', `Fila ${i + 1}: mención de la exención`, ctx.cambios);
   const area = td.querySelector('textarea');
   if (area) area.maxLength = 500;
@@ -5402,7 +6246,7 @@ function notaConsulta(x) {
 }
 
 async function paginaConsultaAeat(ctx) {
-  titulo('Consulta a la AEAT');
+  titulo('Consulta a Hacienda');
   const eid = app.empresaId;
   const q = ctx.query;
   const hoy = anioMesHoy();
@@ -5580,7 +6424,7 @@ async function paginaConsultaAeat(ctx) {
         contenido: [
           h('p', null, `Se marcarán como aceptados estos registros, que ${sv.donde} ya tiene con la misma huella. Antes de cambiar nada `
             + `se vuelve a consultar ${r.entorno === 'simulador' ? 'al simulador local' : 'a la AEAT'} y se comprueba cada uno; los que no cumplan se dejan como están.`),
-          h('ul', { class: 'lista-simple' }, elegidas.map((x) => h('li', null, h('span', { class: 'mono' }, x.num_serie), ` · ${x.estado_local_texto || x.estado_local} → ${x.estado_propuesto_texto || 'Registro aceptado'}`))),
+          h('ul', { class: 'lista-simple' }, elegidas.map((x) => h('li', null, h('span', { class: 'mono' }, x.num_serie), ` · ${x.estado_local_texto || x.estado_local} → ${x.estado_propuesto_texto || textoEstadoEnvio('aceptado', r.entorno)}`))),
           h('p', { class: 'ayuda' }, 'El cambio queda en el registro de actividad y en el diario de recuperación. No se reenvía nada.'),
         ],
         textoBoton: 'Conciliar',
@@ -5650,7 +6494,8 @@ async function paginaConsultaAeat(ctx) {
   });
   pintarSimulador();
   montar(ctx,
-    cabeceraPagina('Consulta a la AEAT', { meta: [badge] }),
+    cabeceraPagina('Consulta a Hacienda (AEAT)', { meta: [badge] }),
+    avisoPantallaAvanzada(),
     tarjeta(null,
       h('p', null, 'Consulta los registros de facturación que la AEAT tiene de esta empresa en un mes y los compara con los de esta '
         + 'instalación: coinciden, solo en la AEAT, solo en local, o con estado o huella distintos.'),

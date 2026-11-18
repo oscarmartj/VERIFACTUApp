@@ -151,7 +151,8 @@ def test_caso5_casos_tributarios(app_cliente):
     assert b["datos"]["importe_total"] == "1028.50" and b["datos"]["total_a_pagar"] == "901.00"
     assert b["datos"]["retencion"]["importe"] == "127.50"
     claves = [i["clave"] for i in b["incidencias"] if i["nivel"] == "confirmar"]
-    assert any(k.startswith("RETENCION") for k in claves)
+    # Sin reinterpretar el total impreso, la retención es una explicación (aviso), no una confirmación (revisión única)
+    assert ("aviso", "RETENCION") in {(i["nivel"], i["codigo"]) for i in b["incidencias"]}
     b = c.ok(c.post(f"/api/borradores/{bid}/confirmaciones", {"claves": claves}))
     assert b["puede_emitir"], [i for i in b["incidencias"] if i["nivel"] != "aviso"]
     fid = c.ok(emitir(c, bid, "ret-1"))["factura_id"]

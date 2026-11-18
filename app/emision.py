@@ -24,9 +24,33 @@ ID_SIF = "FV"
 
 
 class ErrorEmision(Exception):
+    codigo = None
+
     def __init__(self, mensaje, incidencias=None):
         super().__init__(mensaje)
         self.incidencias = incidencias or []
+
+
+class BorradorCambiado(ErrorEmision):
+    """El borrador ya no es el que vio quien pulsa «Emitir» o «He revisado» (lo cambió otra persona u otra pestaña)."""
+    codigo = "borrador_cambiado"
+
+
+MENSAJE_BORRADOR_CAMBIADO = ("El borrador ha cambiado desde que lo revisó (otra persona u otra pestaña lo ha modificado). "
+                             "No se ha emitido nada: revise de nuevo los datos que se muestran ahora.")
+
+
+def version_borrador(datos_guardados: str | None) -> str:
+    """Versión de lo que se muestra de un borrador: SHA-256 de sus datos tal como están guardados (incluye las confirmaciones).
+    El cliente la devuelve («version_vista») al emitir y al confirmar: si no coincide con la fila actual, 409."""
+    return hashlib.sha256((datos_guardados or "").encode("utf-8")).hexdigest()
+
+
+def comprobar_version_vista(datos_guardados: str | None, version_vista) -> None:
+    if version_vista is None:
+        return
+    if not isinstance(version_vista, str) or version_vista != version_borrador(datos_guardados):
+        raise BorradorCambiado(MENSAJE_BORRADOR_CAMBIADO)
 
 
 def canonico(d: dict) -> str:
@@ -61,6 +85,15 @@ def extraccion_de(con, borrador: dict) -> dict | None:
 
 def campos_cambiados(con, borrador_id: int) -> set[str]:
     return {r["campo"] for r in db.filas(con, "SELECT campo FROM cambios_borrador WHERE borrador_id=?", (borrador_id,))}
+
+
+def fecha_operacion_respondida(con, borrador_id: int) -> bool:
+    """La fecha de operación se cambió (respuesta a «¿La operación se realizó el …?») después del último cambio de la
+    fecha del documento: si la fecha del documento cambia después, la pregunta vuelve a hacerse."""
+    ult = {r["campo"]: r["id"] for r in db.filas(con, """SELECT campo, MAX(id) id FROM cambios_borrador WHERE borrador_id=?
+                                                       AND campo IN ('fecha_operacion', 'fecha_documento') GROUP BY campo""",
+                                                 (borrador_id,))}
+    return ult.get("fecha_operacion", 0) > ult.get("fecha_documento", 0)
 
 
 def obligados_del_usuario(con, empresa_id: int, usuario_id: int | None) -> int:
@@ -117,7 +150,10 @@ def validar_borrador(con, borrador: dict, entorno: str) -> tuple[list[dict], dic
                                "rectificativa" if es_rect else "ordinaria")
     inc = borradores.validar(con, empresa, documento if not es_rect else None, datos,
                              extraccion=extraccion_de(con, borrador), serie=serie, es_rectificativa=es_rect,
-                             cambiados=campos_cambiados(con, borrador["id"]))
+                             cambiados=campos_cambiados(con, borrador["id"]),
+                             fecha_respondida=fecha_operacion_respondida(con, borrador["id"]))
+    from .certificados import cruces_factura   # avisos: emisor frente al certificado y al domicilio de la empresa (paquete 3)
+    inc += cruces_factura(con, empresa, datos, entorno)
     if serie and not serie["anio_correcto"]:
         inc.append({"nivel": "bloqueo", "campo": "num_serie", "codigo": "ANIO_SERIE",
                     "mensaje": f"El año del número ({serie['anio_detectado']}) no es el de expedición ({hoy.year})."})
@@ -144,7 +180,43 @@ def validar_borrador(con, borrador: dict, entorno: str) -> tuple[list[dict], dic
         if orig["estado"] not in ("emitida", "rectificada"):
             inc.append({"nivel": "bloqueo", "campo": "rectificativa", "codigo": "RECT_ORIGINAL_ESTADO",
                         "mensaje": f"La factura {orig['num_serie']} está {orig['estado']}: no puede rectificarse."})
+    _anotar_arreglos(con, inc, empresa, entorno, serie, ns if isinstance(ns, str) else "", hoy.year,
+                     "rectificativa" if es_rect else "ordinaria")
     return inc, serie, empresa
+
+
+# Bloqueos y avisos del número que tienen un arreglo seguro de un clic: escribir el número que corresponde. El usuario lo ve
+# y lo acepta (nunca se cambia solo) y nunca avanza el contador; el arreglo vuelve a validarse como cualquier otro cambio
+CODIGOS_ARREGLO_NUMERO = ("NUM_NO_CORRELATIVO", "ANIO_SERIE", "DUPLICADA", "DUPLICADA_ARCHIVADA", "SERIE_NO_CONFIRMADA")
+
+
+def _anotar_arreglos(con, inc: list[dict], empresa: dict, entorno: str, serie: dict | None, ns: str, anio: int,
+                     tipo: str) -> None:
+    """Añade a las incidencias del número un «arreglo» {campo, valor, texto, origen}: usar el siguiente número de la serie
+    detectada (o, si el número no encaja con ninguna serie confirmada y la empresa tiene una sola de ese tipo en el entorno,
+    el siguiente de esa serie: el número impreso en una proforma suele no ser el de la factura), o escribir el número con
+    los ceros de relleno de la serie (SERIE_FORMATO)."""
+    destino = serie
+    if destino is None:
+        conf = series.series_confirmadas(con, empresa["id"], entorno, tipo)
+        destino = conf[0] if len(conf) == 1 else None
+    siguiente = series.siguiente_texto(con, destino, anio) if destino else None
+    if siguiente:
+        # nunca se propone un número ya expedido (escrito de cualquier forma equivalente: «F-2026/240» y «F-2026/0240»)
+        from .importacion import facturas_mismo_numero
+        if facturas_mismo_numero(con, empresa["id"], nifmod.normalizar(empresa["nif"]), siguiente, patrones=[destino["patron"]]):
+            siguiente = None
+    for i in inc:
+        if i.get("campo") != "num_serie":
+            continue
+        if i["codigo"] == "SERIE_FORMATO":
+            fmt = series.formato_esperado(con, empresa["id"], entorno, ns, anio, tipo)
+            if fmt and fmt["esperado"] != ns:
+                i["arreglo"] = {"campo": "num_serie", "valor": fmt["esperado"], "origen": "serie",
+                                "texto": f"Escribirlo como {fmt['esperado']}"}
+        elif i["codigo"] in CODIGOS_ARREGLO_NUMERO and siguiente and siguiente != ns:
+            i["arreglo"] = {"campo": "num_serie", "valor": siguiente, "origen": "serie",
+                            "texto": f"Usar el siguiente número de la serie: {siguiente}"}
 
 
 # --- Datos aprobados (versión inmutable) -----------------------------------------------------------
@@ -352,7 +424,7 @@ def _factura_por_clave(con, empresa_id: int, clave: str, borrador_id: int | None
     return db.fila(con, sql, p)
 
 
-def emitir(con, *, borrador_id: int, usuario_id: int, entorno: str, clave_idempotencia: str) -> int:
+def emitir(con, *, borrador_id: int, usuario_id: int, entorno: str, clave_idempotencia: str, version_vista: str | None = None) -> int:
     if not clave_idempotencia or len(clave_idempotencia) > 100:
         raise ErrorEmision("Falta la clave de idempotencia")
     b = db.fila(con, "SELECT * FROM borradores WHERE id=?", (borrador_id,))
@@ -374,6 +446,8 @@ def emitir(con, *, borrador_id: int, usuario_id: int, entorno: str, clave_idempo
         return b["factura_id"]
     if b["estado"] == "descartado":
         raise ErrorEmision("El borrador está descartado")
+    # Lo que se expide es exactamente lo que vio quien pulsa «Emitir» (la SPA envía siempre la versión que mostró)
+    comprobar_version_vista(b["datos"], version_vista)
     empresa = cargar_empresa(con, b["empresa_id"])
     produccion.comprobar(con, empresa, usuario_id, entorno)
     inc, serie, _ = validar_borrador(con, b, entorno)
@@ -413,6 +487,7 @@ def emitir(con, *, borrador_id: int, usuario_id: int, entorno: str, clave_idempo
         actual = db.fila(con, "SELECT estado, datos, actualizado_en FROM borradores WHERE id=?", (borrador_id,))
         if actual["estado"] in ("descartado", "emitido") or actual["datos"] != b["datos"] or actual["actualizado_en"] != b["actualizado_en"]:
             raise ErrorEmision("El borrador ha cambiado mientras se preparaba la expedición; revíselo y vuelva a intentarlo")
+        comprobar_version_vista(actual["datos"], version_vista)
         if db.ahora().date().isoformat() != fecha_exp:
             raise ErrorEmision("Ha cambiado la fecha durante la expedición; vuelva a intentarlo")
         serie_tx = series.identificar(con, empresa["id"], entorno, datos["num_serie"], int(fecha_exp[:4]),
@@ -582,6 +657,34 @@ def subsanar(con, *, registro_id: int, usuario_id: int, motivo: str) -> int:
     return rid
 
 
+def numero_rectificativa(con, factura: dict, datos: dict) -> str | None:
+    """Número propuesto para la rectificativa (el usuario lo ve y puede cambiarlo en el borrador): el siguiente de la serie
+    de rectificativas confirmada en el entorno de la factura (la primera, si hay varias) o, si no hay ninguna, el primero
+    de la serie de rectificativas propuesta a partir de la serie de la factura («R{n}/{aa}» para «{n}/{aa}»), que el
+    administrador confirma desde el borrador. None si no se puede proponer."""
+    anio = db.ahora().year
+    conf = series.series_confirmadas(con, factura["empresa_id"], factura["entorno"], "rectificativa")
+    if conf:
+        return series.siguiente_texto(con, conf[0], anio)
+    patron = propuesta_serie_rectificativa(con, factura["empresa_id"], factura["entorno"],
+                                           ((datos.get("numeracion") or {}).get("patron")))
+    try:
+        return series.formatear(patron, 1, anio) if patron else None
+    except ValueError:
+        return None
+
+
+def propuesta_serie_rectificativa(con, empresa_id: int, entorno: str, patron_ordinario: str | None) -> str | None:
+    """Patrón de la serie de rectificativas que se propone crear (ver series.patron_rectificativa)."""
+    if not isinstance(patron_ordinario, str):
+        conf = series.series_confirmadas(con, empresa_id, entorno, "ordinaria")
+        patron_ordinario = conf[0]["patron"] if conf else None
+    if not patron_ordinario:
+        return None
+    otros = [s["patron"] for s in db.filas(con, "SELECT patron FROM series WHERE empresa_id=? AND entorno=?", (empresa_id, entorno))]
+    return series.patron_rectificativa(patron_ordinario, otros)
+
+
 def borrador_rectificativa(con, *, factura_id: int, usuario_id: int, tipo: str, motivo: str) -> int:
     if tipo not in ("R1", "R4"):
         raise ErrorEmision("Tipo de rectificativa no soportado (R1 o R4)")
@@ -590,9 +693,10 @@ def borrador_rectificativa(con, *, factura_id: int, usuario_id: int, tipo: str, 
         raise ErrorEmision(f"La factura está {f['estado']}")
     d = json.loads(f["datos"])
     nuevo = {k: d.get(k) for k in ("emisor", "destinatario", "referencias", "forma_pago", "iban")}
+    num_rect = numero_rectificativa(con, f, d)
     nuevo.update({
         # FechaOperacion de la rectificativa = la de la factura original (criterio AEAT, procedimientos)
-        "tipo_documento_origen": "rectificativa", "num_serie": None, "fecha_documento": None,
+        "tipo_documento_origen": "rectificativa", "num_serie": num_rect, "fecha_documento": None,
         "fecha_operacion": d.get("fecha_operacion") or f["fecha_expedicion"],
         "tipo_factura": tipo, "descripcion_operacion": f"Rectificación de la factura {f['num_serie']}: {motivo}"[:500],
         "lineas": [{"concepto": f"Rectificación de la factura {f['num_serie']}", "cantidad": None, "unidad": None,

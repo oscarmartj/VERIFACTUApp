@@ -42,7 +42,9 @@ def importar(con, *, empresa: dict, usuario_id: int, nombre: str, datos: bytes) 
         ext = extraccion_proceso.extraer(paginas, nombre, empresa["nif"])
     except inspeccion.PDFNoValido as e:
         return {"nombre": nombre, "estado": "error", "error": str(e)}
-    sug = borradores.clasificar(ext, insp, empresa, duplicados_de(con, empresa["id"], ext))
+    dups = duplicados_de(con, empresa["id"], ext)
+    sug = borradores.clasificar(ext, insp, empresa, dups)
+    automatica = borradores.admite_clasificacion_automatica(sug, insp, ext, dups)
     nativo = all(p.metodo == "texto_pdf" for p in paginas)
     from . import diario
     ruta = f"empresa_{empresa['id']}/originales/{sha}.pdf"
@@ -77,8 +79,49 @@ def importar(con, *, empresa: dict, usuario_id: int, nombre: str, datos: bytes) 
                 except OSError:
                     pass
         raise
-    return {"nombre": nombre, "documento_id": did, "duplicado": False, "estado": "procesado",
-            "duplicados_fiscales": duplicados_fiscales(con, empresa["id"], did)}
+    out = {"nombre": nombre, "documento_id": did, "duplicado": False, "estado": "procesado",
+           "duplicados_fiscales": duplicados_fiscales(con, empresa["id"], did), "clasificacion_sugerida": sug["sugerida"]}
+    if automatica and not out["duplicados_fiscales"]:
+        # Proforma o borrador claro: se trata como tal y se abre su borrador (el usuario puede cambiarlo desde el borrador)
+        try:
+            confirmar_clasificacion(con, did, "preparatorio", usuario_id, automatica=True,
+                                    motivo="Clasificación automática: " + " ".join(sug.get("motivos") or []))
+            out["borrador_id"] = crear_borrador(con, documento_id=did, usuario_id=usuario_id)
+            out["clasificacion_automatica"] = True
+        except ValueError:
+            pass   # (otro proceso lo clasificó o expidió a la vez) el usuario lo decide en la pantalla del documento
+    return out
+
+
+def confirmar_clasificacion(con, documento_id: int, clasificacion: str, usuario_id: int, *, motivo: str = "",
+                            automatica: bool = False) -> list[int]:
+    """Fija la clasificación del documento (la elige el usuario o, si es clara, la aplicación: `automatica`). Si deja de
+    ser un documento preparatorio, los borradores abiertos que se crearon a partir de él se descartan (nunca uno ya
+    expedido). Devuelve los borradores descartados. ValueError si el documento ya dio lugar a una factura."""
+    doc = db.fila(con, "SELECT * FROM documentos WHERE id=?", (documento_id,))
+    sug = json.loads(doc.get("clasificacion_motivo") or "{}")
+    if not isinstance(sug, dict):
+        sug = {}
+    sug["confirmacion"] = {"clasificacion": clasificacion, "motivo": motivo, "usuario_id": usuario_id,
+                           **({"automatica": True} if automatica else {})}
+    with db.transaccion(con):
+        if db.fila(con, "SELECT id FROM facturas WHERE documento_id=?", (documento_id,)):
+            raise ValueError("El documento ya dio lugar a una factura expedida")
+        con.execute("""UPDATE documentos SET clasificacion=?, clasificacion_motivo=?, clasificacion_confirmada_por=?,
+                       clasificacion_confirmada_en=? WHERE id=?""",
+                    (clasificacion, json.dumps(sug, ensure_ascii=False), usuario_id, db.ahora_iso(), documento_id))
+        db.actividad(con, "documento.clasificado", usuario_id=usuario_id, empresa_id=doc["empresa_id"], objeto="documento",
+                     objeto_id=documento_id, detalle={"clasificacion": clasificacion, "motivo": motivo,
+                                                      **({"automatica": True} if automatica else {})})
+        descartados = []
+        if clasificacion != "preparatorio":
+            for b in db.filas(con, """SELECT id FROM borradores WHERE documento_id=? AND estado NOT IN ('emitido','descartado')
+                                      AND factura_id IS NULL""", (documento_id,)):
+                con.execute("UPDATE borradores SET estado='descartado', actualizado_en=? WHERE id=?", (db.ahora_iso(), b["id"]))
+                db.actividad(con, "borrador.descartado", usuario_id=usuario_id, empresa_id=doc["empresa_id"], objeto="borrador",
+                             objeto_id=b["id"], detalle={"motivo": f"El documento se ha clasificado como «{clasificacion}»"})
+                descartados.append(b["id"])
+    return descartados
 
 
 def extraccion(con, documento_id: int) -> dict | None:

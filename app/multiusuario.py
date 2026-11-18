@@ -15,9 +15,11 @@ un enlace ya usado después de la copia no vuelva a ser válido; el uso de cada 
 
 Invitaciones y permisos: una invitación solo vale mientras quien la creó siga pudiendo crearla (cuenta activa y
 administrador de la empresa; operador, si es de la plataforma). Al degradar, quitar o desactivar a alguien se anulan
-además sus invitaciones pendientes. Con el registro cerrado, una invitación de empresa creada por un usuario normal no
-crea cuentas nuevas (solo la acepta una cuenta existente) salvo que el operador lo permita
-(`invitaciones_empresa_crean_cuentas`).
+además sus invitaciones pendientes. Con el registro cerrado (el registro abierto a cualquiera sigue cerrado por defecto),
+la invitación de un administrador de empresa crea la cuenta de la persona invitada directamente desde su enlace (un solo
+enlace por persona: de un solo uso, con caducidad, dirigido a su correo y con los límites por invitación, por quien invita
+y por día). El operador puede desactivarlo (`invitaciones_empresa_crean_cuentas` = 0): entonces solo la acepta una cuenta
+existente.
 """
 from __future__ import annotations
 
@@ -34,9 +36,10 @@ from datetime import datetime, timedelta, timezone
 from . import db, nif as nifmod, seguridad
 
 # --- Ajustes de la plataforma ------------------------------------------------------------------------------------------
-# Registro CERRADO por defecto en una instalación nueva; y, con el registro cerrado, las invitaciones de los
-# administradores de empresas (usuarios normales) no crean cuentas nuevas salvo que el operador lo permita.
-AJUSTES_DEFECTO = {"registro_abierto": "0", "invitaciones_empresa_crean_cuentas": "0"}
+# Registro CERRADO por defecto en una instalación nueva (nadie crea una cuenta sin invitación). Las invitaciones de los
+# administradores de empresas crean la cuenta de la persona invitada salvo que el operador lo desactive (antes de esta
+# versión el valor por defecto era «0» y hacían falta dos enlaces por persona: el del operador y el de la empresa).
+AJUSTES_DEFECTO = {"registro_abierto": "0", "invitaciones_empresa_crean_cuentas": "1"}
 
 
 def _tiene_tabla(con, nombre: str) -> bool:
@@ -137,11 +140,14 @@ LIMITE_POR_INVITACION = Limitador(10)                                           
 LIMITE_INVITACION_IP = Limitador(_entero_env("VERIFACTU_REGISTRO_MAX_IP_INVITACION", 10 * LIMITE_REGISTRO_IP.maximo))
 LIMITE_INTENTOS_INVITADOR = Limitador(_entero_env("VERIFACTU_REGISTRO_MAX_POR_INVITADOR", 50))   # intentos por quien invita
 LIMITE_ALTAS_INVITADOR = Limitador(_entero_env("VERIFACTU_ALTAS_MAX_POR_INVITADOR", 10))          # cuentas por quien invita
+# Alta guiada: vistas previas de certificados y lecturas de una factura en el modo práctica (sin empresa), por usuario y hora
+LIMITE_ALTA_GUIADA = Limitador(_entero_env("VERIFACTU_ALTA_GUIADA_MAX", 30))
 
 
 def reiniciar_limitadores() -> None:
     for x in (LIMITE_REGISTRO_IP, LIMITE_REGISTRO_GLOBAL, LIMITE_REGISTRO_INTENTOS, LIMITE_CONSULTA_INVITACION,
-              LIMITE_POR_INVITACION, LIMITE_INVITACION_IP, LIMITE_INTENTOS_INVITADOR, LIMITE_ALTAS_INVITADOR):
+              LIMITE_POR_INVITACION, LIMITE_INVITACION_IP, LIMITE_INTENTOS_INVITADOR, LIMITE_ALTAS_INVITADOR,
+              LIMITE_ALTA_GUIADA):
         x.reiniciar()
 
 
@@ -448,9 +454,9 @@ def creador_vigente(con, inv: dict) -> bool:
 
 
 def admite_cuenta_nueva(con, inv: dict) -> bool:
-    """¿Puede usarse la invitación para CREAR una cuenta? Con el registro cerrado, una invitación de empresa creada por un
-    usuario normal solo la acepta una cuenta existente (si no, cualquiera con una empresa propia crearía cuentas sin
-    límite), salvo que el operador lo permita. Las de la plataforma y las que crea un operador, siempre."""
+    """¿Puede usarse la invitación para CREAR una cuenta? Las de la plataforma y las que crea un operador, siempre. Las de
+    un administrador de empresa, salvo que el operador lo haya desactivado (`invitaciones_empresa_crean_cuentas` = 0);
+    los cupos y límites por invitación, por quien invita y por IP acotan las cuentas que puede crear un usuario."""
     if inv["empresa_id"] is None or registro_abierto(con) or invitaciones_empresa_crean_cuentas(con):
         return True
     u = db.fila(con, "SELECT superadmin FROM usuarios WHERE id=?", (inv["creada_por"],))
@@ -559,7 +565,17 @@ MENSAJE_REGISTRO_NO_POSIBLE = ("No se ha podido completar el registro con estos 
                                "se dirigió la invitación.")
 
 
-def registrar(con, *, email: str, nombre: str, hash_clave: str, token: str | None) -> tuple[int, int | None]:
+def _declarar(con, usuario_id: int, empresa_id: int) -> None:
+    """Declaración de autorización del usuario al aceptar la invitación (opcional; la relación es la de la invitación)."""
+    con.execute("UPDATE miembros SET declaracion_autorizacion_en=? WHERE usuario_id=? AND empresa_id=?",
+                (db.ahora_iso(), usuario_id, empresa_id))
+    m = db.fila(con, "SELECT relacion FROM miembros WHERE usuario_id=? AND empresa_id=?", (usuario_id, empresa_id))
+    db.actividad(con, "usuario.declaracion_autorizacion", usuario_id=usuario_id, empresa_id=empresa_id,
+                 detalle={"relacion": (m or {}).get("relacion"), "al_aceptar_invitacion": True})
+
+
+def registrar(con, *, email: str, nombre: str, hash_clave: str, token: str | None,
+              declaro: bool = False) -> tuple[int, int | None]:
     """Crea una cuenta normal (sin privilegios de plataforma). Devuelve (usuario_id, empresa_id de la invitación o None).
 
     El resumen de la contraseña se calcula ANTES (en todos los casos, también cuando el registro no es posible): el tiempo
@@ -589,6 +605,8 @@ def registrar(con, *, email: str, nombre: str, hash_clave: str, token: str | Non
             if inv["empresa_id"] is not None:
                 eid = inv["empresa_id"]
                 _alta_miembro(con, inv, uid)
+                if declaro:
+                    _declarar(con, uid, eid)
         db.actividad(con, "usuario.registro", usuario_id=uid, empresa_id=eid,
                      detalle={"invitacion": inv["id"] if inv else None})
     if inv:
@@ -596,7 +614,7 @@ def registrar(con, *, email: str, nombre: str, hash_clave: str, token: str | Non
     return uid, eid
 
 
-def aceptar_invitacion(con, *, usuario_id: int, token: str) -> int:
+def aceptar_invitacion(con, *, usuario_id: int, token: str, declaro: bool = False) -> int:
     """Un usuario con cuenta acepta la invitación a una empresa dirigida a su correo. Devuelve el id de la empresa."""
     with db.transaccion(con):
         inv = invitacion_vigente(con, token)
@@ -609,6 +627,8 @@ def aceptar_invitacion(con, *, usuario_id: int, token: str) -> int:
             _alta_miembro(con, inv, usuario_id)
         except OperacionNoPermitida:   # p. ej. el único administrador aceptando una invitación con otro rol
             raise RegistroNoPosible()
+        if declaro:
+            _declarar(con, usuario_id, inv["empresa_id"])
     anotar_invitacion_usada(con, inv["id"])
     return inv["empresa_id"]
 

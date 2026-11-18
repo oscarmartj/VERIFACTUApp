@@ -24,15 +24,43 @@ def esquemas_contrastados() -> bool:
     return (ESQUEMAS_DIR / "CONTRASTADO_AEAT").exists()
 
 
+# Requisitos que dependen de la plataforma (su operador y el servidor), no de la empresa: a la empresa se le resumen en
+# una línea («La plataforma aún no está habilitada…»); el operador ve el detalle.
+REQUISITOS_PLATAFORMA = ("productor", "declaracion", "esquemas", "interruptor")
+NOMBRE_ENTORNO = {"pruebas": "el entorno de pruebas de la AEAT", "produccion": "producción"}
+TEXTO_PLATAFORMA_PENDIENTE = {
+    "produccion": "La plataforma aún no está habilitada para producción (lo gestiona el operador).",
+    "pruebas": "La plataforma aún no está habilitada para el entorno de pruebas de la AEAT (lo gestiona el operador).",
+}
+TEXTO_MODO_PRACTICA = ("Modo práctica: la empresa se dio de alta sin certificado y solo trabaja en el simulador (no se envía "
+                       "nada a Hacienda). Cargue el certificado de la empresa para pasar a pruebas o a producción.")
+
+
+def modo_practica(con, empresa: dict) -> bool:
+    """La empresa se dio de alta en modo práctica (datos leídos de una factura, sin certificado) y aún no tiene un
+    certificado para la AEAT: solo trabaja en el simulador."""
+    if empresa.get("alta_origen") != "practica":
+        return False
+    return not any(certificados.seleccionado(con, empresa["id"], ent) for ent in certificados.ENTORNOS_CERT)
+
+
+def plataforma(reqs: list[dict]) -> dict:
+    """Resumen de los requisitos de la plataforma para la empresa: {lista, pendientes}."""
+    pend = [x for x in reqs if x.get("de") == "plataforma" and not x["cumplido"]]
+    return {"lista": not pend, "pendientes": len(pend)}
+
+
 def requisitos(con, empresa: dict, usuario_id: int, entorno: str = "produccion") -> list[dict]:
     a = ajustes()
     req = []
 
     def r(clave, texto, cumplido, detalle=""):
-        req.append({"clave": clave, "texto": texto, "cumplido": bool(cumplido), "detalle": detalle})
+        req.append({"clave": clave, "texto": texto, "cumplido": bool(cumplido), "detalle": detalle,
+                    "de": "plataforma" if clave in REQUISITOS_PLATAFORMA else
+                          ("usuario" if clave == "autorizacion_usuario" else "empresa")})
     amb = json.loads(empresa.get("ambito_resultado") or "{}")
-    r("ambito", "Ámbito del emisor confirmado y soportado", empresa.get("ambito_confirmado_en") and amb.get("puede_emitir"),
-      "; ".join(amb.get("motivos", [])))
+    r("ambito", "Tres preguntas sobre la empresa respondidas y supuesto soportado",
+      empresa.get("ambito_confirmado_en") and amb.get("puede_emitir"), "; ".join(amb.get("motivos", [])))
     m = db.fila(con, "SELECT * FROM miembros WHERE usuario_id=? AND empresa_id=?", (usuario_id, empresa["id"]))
     r("autorizacion_usuario", "El usuario ha declarado su autorización para actuar por la empresa",
       m and m.get("declaracion_autorizacion_en"), (m or {}).get("relacion", ""))
@@ -41,12 +69,13 @@ def requisitos(con, empresa: dict, usuario_id: int, entorno: str = "produccion")
       (p or {}).get("nombre") or "Sin designar: lo identifica y confirma el operador de la plataforma")
     serie = db.fila(con, "SELECT COUNT(*) n FROM series WHERE empresa_id=? AND entorno=? AND confirmada_en IS NOT NULL",
                     (empresa["id"], entorno))
-    r("serie", f"Serie de numeración confirmada para {entorno}", serie["n"] > 0)
+    r("serie", f"Serie de numeración confirmada para {NOMBRE_ENTORNO.get(entorno, entorno)}", serie["n"] > 0)
     # Qué certificado se usará (de la empresa o de «Mis certificados») y si actúa un representante (tercero legitimado)
     cert = certificados.activo(con, empresa["id"], entorno)
     leg = (cert or {}).get("legitimacion_dict") or {}
-    r("certificado", f"Certificado de {entorno} vigente y utilizable por la empresa", cert and leg.get("utilizable"),
-      certificados.describir(cert, entorno))
+    r("certificado", f"Certificado para {NOMBRE_ENTORNO.get(entorno, entorno)} vigente y utilizable por la empresa",
+      cert and leg.get("utilizable"),
+      TEXTO_MODO_PRACTICA if not cert and empresa.get("alta_origen") == "practica" else certificados.describir(cert, entorno))
     req[-1]["certificado"] = certificados.resumen(cert, usuario_id)
     if cert and leg.get("requiere_legitimacion"):
         t = leg.get("titular") or {}

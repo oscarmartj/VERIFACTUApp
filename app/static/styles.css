@@ -554,7 +554,7 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
   flex: none; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
   font-size: 0.8rem; font-weight: 700; border: 2px solid var(--borde-fuerte); color: var(--texto-2);
 }
-.paso-ok .paso-icono { background: var(--ok); border-color: var(--ok); color: var(--superficie); }
+.paso-ok .paso-icono, .paso-guardado .paso-icono { background: var(--ok); border-color: var(--ok); color: var(--superficie); }
 .paso-error .paso-icono { background: var(--danger); border-color: var(--danger); color: var(--superficie); }
 .paso-opcional .paso-icono { border-style: dashed; }
 .paso-texto { display: flex; flex-direction: column; font-weight: 600; font-size: 0.9rem; }
@@ -683,3 +683,87 @@ body.vista-publica .contenido { display: flex; justify-content: center; }
 /* --- exentas: calificación de cada fila del desglose (sujeta / exenta con su causa y mención) --- */
 .tabla-editable .celda-calificacion { min-width: 220px; }
 .tabla-editable .sel-calificacion { width: 100%; max-width: 320px; min-height: 32px; font-size: 0.85rem; margin-bottom: 2px; }
+
+/* --- revisión única del borrador y preguntas (carril A: paquetes 1 y 2) --- */
+.pregunta { padding: 10px 12px; margin-bottom: 10px; border-radius: 6px; border: 1px solid var(--borde); border-left: 4px solid var(--primario); background: var(--superficie-2); }
+.card-clasificacion .pregunta { border-left-color: var(--primario); }
+.pregunta-titulo { font-weight: 650; margin: 0 0 6px; overflow-wrap: anywhere; }
+.pregunta p { overflow-wrap: anywhere; }
+.pregunta .acciones { margin-top: 6px; }
+.card-revision .inc-item .acciones { margin-top: 0; }
+.cabecera-revision { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.cabecera-revision:empty { display: none; }
+.linea-clasificacion { margin: 0; font-size: 0.9rem; color: var(--texto-2); }
+.ok-texto { color: var(--ok); }
+.ayuda-plegable { margin: 6px 0; }
+.ayuda-plegable > summary { cursor: pointer; color: var(--primario); font-size: 0.9rem; }
+.plegable-seccion { margin-bottom: 12px; }
+.plegable-seccion > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+.mas-opciones > .card { box-shadow: none; }
+.barra-fija { position: sticky; bottom: 8px; z-index: 5; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15); }
+.solo-movil { display: none; }
+@media (max-width: 1023px) {
+  .btn.solo-movil { display: inline-flex; }
+  .split > .col-visor.plegado-movil { display: none; }
+}
+
+/* --- carril B: alta guiada, tres preguntas y opciones avanzadas plegadas --- */
+details.avanzado, details.mas-opciones { margin: 12px 0; }
+details.avanzado > summary, details.mas-opciones > summary { cursor: pointer; color: var(--primario); font-weight: 500; padding: 6px 0; overflow-wrap: anywhere; }
+details.avanzado[open] > summary { margin-bottom: 8px; }
+.tres-preguntas .radios { flex-direction: row; flex-wrap: wrap; column-gap: 12px; }
+.tres-preguntas .radios legend { flex-basis: 100%; font-weight: 600; }
+.tres-preguntas .radios .ayuda { flex-basis: 100%; margin: 0 0 4px; }
+.tres-preguntas .radio-opcion { min-width: 96px; border: 1px solid var(--borde); }
+
+/* --- carril C: menú por papel con «Más», modo avanzado y vistas de solo consulta --- */
+.nav-principal { position: relative; }
+.nav-mas-item { position: relative; }
+.nav-mas > summary {
+  display: block; padding: 9px 12px; cursor: pointer; color: var(--texto-2); font-weight: 600; list-style: none;
+  border-bottom: 3px solid transparent;
+}
+.nav-mas > summary::-webkit-details-marker { display: none; }
+.nav-mas > summary::after { content: " ▾"; font-size: 0.8em; }
+.nav-mas > summary:hover { color: var(--texto); }
+.nav-mas.activo > summary { color: var(--primario); border-bottom-color: var(--primario); }
+.nav-principal .nav-mas-lista {
+  display: block; position: absolute; left: 0; right: auto; top: 100%; z-index: 40; min-width: 260px; max-width: min(360px, calc(100vw - 2 * var(--gutter)));
+  list-style: none; margin: 0; padding: 6px 0; background: var(--superficie); border: 1px solid var(--borde);
+  border-radius: var(--radio); box-shadow: 0 6px 20px rgba(16, 24, 40, 0.16);
+}
+.nav-principal .nav-mas-lista li { flex: initial; min-width: 0; }
+.nav-principal .nav-mas-lista a { padding: 8px 14px; border-bottom: 0; white-space: normal; }
+.nav-principal .nav-mas-lista a[aria-current="page"] { background: var(--superficie-2); }
+.nav-mas-modo { border-top: 1px solid var(--borde); margin-top: 4px; padding: 8px 14px 6px; }
+.nav-mas-modo .ayuda { margin: 0 0 6px; }
+.lista-numeracion { list-style: none; margin: 0 0 8px; padding: 0; }
+.lista-numeracion li { padding: 6px 0; border-bottom: 1px solid var(--borde); overflow-wrap: anywhere; }
+.lista-numeracion li:last-child { border-bottom: 0; }
+.pie a { color: var(--texto-2); }
+@media (max-width: 640px) {
+  /* Cuatro entradas: caben sin desplazamiento; «Más» se despliega a lo ancho, bajo el menú */
+  .nav-principal > ul { flex-wrap: wrap; overflow: visible; padding: 0 8px; gap: 0 2px; }
+  .nav-principal > ul > li > a, .nav-mas > summary { padding: 8px 7px; font-size: 0.88rem; white-space: nowrap; }
+  .nav-mas-item { position: static; }
+  .nav-principal .nav-mas-lista { left: var(--gutter); right: var(--gutter); max-width: none; min-width: 0; }
+}
+
+/* --- IVA de la revisión: importes en una fila y «con IVA o exenta» debajo, a todo el ancho (cabe en el panel y a 390 px) --- */
+.tabla-desglose { table-layout: fixed; }
+.tabla-desglose .col-num { width: 32px; }
+.tabla-desglose th:last-child, .tabla-desglose .col-quitar { width: 72px; }
+.tabla-desglose input { min-width: 0; width: 100%; }
+.tabla-desglose .fila-desglose-importes td { border-bottom: 0; }
+.tabla-desglose .fila-desglose-calificacion td { padding-top: 0; }
+.tabla-desglose .celda-calificacion { min-width: 0; }
+.tabla-desglose .celda-calificacion textarea { min-width: 0; width: 100%; }
+.tabla-desglose .sel-calificacion { width: 100%; max-width: 100%; min-width: 0; }
+.tabla-desglose .etiqueta-calificacion { display: block; font-size: 0.82rem; font-weight: 650; color: var(--texto-2); }
+.tabla-desglose .col-quitar { text-align: right; white-space: nowrap; }
+.tabla.tabla-desglose th { white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .tabla-desglose .col-num { width: 22px; padding-left: 4px; padding-right: 2px; }
+  .tabla-desglose th:last-child, .tabla-desglose .col-quitar { width: 72px; padding-left: 2px; padding-right: 2px; }
+  .tabla-desglose .col-quitar .btn { padding-left: 6px; padding-right: 6px; }
+}

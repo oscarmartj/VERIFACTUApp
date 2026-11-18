@@ -76,9 +76,17 @@ La aplicación la pueden usar muchas personas a la vez, cada una con sus empresa
 | **Emisor / lector de una empresa** | Personas invitadas | Importar y expedir / solo consultar |
 
 - El **registro** está **cerrado** por defecto: solo entra quien recibe una invitación (de un solo uso, con caducidad). El
-  operador puede abrirlo en la instalación o en el panel; entonces se aplican límites por dirección y por hora. Con el
-  registro cerrado, las invitaciones de los administradores de empresas solo las acepta quien ya tiene cuenta (las del
-  operador sí crean cuentas), salvo que el operador lo permita en el panel.
+  operador puede abrirlo en la instalación o en el panel; entonces se aplican límites por dirección y por hora. La
+  invitación de un administrador de empresa crea la cuenta de la persona invitada con **un solo enlace** (dirigido a su
+  correo, de un solo uso, con caducidad y con límites por invitación, por quien invita y por día); el operador puede
+  desactivarlo en el panel (entonces solo la acepta quien ya tiene cuenta).
+- **Alta de la empresa**: con el **certificado de la empresa** (la aplicación lee el NIF y la razón social y lo deja como
+  certificado de la empresa para pruebas y producción; vista previa cifrada unos minutos, nunca en claro), en **modo
+  práctica** sin certificado (los datos se proponen a partir del emisor de una factura suya y la empresa solo trabaja en
+  el simulador hasta cargar el certificado) o escribiendo los datos. Después, **Primeros pasos**: subir una factura,
+  confirmar el domicilio y responder las **tres preguntas sobre su empresa** (territorio foral, SII, Canarias/Ceuta/Melilla;
+  sin respuesta marcada de antemano) con la declaración de autorización, en un solo paso. Un certificado autofirmado no
+  acredita el NIF (sigue «sin acreditar» hasta el operador o una aceptación de la AEAT).
 - Una invitación solo vale mientras quien la creó siga siendo administrador activo de la empresa: degradar, quitar o
   desactivar a alguien anula sus invitaciones pendientes. Los administradores pueden **quitar** el acceso a una persona y
   cualquiera puede **salir** de una empresa; la empresa conserva siempre un administrador activo.
@@ -86,7 +94,8 @@ La aplicación la pueden usar muchas personas a la vez, cada una con sus empresa
   equivalente (las entidades C, D, F, G, J, U y V admiten como control el dígito o la letra): si ya está, hay que pedir
   acceso a uno de sus administradores.
 - Requisitos por persona antes de emitir fuera del simulador: cada miembro declara su relación con la empresa y su
-  autorización; el ámbito de la empresa debe estar confirmado (Configuración → «Paso a producción»).
+  autorización (en las tres preguntas o al aceptar la invitación); las tres preguntas deben estar respondidas
+  (Configuración → «Empezar a enviar a Hacienda», donde lo que depende de la plataforma se resume en una línea).
 - **NIF verificado**: cualquier usuario puede dar de alta una empresa con un NIF libre y declarar que un tercero (una
   gestoría) presenta en su nombre. Por eso, el primer envío a la AEAT (pruebas o producción) con el certificado de un
   tercero exige que el operador marque el NIF como verificado en el panel «Plataforma» (queda anotado); no hace falta si
@@ -94,6 +103,18 @@ La aplicación la pueden usar muchas personas a la vez, cada una con sus empresa
   restaurar una copia se conserva la última decisión del operador (también una retirada posterior a la copia).
 - Para un despliegue **público** faltan piezas (verificación del correo, recuperación de contraseña por correo,
   condiciones de uso y contrato de encargado del tratamiento): ver `docs/pendientes-produccion.md`.
+
+### Menú por papel y modo avanzado
+
+El menú es **Documentos**, **Facturas**, **Configuración** y **Más** (envíos a Hacienda, otra empresa, declaración
+responsable y el interruptor del modo avanzado). Cada papel ve solo lo que puede usar (un lector no ve la subida ni
+«Emitir»; un emisor ve la configuración solo para consultarla). El **modo avanzado** (preferencia de cada persona,
+desactivado por defecto) muestra las herramientas técnicas: editor de la numeración, detalle de los envíos, consulta a la
+AEAT, actividad, huellas, CSV y XML, «Mis certificados» y la legitimación completa. Los textos van en lenguaje llano
+(«Modo práctica: no se envía a Hacienda», «Aceptada en la simulación» / «Aceptada por Hacienda», «12/11/2026»,
+«1.028,50 €», también en los avisos de la revisión). Solo se expide lo que se vio: si otra persona u otra pestaña
+cambia el borrador con el resumen «Emitir» abierto, no se expide nada y la revisión se vuelve a mostrar con los datos
+nuevos. Ver `docs/guia-uso.md` («Menú, papeles y modo avanzado»).
 
 ### Actualizar desde la versión anterior
 
@@ -122,7 +143,7 @@ Casi 900 pruebas: los 14 casos de aceptación del encargo, las regresiones de cu
 
 ## Consulta a la AEAT y series con ceros de relleno
 
-- **Consulta a la AEAT** (menú *Consulta AEAT*): pide al servicio `ConsultaFactuSistemaFacturacion` los registros de la
+- **Consulta a la AEAT** (menú *Más → Consulta a Hacienda*, con el modo avanzado): pide al servicio `ConsultaFactuSistemaFacturacion` los registros de la
   empresa en un mes (todas las páginas) y los compara con los locales: *coinciden*, *solo en la AEAT*, *solo en local* y
   *estado o huella distintos*. No cambia nada por sí misma; un administrador puede **conciliar**, con confirmación, el único
   caso seguro (registro local sin respuesta definitiva, o rechazado por duplicado 3000, que la AEAT tiene con la misma
@@ -137,7 +158,15 @@ Casi 900 pruebas: los 14 casos de aceptación del encargo, las regresiones de cu
   transporte y las mismas salvaguardas que la remisión; el simulador local también responde a la consulta y sus textos nunca
   dicen «la AEAT». Ver `docs/api.md`, `docs/guia-uso.md` (apartado 8) y `docs/copias-y-recuperacion.md`.
 - **Series con ceros de relleno**: `{n:3}` (o `{nnn}`) en el patrón (`{n:3}/A{aa}` → `042/A26`); si un número no encaja con
-  ninguna serie, el borrador propone el patrón.
+  ninguna serie, el borrador pregunta «Esta será la numeración: …, ¿es correcta?» y un administrador la crea y confirma con
+  un clic.
+- **Revisión única por factura**: una proforma clara se abre directamente como borrador («Tratado como proforma · Cambiar»);
+  si no, una sola pregunta («¿Ya entregó esta factura a su cliente?»). En una pantalla: lo que hay que corregir (en lenguaje
+  llano, con arreglo de un clic cuando es seguro), preguntas (numeración, fecha de la operación, cada exención) y los campos
+  dudosos en ámbar con una sola acción «He revisado los campos marcados»; cliente, número, fechas, base, IVA y total siempre
+  visibles; el resto en «Más opciones». Nota opcional e historial automático (quién, cuándo, antes, después, procedencia).
+  Emitir: un botón con el resumen en el simulador y en pruebas; en producción, una confirmación fuerte (escribir el
+  número). Datos del cliente, importes, tipos, fechas y número nunca se dan por buenos solos.
 
 ## Documentación
 
@@ -166,22 +195,22 @@ tests/          pruebas de aceptación y fixtures sintéticos
 
 ## Tamaño del código
 
-**43.240 líneas de código** propio (sin líneas en blanco ni comentarios), en 100 ficheros. Contando también los
-comentarios (5.250) y las líneas en blanco (5.683), son 54.173 líneas.
+**46.236 líneas de código** propio (sin líneas en blanco ni comentarios), en 113 ficheros. Contando también los
+comentarios (6.022) y las líneas en blanco (6.112), son 58.370 líneas.
 
 | Parte | Ficheros | Líneas de código |
 |---|---:|---:|
-| Aplicación (`app/`): servidor, extracción, validación, emisión, PDF y SQL | 44 | 15.810 |
-| Interfaz web (`app/static/`): JavaScript, CSS y HTML | 3 | 5.748 |
-| Scripts (`scripts/`): generadores de facturas sintéticas, evaluación y utilidades | 14 | 9.970 |
-| Pruebas (`tests/`) | 37 | 11.680 |
-| Despliegue (`Dockerfile`, `docker-compose.yml`) | 2 | 32 |
-| **Total** | **100** | **43.240** |
+| Aplicación (`app/`): servidor, extracción, validación, emisión, PDF y SQL | 46 | 16.664 |
+| Interfaz web (`app/static/`): JavaScript, CSS y HTML | 3 | 6.516 |
+| Scripts (`scripts/`): generadores de facturas sintéticas, evaluación y utilidades | 14 | 9.971 |
+| Pruebas (`tests/`) | 48 | 13.049 |
+| Despliegue (`Dockerfile`, `docker-compose.yml`) | 2 | 36 |
+| **Total** | **113** | **46.236** |
 
-Por lenguaje: Python 37.042, JavaScript 5.118, CSS 607, SQL 418, HTML 23, Dockerfile 17 y YAML 15.
+Por lenguaje: Python 39.225, JavaScript 5.811, CSS 682, SQL 459, HTML 23, Dockerfile 20 y YAML 16.
 
 No se cuentan los esquemas oficiales de la AEAT (XSD, WSDL y catálogo de errores, 2.316 líneas), los datos esperados del
-corpus de pruebas (JSON, 3.910), los PDF de prueba ni la documentación. Medido el 12/11/2026 con
+corpus de pruebas (JSON, 3.910), los PDF de prueba ni la documentación. Medido el 18/11/2026 con
 [cloc](https://github.com/AlDanial/cloc) 1.94:
 
 ```bash

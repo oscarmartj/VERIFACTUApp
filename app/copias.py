@@ -27,8 +27,8 @@ from .config import ajustes
 
 
 AVISO_SIN_DIARIO = ("Se ha restaurado sin diario de recuperación: lo expedido después de la copia no se ha podido recuperar. "
-                    "Antes de expedir, anular o subsanar, consulte a la AEAT (página Consulta a la AEAT) cada mes desde la "
-                    "fecha de la copia: avance los contadores de las series y, si la consulta avisa de que la cadena está "
+                    "Antes de expedir, anular o subsanar, consulte a la AEAT (página «Consulta a Hacienda», menú «Más», con el "
+                    "modo avanzado) cada mes desde la fecha de la copia: avance los contadores de las series y, si la consulta avisa de que la cadena está "
                     "atrasada, reanúdela desde el último registro de la AEAT.")
 
 

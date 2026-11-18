@@ -595,8 +595,8 @@ def mensaje_cadena_atrasada(est: dict, entorno: str) -> str:
             f"{db.legible(est['fecha_hora_huso'])}), probablemente generados después de la copia que se restauró y perdidos con la base "
             "de datos y el diario. No se pueden expedir, anular ni subsanar facturas en este entorno hasta reanudar la "
             f"cadena: un administrador debe usar «Reanudar la cadena desde el último registro {servicio(entorno, prep='de')}» en "
-            f"la página Consulta a la AEAT. Así el siguiente registro se encadenará al último que tiene {serv} y no al de la "
-            "copia.")
+            "la página «Consulta a Hacienda» (menú «Más», con el modo avanzado). Así el siguiente registro se encadenará al "
+            f"último que tiene {serv} y no al de la copia.")
 
 
 def _snapshot(con, empresa_id: int, entorno: str) -> dict | None:

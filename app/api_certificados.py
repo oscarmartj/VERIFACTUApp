@@ -12,12 +12,16 @@ Reglas de acceso:
 from __future__ import annotations
 
 import re
+import sqlite3
 
+import anyio
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
-from . import certificados, db
+from . import borradores, certificados, db, multiusuario
 from . import nif as nifmod
-from .api import _texto_xml, get_con, rol, sesion
+from .api import (_IMPORTACIONES, EMPRESA_YA_DADA_DE_ALTA, _anotar_miembros, _empresa_out, _texto_xml, crear_empresa, get_con,
+                  rol, sesion)
+from .config import ajustes
 
 router = APIRouter(prefix="/api")
 MAX_CERT = 2_000_000
@@ -128,9 +132,10 @@ def mis_certificados_usos(cid: int, s=Depends(sesion), con=Depends(get_con)):
 @router.post("/empresas/{eid}/certificados")
 async def certificado_subir(eid: int, archivo: UploadFile = File(...), clave: str = Form(""), entorno: str = Form(...),
                             s=Depends(sesion), con=Depends(get_con)):
-    """Carga un certificado para la empresa y entorno (lo deja en uso; retira la asignación de «Mis certificados»)."""
+    """Carga un certificado para la empresa y entorno (lo deja en uso; retira la asignación de «Mis certificados»).
+    `entorno` «todos»: un solo certificado para pruebas y producción."""
     rol(con, s, eid, "admin")
-    if entorno not in certificados.ENTORNOS_CERT:
+    if entorno not in certificados.ENTORNOS_CARGA:
         raise HTTPException(422, "Entorno no válido")
     datos = await archivo.read(MAX_CERT + 1)
     if len(datos) > MAX_CERT:
@@ -148,7 +153,8 @@ async def certificado_subir(eid: int, archivo: UploadFile = File(...), clave: st
     except certificados.CertificadoNoValido as e:
         raise HTTPException(422, str(e))
     _cambios_anotados(con, [("certificado_asignaciones", i) for i in retiradas] + cambios)
-    return _cert_out(con, db.fila(con, "SELECT * FROM certificados WHERE id=?", (cid,)), empresa)
+    en_uso = {ent: certificados.seleccionado(con, eid, ent) for ent in certificados.ENTORNOS_CERT}
+    return _cert_out(con, db.fila(con, "SELECT * FROM certificados WHERE id=?", (cid,)), empresa, en_uso)
 
 
 def _cert_out(con, c: dict, empresa: dict, en_uso: dict | None = None) -> dict:
@@ -159,8 +165,9 @@ def _cert_out(con, c: dict, empresa: dict, en_uso: dict | None = None) -> dict:
     c["legitimacion"] = leg
     c["titular"] = leg["titular"]
     c["origen"] = "empresa"
-    u = (en_uso or {}).get(c["entorno"]) or {}
-    c["en_uso"] = u.get("origen") == "empresa" and u.get("id") == c["id"]
+    usos = [(en_uso or {}).get(ent) or {} for ent in certificados.entornos_de(c["entorno"])]
+    c["en_uso"] = any(u.get("origen") == "empresa" and u.get("id") == c["id"] for u in usos)
+    c["aviso_caducidad"] = certificados.aviso_caducidad(c)
     return c
 
 
@@ -227,7 +234,7 @@ def certificado_activar(eid: int, cert_id: int, s=Depends(sesion), con=Depends(g
     except LookupError:
         raise HTTPException(404, "No encontrado")
     _cambios_anotados(con, [("certificado_asignaciones", i) for i in retiradas] + cambios)
-    return certificados.resumen(certificados.seleccionado(con, eid, c["entorno"]), s["usuario_id"])
+    return certificados.resumen(certificados.seleccionado(con, eid, certificados.entornos_de(c["entorno"])[-1]), s["usuario_id"])
 
 
 @router.delete("/empresas/{eid}/certificados/asignaciones/{aid}")
@@ -311,3 +318,126 @@ def legitimacion_revocar(eid: int, lid: int, s=Depends(sesion), con=Depends(get_
         db.actividad(con, "legitimacion.revocada", usuario_id=s["usuario_id"], empresa_id=eid, objeto="legitimacion", objeto_id=lid)
     _cambios_anotados(con, [("legitimaciones", lid)])
     return {"ok": True}
+
+
+# --- Alta guiada: «Empiece con el certificado de su empresa» y «Probar sin certificado» ------------------------------------
+# Rutas sin identificadores (la empresa aún no existe). Terminan en /certificados y /documentos para que el límite de tamaño
+# del cuerpo sea el de las subidas (main.LimiteCuerpo).
+def _limite_alta(s) -> None:
+    if not multiusuario.LIMITE_ALTA_GUIADA.consumir(f"usuario:{s['usuario_id']}"):
+        raise HTTPException(429, "Demasiados intentos de alta en poco tiempo. Inténtelo de nuevo más tarde.")
+
+
+@router.post("/alta/certificados")
+async def alta_certificado_previa(archivo: UploadFile = File(...), clave: str = Form(""), s=Depends(sesion), con=Depends(get_con)):
+    """Vista previa del certificado antes de crear la empresa: lo abre EN MEMORIA y lo guarda cifrado unos minutos
+    (certificados.guardar_previa). Devuelve la empresa que identifica, su vigencia y los avisos, y un identificador de un
+    solo uso para crearla; nunca el archivo ni la contraseña. No dice si la empresa ya está dada de alta."""
+    datos = await archivo.read(MAX_CERT + 1)
+    if len(datos) > MAX_CERT:
+        raise HTTPException(422, "El archivo del certificado supera 2 MB")
+    _limite_alta(s)
+    con.execute("PRAGMA secure_delete=ON")   # las vistas previas borradas se sobrescriben en la base
+    try:
+        with db.transaccion(con):
+            token, info = certificados.guardar_previa(con, usuario_id=s["usuario_id"], p12=datos, clave=clave)
+    except certificados.CertificadoNoValido as e:
+        raise HTTPException(422, str(e))
+    vista = certificados.vista_previa(info, s.get("nombre"))
+    return dict(vista, previa=token, minutos=certificados.MINUTOS_PREVIA)
+
+
+@router.post("/alta/empresa")
+def alta_empresa_certificado(body: dict, s=Depends(sesion), con=Depends(get_con)):
+    """«Crear la empresa con estos datos»: crea la empresa con el NIF y la razón social del certificado de la vista previa
+    (quien la crea queda como administrador, con la relación que corresponde al tipo de certificado) y deja ese certificado
+    como el de la empresa para pruebas y producción. El NIF queda «sin acreditar» (certificados.nif_acreditado): un
+    certificado autofirmado parecería propio. Si la empresa ya está dada de alta, el mismo 409 que el alta manual."""
+    token = body.get("previa")
+    if not isinstance(token, str):
+        raise HTTPException(422, "Vuelva a cargar el certificado")
+    con.execute("PRAGMA secure_delete=ON")
+    retiradas: list[int] = []
+    cambios: list[tuple[str, int]] = []
+    try:
+        with db.transaccion(con):
+            try:
+                p12, clave = certificados.tomar_previa(con, usuario_id=s["usuario_id"], token=token)
+            except LookupError:
+                raise HTTPException(410, "La vista previa del certificado ha caducado o ya se usó: vuelva a cargarlo.")
+            info = certificados.analizar(p12, clave)
+            emp = certificados.empresa_del_certificado(info)
+            if not certificados.vigente_ahora(info):
+                raise certificados.CertificadoNoValido("El certificado no está vigente (caducado o aún no válido).")
+            if not emp:
+                raise certificados.CertificadoNoValido("El certificado no identifica a ninguna empresa ni persona con un NIF "
+                                                       "válido: dé de alta la empresa escribiendo sus datos.")
+            multiusuario.comprobar_cupo_empresas(con, s["usuario_id"])
+            eid = crear_empresa(con, s["usuario_id"], emp["nif"], emp["razon_social"], None, "certificado")
+            con.execute("UPDATE miembros SET relacion=? WHERE usuario_id=? AND empresa_id=?", (emp["relacion"], s["usuario_id"], eid))
+            empresa = db.fila(con, "SELECT * FROM empresas WHERE id=?", (eid,))
+            cid = certificados.guardar(con, empresa=empresa, entorno=certificados.ENTORNO_TODOS, p12=p12, clave=clave,
+                                       usuario_id=s["usuario_id"], retiradas=retiradas, cambios=cambios)
+            db.actividad(con, "certificado.cargado", usuario_id=s["usuario_id"], empresa_id=eid, objeto="certificado",
+                         objeto_id=cid, detalle={"entorno": certificados.ENTORNO_TODOS, "alta": True, "tipo": info["tipo"]})
+    except sqlite3.IntegrityError:
+        with db.transaccion(con):
+            certificados.borrar_previa(con, usuario_id=s["usuario_id"], token=token)
+        raise HTTPException(409, EMPRESA_YA_DADA_DE_ALTA)
+    except multiusuario.CupoSuperado as e:
+        raise HTTPException(429, str(e))
+    except certificados.CertificadoNoValido as e:
+        with db.transaccion(con):
+            certificados.borrar_previa(con, usuario_id=s["usuario_id"], token=token)
+        raise HTTPException(422, str(e))
+    _anotar_miembros(con, eid)
+    _cambios_anotados(con, cambios)
+    return _empresa_out(con, eid, s["usuario_id"])
+
+
+def _leer_factura_practica(nombre: str, datos: bytes) -> dict:
+    """Lee el emisor de una factura SIN guardarla (ni el PDF, ni imágenes, ni la extracción): inspección de seguridad,
+    texto (OCR local si hace falta) y extracción en procesos hijos limitados, como en la importación."""
+    from .extraccion import extraccion_proceso, inspeccion, texto
+    inspeccion.validar_basico(datos, nombre)
+    insp = inspeccion.inspeccionar(datos)
+    ext = extraccion_proceso.extraer(texto.leer(datos), nombre, None)
+    return {"insp": insp, "ext": ext}
+
+
+@router.post("/alta/practica/documentos")
+async def alta_practica_leer(archivo: UploadFile = File(...), s=Depends(sesion)):
+    """«Probar sin certificado»: propone el NIF, la razón social y el domicilio de la empresa a partir del emisor de una
+    factura o proforma suya. No guarda nada: el usuario confirma o corrige los datos y crea la empresa en modo práctica
+    (POST /api/empresas con modo «practica»; solo simulador hasta cargar el certificado)."""
+    limite = ajustes().max_mb_pdf * 1024 * 1024
+    datos = await archivo.read(limite + 1)
+    if len(datos) > limite:
+        raise HTTPException(422, f"El archivo supera {ajustes().max_mb_pdf} MB")
+    _limite_alta(s)
+    from .extraccion import inspeccion
+    from .importacion import _nombre_seguro
+    try:
+        r = await anyio.to_thread.run_sync(_leer_factura_practica, _nombre_seguro(archivo.filename or ""), datos,
+                                           limiter=_IMPORTACIONES)
+    except inspeccion.PDFNoValido as e:
+        raise HTTPException(422, str(e))
+    em = r["ext"].get("emisor") or {}
+
+    def leido(k):
+        v = em.get(k)
+        return v if isinstance(v, dict) and isinstance(v.get("valor"), str) and v["valor"].strip() else None
+    nif = nifmod.normalizar(leido("nif")["valor"]) if leido("nif") else ""
+    valido = nifmod.es_valido(nif)
+    out = {"emisor": {"nombre": certificados.limpio(leido("nombre")["valor"], 120) if leido("nombre") else None,
+                      "domicilio": borradores.domicilio_propuesto(certificados.limpio(leido("domicilio")["valor"], 300))
+                      if leido("domicilio") else None},
+           "confianza": {k: (leido(k) or {}).get("confianza") for k in ("nif", "nombre", "domicilio")}, "avisos": []}
+    out["emisor"]["nif"] = nif if valido else None
+    if not valido:
+        out["avisos"].append("No se ha podido leer un NIF válido del emisor: escríbalo.")
+    cp = borradores.codigo_postal(out["emisor"]["domicilio"])
+    if borradores.provincia_foral(cp):
+        out["avisos"].append(f"El domicilio (código postal {cp}, {borradores.provincia_foral(cp)}) está en un territorio foral: "
+                             "si la empresa tributa en el País Vasco o en Navarra, VERI*FACTU no se le aplica.")
+    return out

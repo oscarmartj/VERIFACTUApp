@@ -246,7 +246,8 @@ def test_exenta_e1_solo_pide_confirmar_la_causa():
     assert not codigos(inc, "bloqueo"), [i for i in inc if i["nivel"] == "bloqueo"]
     conf = [i for i in inc if i["codigo"] == "EXENTA_CAUSA"]
     assert len(conf) == 1 and conf[0]["nivel"] == "confirmar" and not conf[0]["confirmado"]
-    assert "E1" in conf[0]["mensaje"] and MENCION_23 in conf[0]["mensaje"]
+    # la causa por su nombre (sin el código interno «E1 —», carril C) y la mención que se imprimirá
+    assert "Exenta por el artículo 20" in conf[0]["mensaje"] and "E1 —" not in conf[0]["mensaje"] and MENCION_23 in conf[0]["mensaje"]
     assert not borradores.puede_emitir(inc)
     d["confirmaciones"] = [i["clave"] for i in inc if i["nivel"] == "confirmar"]
     assert borradores.puede_emitir(validar(d))
@@ -289,7 +290,7 @@ def test_e2_y_e3_se_declaran_con_clave_02():
         assert fila["clave_regimen"] == "02" and fila["motivo_exencion"] == borradores.mencion_exencion(causa)
         inc = validar(datos_base([fila], "650.00", "0.00", "650.00"))
         assert not codigos(inc, "bloqueo")
-        assert "clave de régimen 02" in next(i for i in inc if i["codigo"] == "EXENTA_CAUSA")["mensaje"]
+        assert "(se declara como exportación)" in next(i for i in inc if i["codigo"] == "EXENTA_CAUSA")["mensaje"]
         # una fila guardada con la clave 01 (p. ej. editada por la API) también vale: al expedir se fija la 02
         inc = validar(datos_base([dict(fila, clave_regimen="01")], "650.00", "0.00", "650.00"))
         assert not codigos(inc, "bloqueo")

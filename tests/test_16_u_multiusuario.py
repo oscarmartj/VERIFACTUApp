@@ -879,6 +879,9 @@ def test_r5_registro_cerrado_las_invitaciones_de_empresa_no_crean_cuentas(app_cl
     a = otro(op)
     assert registrar(a, "a@ejemplo.test", invitacion=op.ok(op.post("/api/plataforma/invitaciones", {"email": "a@ejemplo.test"}))["token"]).status_code == 200
     ea = a.ok(nueva_empresa(a, NIF_B))["id"]
+    # Carril B (paquete 6): por defecto la invitación de la empresa SÍ crea la cuenta; aquí el operador lo desactiva
+    assert op.ok(op.get("/api/plataforma"))["ajustes"]["invitaciones_empresa_crean_cuentas"] is True
+    op.ok(op.put("/api/plataforma/ajustes", {"invitaciones_empresa_crean_cuentas": False}))
     inv = a.ok(a.post(f"/api/empresas/{ea}/miembros", {"email": "bot0@desechable.test", "rol": "lector"}))["invitacion"]
     assert inv["crea_cuenta"] is False
     assert consulta(op, inv["token"])["crea_cuenta"] is False

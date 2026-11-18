@@ -109,7 +109,7 @@ def test_total_con_cifras_sin_interpretar_no_se_deduce(ctx):
     assert d["importe_total"] is None and d["total_a_pagar"] is None
     inc = _validar(con, emp, d, ext)
     falta = [i for i in inc if i["codigo"] == "TOTAL_FALTA"]
-    assert falta and falta[0]["nivel"] == "bloqueo" and "1240.00" in falta[0]["mensaje"]
+    assert falta and falta[0]["nivel"] == "bloqueo" and "1.240,00 €" in falta[0]["mensaje"]
     # el usuario indica el total impreso: no cuadra con base + cuota y sigue bloqueado (caso no soportado)
     inc = _validar(con, emp, dict(d, importe_total="1240.00"), ext, cambiados={"importe_total"})
     assert "TOTAL_DESCUADRE" in _codigos(inc, "bloqueo")
@@ -187,7 +187,8 @@ def test_retencion_garantia_no_se_trata_como_irpf(ctx, rotulo, importe, pagar, n
     especificos = {"RETENCION_GARANTIA", "RET_TIPO_INUSUAL"}
     assert _codigos(inc, "bloqueo") & especificos == bloqueos
     assert _codigos(inc, "confirmar") & especificos == confirmar
-    assert "RETENCION" in _codigos(inc, "confirmar")
+    # sin total reinterpretado, la explicación de la retención es un aviso (revisión única), no una confirmación
+    assert "RETENCION" in _codigos(inc, "aviso")
 
 
 def test_retencion_sin_porcentaje_exige_indicarlo(ctx):
@@ -290,7 +291,7 @@ def test_total_leido_con_importe_mayor_debajo_exige_confirmacion(ctx):
                                             (rot_tasa, "30,00"), (rot_fin, "1.240,00")]))
         assert d["importe_total"] == "1210.00" and "1240.00" in ext["total_factura"]["bajo_total"]
         inc = [i for i in _validar(con, emp, d, ext) if i["codigo"] == "TOTAL_CIFRAS_DEBAJO"]
-        assert inc and inc[0]["nivel"] == "confirmar" and "1240.00" in inc[0]["mensaje"]
+        assert inc and inc[0]["nivel"] == "confirmar" and "1.240,00 €" in inc[0]["mensaje"]
     # un anticipo o un pendiente de pago menores que el total, o importes ya reconocidos, no lo cuestionan
     for filas in ([("TOTAL FACTURA", "1.210,00"), ("Anticipo a cuenta (50 %)", "605,00")],
                   [("TOTAL FACTURA", "1.210,00"), ("Importe pendiente", "1.210,00")]):
@@ -450,7 +451,7 @@ def test_total_impreso_neto_de_retencion_se_explica_en_la_confirmacion(ctx):
     assert (d["importe_total"], d["total_a_pagar"]) == ("1210.00", "1060.00")
     ret = [i for i in _validar(con, emp, d, ext) if i["codigo"] == "RETENCION"]
     assert [i["nivel"] for i in ret] == ["confirmar"]
-    assert "imprime como total 1060.00" in ret[0]["mensaje"] and "base + cuota (1210.00)" in ret[0]["mensaje"]
+    assert "imprime como total 1.060,00 €" in ret[0]["mensaje"] and "la base más el IVA (1.210,00 €)" in ret[0]["mensaje"]
     ret = [i for i in _validar(con, emp, d, ext, cambiados={"importe_total"}) if i["codigo"] == "RETENCION"]
     assert "imprime como total" not in ret[0]["mensaje"]
     # total impreso normal (no neto): sin esa explicación
@@ -547,7 +548,7 @@ def test_total_leido_mas_otra_cifra_impresa_en_otro_sitio_exige_confirmacion(ctx
     ext, d = _extraer(_totales_con_tasa(disposicion))
     assert d["importe_total"] == "1210.00"
     inc = [i for i in _validar(con, emp, d, ext) if i["codigo"] in ("TOTAL_OTRA_CIFRA", "TOTAL_CIFRAS_DEBAJO")]
-    assert [i["nivel"] for i in inc] == ["confirmar"] and "1240.00" in inc[0]["mensaje"]
+    assert [i["nivel"] for i in inc] == ["confirmar"] and "1.240,00 €" in inc[0]["mensaje"]
     assert not [i for i in _validar(con, emp, d, ext, cambiados={"importe_total"}) if i["codigo"] == "TOTAL_OTRA_CIFRA"]
 
 

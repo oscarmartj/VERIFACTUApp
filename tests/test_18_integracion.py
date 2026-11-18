@@ -202,12 +202,12 @@ for (const d of JSON.parse(process.argv[3])) console.log(ctx.__d(JSON.stringify(
     for zona in ("Atlantic/Canary", "UTC", "Europe/Madrid"):
         out = subprocess.run(["node", str(arnes), str(APP_JS), json.dumps(casos)], capture_output=True, text=True,
                              timeout=60, env=dict(os.environ, TZ=zona), check=True).stdout.splitlines()
-        assert out[0].startswith("Minuto: 12/11/26, 3:54"), (zona, out[0])
+        assert out[0].startswith("Minuto: 12/11/2026, 03:54"), (zona, out[0])     # año con cuatro cifras (carril C)
         assert out[1].startswith("Modo: Respuesta fuera de esquema") and out[2].startswith("Modo: Rechazo de la consulta")
         assert "solo en el simulador local 2" in out[3] and "Último registro en el simulador local" in out[3]
         assert "Fecha de expedición: 12/11/2026" in out[3] and "AEAT" not in out[3]
         assert "solo en la AEAT 1" in out[4]
-        assert out[5].startswith("Copia: copia del 12/11/26, 3:54")
+        assert out[5].startswith("Copia: copia del 12/11/2026, 03:54")
         assert "Estados de la cadena recuperados: 1" in out[6]
         assert not any(re.search(r"\b[a-z]+_[a-z_]+\b", x) for x in out), out
 

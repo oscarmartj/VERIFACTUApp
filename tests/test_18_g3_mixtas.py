@@ -115,7 +115,7 @@ def test_disenos_correctos_se_separan_y_la_confirmacion_dice_de_donde_sale(linea
     assert not codigos(inc, "bloqueo"), [i for i in inc if i["nivel"] == "bloqueo"]
     conf = next(i for i in inc if i["codigo"] == "EXENTA_CAUSA")
     assert "se ha calculado como diferencia" in conf["mensaje"]
-    assert f"corresponde a la línea «{lineas[0][0]}» (650.00)" in conf["mensaje"]
+    assert f"corresponde a la línea «{lineas[0][0]}» (650,00 €)" in conf["mensaje"]
     assert ("coincide con la base exenta impresa" in conf["mensaje"]) == impresa
     assert not borradores.puede_emitir(inc)   # la causa se confirma siempre
 

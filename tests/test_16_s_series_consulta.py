@@ -173,7 +173,10 @@ def test_serie_con_ceros_de_principio_a_fin(tres_emitidas):
     b = c.ok(c.patch(f"/api/borradores/{b['id']}", {"cambios": [{"campo": "num_serie", "valor": f"4/A{aa}", "motivo": "prueba"}]}))
     assert "SERIE_NO_CONFIRMADA" in _codigos(b, "bloqueo")
     aviso = next(i for i in b["incidencias"] if i["codigo"] == "SERIE_FORMATO")
-    assert f"004/A{aa}" in aviso["mensaje"] and b["serie_propuesta"]["patron"] == "{n}/A{aa}"
+    # no se propone una serie «{n}/A{aa}»: se solaparía con la confirmada y su contador repetiría números (revisión del
+    # carril A, A-V1); se ofrece escribirlo con el ancho de la serie, con un clic
+    assert f"004/A{aa}" in aviso["mensaje"] and b["serie_propuesta"] is None
+    assert (aviso.get("arreglo") or {}).get("valor") == f"004/A{aa}", aviso
     # Mismo número con otros ceros: duplicado de una factura expedida
     b = c.ok(c.patch(f"/api/borradores/{b['id']}", {"cambios": [{"campo": "num_serie", "valor": f"0002/A{aa}", "motivo": "prueba"}]}))
     assert "DUPLICADA" in _codigos(b, "bloqueo")

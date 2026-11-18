@@ -290,6 +290,9 @@ def sitio(tmp_path_factory):
                                             "empresa": EMPRESA_A, "registro_abierto": True}))
         op.csrf, ea = d["csrf"], d["empresas"][0]["id"]
         configurar(op, ea, patron="{n:3}/A{aa}", siguiente=1)
+        # Carril C: estas pruebas recorren herramientas técnicas (detalle de la remisión, consulta y conciliación, actividad,
+        # editor de la numeración, verificación del PDF): el operador las ve con el «Modo avanzado» activado
+        op.ok(op.put("/api/yo/preferencias", {"modo_avanzado": True}))
         ana = _registrar(_cliente_http(url), "ana@ejemplo.test")
         eb = ana.ok(ana.post("/api/empresas", EMPRESA_B))["id"]
         configurar(ana, eb, patron="{n:3}/B{aa}", siguiente=1)
@@ -462,16 +465,18 @@ await pe.screenshot({ path: `${DIR}/ui3_vuelve_a_tener_acceso.png`, fullPage: tr
 def test_ui4_pantallas_del_productor_y_del_ambito(sitio):
     """UI-4: un administrador de empresa que no es el operador ve que el productor lo identifica el operador de la
     plataforma (no un paso pendiente de su empresa, sin formulario deshabilitado), y la ayuda del ámbito ya no dice que
-    las exenciones se bloquean. El operador sigue viendo el paso pendiente y el formulario."""
+    las exenciones se bloquean. El operador sigue viendo el paso pendiente y el formulario.
+    Carril B (paquete 4): para quien no es el operador, el paso «Productor del sistema» ya no aparece; lo que depende de
+    la plataforma se resume en una línea en «Empezar a enviar a Hacienda» (y la ruta antigua lleva allí)."""
     s = sitio
     obs = recorrido(s, r"""
 const page = await abrir(browser);
 await entrar(page, 'ana@ejemplo.test', 'clave-segura-123');
 await ir(page, '/configuracion/productor', '.config-contenido .card');
 obs.productor = await texto(page, '.config-contenido');
-obs.paso = await texto(page, '.stepper li:has(a[href="#/configuracion/productor"])');
-obs.paso_clase = await page.locator('.stepper li:has(a[href="#/configuracion/productor"])').getAttribute('class');
-obs.campos = await page.locator('.config-contenido input').count();
+obs.paso = String(await page.locator('.stepper li:has(a[href="#/configuracion/productor"])').count());
+obs.paso_clase = await page.locator('.stepper li[class*="paso-"] a[aria-current="step"]').getAttribute('href');
+obs.campos = await page.locator('.config-contenido input:not([type="checkbox"])').count();
 await page.screenshot({ path: `${DIR}/ui4_productor_ana.png`, fullPage: true });
 await ir(page, '/configuracion/ambito', '.config-contenido .card');
 obs.casos = await texto(page, '.card:has-text("Casos que la aplicación puede expedir")');
@@ -481,10 +486,10 @@ await ir(op, '/configuracion/productor', '.config-contenido .card');
 obs.op_paso = await texto(op, '.stepper li:has(a[href="#/configuracion/productor"])');
 obs.op_boton = await op.getByRole('button', { name: 'Confirmar productor' }).isEnabled();
 """)
-    assert "operador de la plataforma" in obs["productor"], obs["productor"]
-    assert "Solo un administrador puede modificarlo" not in obs["productor"] and obs["campos"] == 0
-    assert "pendiente" not in obs["paso"] and "paso-pendiente" not in obs["paso_clase"], obs
-    assert "lo completa el operador de la plataforma" in obs["paso"]
+    assert "La plataforma aún no está habilitada para producción (lo gestiona el operador)." in obs["productor"], obs["productor"]
+    assert "Solo un administrador puede modificarlo" not in obs["productor"] and "Productor del sistema identificado" not in obs["productor"]
+    assert obs["paso"] == "0" and obs["paso_clase"] == "#/configuracion/produccion", obs
+    assert obs["campos"] <= 1, obs                                   # solo la frase de la autorización (plegada)
     assert "Operaciones exentas de IVA" in obs["casos"]
     assert "(exenciones" not in obs["casos"] and "exenciones," not in obs["casos"], obs["casos"]
     assert obs["op_paso"].endswith("pendiente") and obs["op_boton"] is True

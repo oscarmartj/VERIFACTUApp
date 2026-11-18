@@ -27,9 +27,10 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import tempfile
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from cryptography import x509
@@ -43,6 +44,12 @@ from .seguridad import cifrar, descifrar
 
 OID_ORG_ID = x509.ObjectIdentifier("2.5.4.97")
 ENTORNOS_CERT = ("pruebas", "produccion")                       # certificados cargados por empresa
+# Un certificado cargado para la empresa puede servir para los dos entornos de la AEAT («todos»): se carga una sola vez (alta
+# guiada por el certificado, o «para pruebas y producción»). Uno cargado para un entorno concreto prevalece en ese entorno.
+ENTORNO_TODOS = "todos"
+ENTORNOS_CARGA = ENTORNOS_CERT + (ENTORNO_TODOS,)
+DIAS_AVISO_CADUCIDAD = 30          # aviso de caducidad del certificado con esta antelación
+MINUTOS_PREVIA = 15                # vigencia de la vista previa (cifrada) de un certificado antes de crear la empresa
 ENTORNOS_ASIGNACION = ("simulador", "pruebas", "produccion")    # en el simulador solo sirve para probar la representación
 METODOS_TERCERO = ("apoderamiento_aeat", "colaborador_social")
 TEXTO_METODO = {"apoderamiento_aeat": "apoderamiento en la AEAT", "colaborador_social": "colaboración social"}
@@ -50,15 +57,15 @@ TEXTO_METODO = {"apoderamiento_aeat": "apoderamiento en la AEAT", "colaborador_s
 # estado «en uso»: la fila necesita el archivo cifrado, que el diario nunca guarda.
 TABLAS_DIARIO = ("certificados_usuario", "certificado_asignaciones", "legitimaciones", "certificados")
 AYUDA_4112 = ("El titular del certificado no consta como obligado, apoderado ni colaborador social: revise en Configuración "
-              "→ Certificados qué certificado se usa y la legitimación declarada para su titular, y compruebe el "
+              "→ Certificado qué certificado se usa y la legitimación declarada para su titular, y compruebe el "
               "apoderamiento o la colaboración social en la AEAT antes de reintentar.")
 AYUDA_4123 = ("La AEAT no encuentra en su censo el NIF del representante (el titular del certificado de un tercero que se usa "
-              "para remitir): compruebe en Configuración → Certificados qué certificado se usa y el NIF de la legitimación "
+              "para remitir): compruebe en Configuración → Certificado qué certificado se usa y el NIF de la legitimación "
               "declarada. Si el NIF es correcto, su titular debe resolver su situación en el censo de la AEAT antes de "
               "reintentar.")
 AYUDA_4124 = ("La AEAT no reconoce el nombre del representante para ese NIF. Los envíos llevan el nombre que figura en el "
               "certificado (la razón social en los sellos y certificados de representante de persona jurídica; apellidos y "
-              "nombre en los de persona física): compruebe en Configuración → Certificados el certificado en uso y su titular. "
+              "nombre en los de persona física): compruebe en Configuración → Certificado el certificado en uso y su titular. "
               "Si el censo tiene otro nombre (p. ej., tras un cambio de denominación), use un certificado con el nombre "
               "actual o actualice el censo antes de reintentar.")
 AYUDAS_AEAT = {"4112": AYUDA_4112, "4123": AYUDA_4123, "4124": AYUDA_4124}
@@ -181,6 +188,152 @@ def vigente_ahora(cert_row: dict) -> bool:
         return False
 
 
+def dias_para_caducar(c: dict) -> int | None:
+    """Días que faltan para que caduque el certificado (negativo si ya caducó); None si la fecha no se puede leer."""
+    try:
+        hasta = datetime.fromisoformat(c["valido_hasta"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return (hasta - datetime.now(timezone.utc)).days
+
+
+def aviso_caducidad(c: dict | None) -> str | None:
+    """Aviso cuando a un certificado vigente le quedan DIAS_AVISO_CADUCIDAD días o menos: al caducar, los envíos a la
+    AEAT se detienen hasta cargar el renovado."""
+    if not c or not vigente_ahora(c):
+        return None
+    d = dias_para_caducar(c)
+    if d is None or d > DIAS_AVISO_CADUCIDAD:
+        return None
+    cuando = "hoy" if d <= 0 else ("mañana" if d == 1 else f"dentro de {d} días")
+    return (f"El certificado caduca el {db.legible(c['valido_hasta'], hora=False)} ({cuando}): pida su renovación y "
+            "cárguelo de nuevo antes de esa fecha; si caduca, los envíos a la AEAT se detendrán hasta entonces.")
+
+
+def nombre_persona(c: dict) -> str | None:
+    """Nombre de la PERSONA del certificado («APELLIDOS NOMBRE»): el titular en los de persona física y el representante
+    en los de representante de persona jurídica (su nombre solo consta en el sujeto: GN/SN o el CN). None en los sellos."""
+    if c.get("tipo") not in ("persona_fisica", "representante_pj"):
+        return None
+    try:
+        suj = x509.Name.from_rfc4514_string(c.get("sujeto") or "")
+    except Exception:  # noqa: BLE001 — sujeto no interpretable: sin nombre
+        return None
+    gn, sn = _attr(suj, NameOID.GIVEN_NAME), _attr(suj, NameOID.SURNAME)
+    if gn and sn:
+        return limpio(f"{sn} {gn}")
+    cn = _attr(suj, NameOID.COMMON_NAME)
+    return _nombre_cn(cn, c.get("titular_nif"))
+
+
+# Relación con la empresa de quien la da de alta con su certificado (miembros.relacion)
+RELACION_POR_TIPO = {"persona_juridica": "administrador", "representante_pj": "representante", "persona_fisica": "administrador"}
+
+
+def empresa_del_certificado(info: dict) -> dict | None:
+    """Empresa (obligado tributario) que identifica el certificado: el NIF de la entidad (2.5.4.97) y su razón social (O)
+    en los sellos y certificados de representante de persona jurídica; el NIF y el nombre del titular en los de persona
+    física (autónomo). Con la relación de quien lo carga. None si no identifica a ninguna (tipo no reconocido)."""
+    tipo = info.get("tipo")
+    if tipo in ("persona_juridica", "representante_pj"):
+        nif = info.get("representado_nif")
+    elif tipo == "persona_fisica":
+        nif = info.get("titular_nif")
+    else:
+        return None
+    nombre = nombre_certificado(info) or limpio(info.get("titular_nombre"))
+    if not nif or not nombre:
+        return None
+    return {"nif": nif, "razon_social": nombre, "relacion": RELACION_POR_TIPO[tipo]}
+
+
+# --- Vista previa del certificado antes de crear la empresa -------------------------------------------------------------
+def _hash_previa(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _ctx_previa(token_hash: str, usuario_id: int) -> bytes:
+    """Contexto AEAD: el archivo de la vista previa solo se descifra para ese identificador y ese usuario."""
+    return f"cert-previa:{token_hash}:{usuario_id}".encode()
+
+
+def purgar_previas(con) -> int:
+    """Borra las vistas previas caducadas (archivo y contraseña cifrados). Lo hace cada alta y el arranque."""
+    if not db.fila(con, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='certificados_previos'"):
+        return 0
+    return con.execute("DELETE FROM certificados_previos WHERE expira_en <= ?", (db.utc_iso(),)).rowcount
+
+
+def guardar_previa(con, *, usuario_id: int, p12: bytes, clave: str) -> tuple[str, dict]:
+    """Analiza el certificado EN MEMORIA y, si se puede abrir, lo guarda cifrado (AES-256-GCM con la clave maestra, ligado a
+    la fila y al usuario) durante MINUTOS_PREVIA minutos para crear la empresa sin volver a pedirlo. Devuelve (identificador
+    para el navegador, datos del certificado sin secretos). Del identificador solo se guarda su SHA-256. Cada usuario tiene
+    a lo sumo 3 vistas previas pendientes (se borran las más antiguas). Dentro de una transacción."""
+    info = analizar(p12, clave)
+    purgar_previas(con)
+    viejas = [r["id"] for r in db.filas(con, "SELECT id FROM certificados_previos WHERE usuario_id=? ORDER BY id DESC",
+                                        (usuario_id,))][2:]
+    for i in viejas:
+        con.execute("DELETE FROM certificados_previos WHERE id=?", (i,))
+    token = secrets.token_urlsafe(32)
+    th = _hash_previa(token)
+    blob = cifrar(json.dumps({"p12": base64.b64encode(p12).decode(), "clave": clave}).encode(), _ctx_previa(th, usuario_id))
+    ahora = datetime.now(timezone.utc).replace(microsecond=0)
+    con.execute("INSERT INTO certificados_previos (token_hash, usuario_id, blob_cifrado, creado_en, expira_en) VALUES (?,?,?,?,?)",
+                (th, usuario_id, blob, ahora.isoformat(), (ahora + timedelta(minutes=MINUTOS_PREVIA)).isoformat()))
+    return token, info
+
+
+def tomar_previa(con, *, usuario_id: int, token) -> tuple[bytes, str]:
+    """Recupera (y BORRA) la vista previa del usuario: (archivo, contraseña) en memoria. LookupError si no existe, es de otro
+    usuario o ha caducado. Dentro de una transacción: si la transacción se deshace, la fila vuelve (bórrela con
+    `borrar_previa`)."""
+    if not isinstance(token, str) or not 20 <= len(token) <= 100:
+        raise LookupError("No encontrado")
+    th = _hash_previa(token)
+    f = db.fila(con, "SELECT * FROM certificados_previos WHERE token_hash=? AND usuario_id=? AND expira_en > ?",
+                (th, usuario_id, db.utc_iso()))
+    if not f:
+        raise LookupError("No encontrado")
+    con.execute("DELETE FROM certificados_previos WHERE id=?", (f["id"],))
+    d = json.loads(descifrar(f["blob_cifrado"], _ctx_previa(th, usuario_id)))
+    return base64.b64decode(d["p12"]), d["clave"]
+
+
+def borrar_previa(con, *, usuario_id: int, token) -> None:
+    if isinstance(token, str) and 20 <= len(token) <= 100:
+        con.execute("DELETE FROM certificados_previos WHERE token_hash=? AND usuario_id=?", (_hash_previa(token), usuario_id))
+
+
+TEXTO_SIN_ACREDITAR = ("La aplicación no comprueba quién emitió el certificado (eso lo hace la AEAT al conectar): el NIF de "
+                       "la empresa queda «sin acreditar» hasta que el operador de la plataforma lo verifique o la AEAT acepte "
+                       "un envío hecho con este certificado. En el simulador puede trabajar desde ya.")
+
+
+def vista_previa(info: dict, nombre_cuenta: str | None) -> dict:
+    """Lo que se muestra antes de crear la empresa: la empresa que identifica el certificado, su vigencia y los avisos
+    (caducidad, nombre del representante distinto del de la cuenta). Nunca el archivo ni la contraseña."""
+    emp = empresa_del_certificado(info)
+    avisos = []
+    vig = vigente_ahora(info)
+    if not vig:
+        avisos.append("El certificado no está vigente (caducado o aún no válido): no puede usarse para dar de alta la empresa.")
+    elif aviso_caducidad(info):
+        avisos.append(aviso_caducidad(info))
+    if not emp:
+        avisos.append("El certificado no identifica a ninguna empresa ni persona con un NIF válido: dé de alta la empresa "
+                      "escribiendo sus datos y cargue después el certificado.")
+    persona = nombre_persona(info) if info.get("tipo") == "representante_pj" else None
+    if persona and nombre_cuenta and not mismo_nombre(persona, nombre_cuenta):
+        avisos.append(f"El certificado es del representante «{persona}» y su cuenta está a nombre de «{nombre_cuenta}». "
+                      "Si no es usted, compruebe que está autorizado a usar este certificado.")
+    return {"empresa": emp, "tipo": info.get("tipo"), "vigente": vig, "valido_desde": info.get("valido_desde"),
+            "valido_hasta": info.get("valido_hasta"),
+            "representante": ({"nif": info.get("titular_nif"), "nombre": persona} if info.get("tipo") == "representante_pj"
+                              else None),
+            "avisos": avisos, "nota": TEXTO_SIN_ACREDITAR, "puede_crear": bool(emp and vig)}
+
+
 def nombre_certificado(c: dict) -> str | None:
     """Nombre del titular tal como lo identifica el certificado, en el orden del censo: la entidad (O) en los sellos y
     certificados de representante de persona jurídica; «APELLIDOS NOMBRE» (SN y GN, o el CN) en los de persona física."""
@@ -249,7 +402,7 @@ def evaluar_legitimacion(info: dict, empresa: dict, legitimaciones: list[dict]) 
         elif not legs and del_titular:
             res["detalle"] = (f"La legitimación declarada para {nombre_t or 'el titular'} (NIF {nif_t}) no tiene su documento "
                               "de evidencia (p. ej., se perdió al restaurar una copia de seguridad): no cuenta. Vuelva a "
-                              "declararla en Configuración → Certificados con el documento que la acredite.")
+                              "declararla en Configuración → Certificado con el documento que la acredite.")
         elif legs:
             l = legs[-1]
             # El nombre del Representante es el del certificado (la AEAT lo contrasta con su censo: error 4124); el
@@ -268,7 +421,7 @@ def evaluar_legitimacion(info: dict, empresa: dict, legitimaciones: list[dict]) 
                 res["detalle"] += " " + res["aviso_nombre"]
         else:
             res["detalle"] = (f"El certificado es de un tercero ({nombre_t or 'titular sin nombre'} · NIF {nif_t}), no de la "
-                              "empresa ni de su representante legal. Para usarlo declare en Configuración → Certificados el "
+                              "empresa ni de su representante legal. Para usarlo declare en Configuración → Certificado el "
                               "apoderamiento en la AEAT o la colaboración social de ese titular, con el documento que lo "
                               "acredite.")
     if not vigente:
@@ -345,8 +498,9 @@ def seleccionado(con, empresa_id: int, entorno: str) -> dict | None:
         if cu:
             v = _vista_asignacion(a, cu)
     if v is None and entorno in ENTORNOS_CERT:
-        c = db.fila(con, "SELECT * FROM certificados WHERE empresa_id=? AND entorno=? AND activo=1 ORDER BY id DESC LIMIT 1",
-                    (empresa_id, entorno))
+        # El cargado para ese entorno prevalece sobre el cargado para los dos («todos»)
+        c = db.fila(con, """SELECT * FROM certificados WHERE empresa_id=? AND entorno IN (?, 'todos') AND activo=1
+                            ORDER BY (entorno = ?) DESC, id DESC LIMIT 1""", (empresa_id, entorno, entorno))
         if c:
             v = _vista_empresa(c)
     if v is None:
@@ -451,14 +605,15 @@ def resumen(v: dict | None, usuario_id: int | None = None) -> dict | None:
             "representado_nif": v.get("representado_nif"), "valido_desde": v.get("valido_desde"),
             "valido_hasta": v.get("valido_hasta"), "titular": leg.get("titular"),
             "propietario": ({"id": v["propietario_id"], "nombre": leg.get("propietario")} if v.get("propietario_id") else None),
-            "es_mio": bool(usuario_id and v.get("propietario_id") == usuario_id), "legitimacion": leg}
+            "es_mio": bool(usuario_id and v.get("propietario_id") == usuario_id), "legitimacion": leg,
+            "aviso_caducidad": aviso_caducidad(v)}
 
 
 def describir(v: dict | None, entorno: str) -> str:
     """Texto del requisito «certificado»: qué certificado se usará y en calidad de qué."""
     if not v:
         return (f"No hay certificado para {entorno}: cárguelo para la empresa o asigne uno de «Mis certificados» "
-                "(Configuración → Certificados).")
+                "(Configuración → Certificado).")
     leg = v["legitimacion_dict"]
     t = leg.get("titular") or {}
     origen = "de la empresa" if v.get("origen") != "usuario" else f"de «Mis certificados» de {leg.get('propietario') or 'otro usuario'}"
@@ -470,15 +625,84 @@ def describir(v: dict | None, entorno: str) -> str:
         papel = "de un tercero: necesita legitimación declarada para su titular"
     # Con un tercero utilizable, el detalle de la legitimación ya figura en el requisito «representacion»
     detalle = "" if leg.get("requiere_legitimacion") and leg.get("utilizable") else leg.get("detalle", "")
+    caduca = aviso_caducidad(v)
     return (f"Se usará el certificado de {t.get('nombre') or '—'} (NIF {t.get('nif') or '—'}), {origen}, válido hasta "
-            f"{db.legible(v.get('valido_hasta'), hora=False)}; {papel}. {detalle}").strip()
+            f"{db.legible(v.get('valido_hasta'), hora=False)}; {papel}. {detalle}{' ' + caduca if caduca else ''}").strip()
+
+
+# --- Cruces de cada factura con el certificado y el domicilio de la empresa ---------------------------------------------
+def _texto(v) -> str:
+    return v.strip() if isinstance(v, str) else ""
+
+
+def certificado_de_referencia(con, empresa_id: int, entorno: str) -> dict | None:
+    """Certificado con el que cruzar los datos de una factura: el del entorno (pruebas o producción) o, en el simulador, el
+    que se usaría en producción o en pruebas."""
+    for ent in ((entorno,) if entorno in ENTORNOS_CERT else ("produccion", "pruebas")):
+        c = seleccionado(con, empresa_id, ent)
+        if c:
+            return c
+    return None
+
+
+def cruces_factura(con, empresa: dict, datos: dict, entorno: str) -> list[dict]:
+    """Avisos (nunca bloqueos ni confirmaciones) que cruzan los datos del documento con el certificado de la empresa y con
+    su domicilio configurado:
+    - EMISOR_NOMBRE_CERTIFICADO: la razón social del emisor del documento no es la del certificado propio de la empresa;
+    - EMISOR_CP_FORAL: el código postal del emisor es de un territorio foral (01, 20, 48, 31) y la empresa respondió que
+      tributa en territorio común: se le pide revisar la respuesta sobre el territorio;
+    - EMISOR_CP_DISTINTO: el código postal del emisor no es el del domicilio fiscal configurado;
+    - CERTIFICADO_CADUCA: el certificado del entorno caduca en 30 días o menos (pruebas y producción).
+    Ningún dato se da por bueno: el registro sigue usando la razón social configurada y el usuario ve el documento."""
+    from .borradores import TERRITORIOS_FORALES, codigo_postal, provincia_foral
+    inc: list[dict] = []
+
+    def add(campo, codigo, mensaje):
+        inc.append({"nivel": "aviso", "campo": campo, "codigo": codigo, "mensaje": mensaje})
+    datos = datos if isinstance(datos, dict) else {}
+    em = datos.get("emisor") if isinstance(datos.get("emisor"), dict) else {}
+    nombre, domicilio = _texto(em.get("nombre")), _texto(em.get("domicilio"))
+    try:
+        cert = certificado_de_referencia(con, empresa["id"], entorno)
+    except Exception:  # noqa: BLE001 — un cruce nunca impide revisar la factura
+        cert = None
+    leg = (cert or {}).get("legitimacion_dict") or {}
+    if cert and leg.get("propio") and nombre:
+        del_cert = nombre_certificado(cert)
+        if del_cert and not mismo_nombre(nombre, del_cert):
+            add("emisor.nombre", "EMISOR_NOMBRE_CERTIFICADO",
+                f"La razón social del emisor en el documento («{nombre}») no coincide con la del certificado de la empresa "
+                f"(«{del_cert}»). Compruébela: el registro usará la razón social configurada («{empresa.get('razon_social') or '—'}»).")
+    cp = codigo_postal(domicilio)
+    if provincia_foral(cp) and empresa.get("territorio") not in TERRITORIOS_FORALES:
+        add("emisor.domicilio", "EMISOR_CP_FORAL",
+            f"El domicilio del emisor del documento (código postal {cp}, {provincia_foral(cp)}) está en un territorio foral. "
+            "Si su empresa tributa en el País Vasco o en Navarra, VERI*FACTU no se le aplica: revise la respuesta sobre el "
+            "territorio en Configuración → «Tres preguntas sobre su empresa».")
+    cp_emp = codigo_postal(empresa.get("domicilio"))
+    if cp and cp_emp and cp != cp_emp:
+        add("emisor.domicilio", "EMISOR_CP_DISTINTO",
+            f"El código postal del emisor en el documento ({cp}) no es el del domicilio fiscal configurado ({cp_emp}). "
+            "Compruebe el domicilio del emisor: se imprime en la factura.")
+    if entorno in ENTORNOS_CERT and cert and aviso_caducidad(cert):
+        add("empresa", "CERTIFICADO_CADUCA", aviso_caducidad(cert))
+    return inc
 
 
 # --- Carga por empresa -------------------------------------------------------------------------------------------
+def entornos_de(entorno: str) -> tuple[str, ...]:
+    """Entornos de la AEAT a los que sirve un certificado cargado para la empresa."""
+    return ENTORNOS_CERT if entorno == ENTORNO_TODOS else (entorno,)
+
+
 def _desactivar_empresa(con, empresa_id: int, entorno: str, excepto: int | None = None) -> list[tuple[str, int]]:
-    """Deja sin uso los certificados de la empresa en ese entorno (con nueva versión, para anotarlos en el diario)."""
-    ids = [r["id"] for r in db.filas(con, "SELECT id FROM certificados WHERE empresa_id=? AND entorno=? AND activo=1 AND id<>?",
-                                     (empresa_id, entorno, excepto or 0))]
+    """Deja sin uso los certificados de la empresa en ese entorno (con nueva versión, para anotarlos en el diario). Uno
+    para los dos entornos («todos») sustituye a todos; uno para un entorno solo a los de ese entorno (el de los dos sigue
+    sirviendo para el otro)."""
+    entornos = ENTORNOS_CARGA if entorno == ENTORNO_TODOS else (entorno,)
+    ids = [r["id"] for r in db.filas(con, f"""SELECT id FROM certificados WHERE empresa_id=? AND activo=1 AND id<>?
+                                             AND entorno IN ({','.join('?' * len(entornos))})""",
+                                     (empresa_id, excepto or 0, *entornos))]
     for i in ids:
         con.execute("UPDATE certificados SET activo=0, version=version+1 WHERE id=?", (i,))
     return [("certificados", i) for i in ids]
@@ -493,9 +717,12 @@ def guardar(con, *, empresa: dict, entorno: str, p12: bytes, clave: str, usuario
     leg = evaluar_legitimacion(info, empresa, _legitimaciones(con, empresa["id"]))
     contexto = f"cert:{empresa['id']}:{entorno}".encode()
     blob = cifrar(json.dumps({"p12": base64.b64encode(p12).decode(), "clave": clave}).encode(), contexto)
+    if entorno not in ENTORNOS_CARGA:
+        raise ValueError("Entorno no válido")
     desactivados = _desactivar_empresa(con, empresa["id"], entorno)
-    ids = retirar(con, usuario_id=usuario_id, motivo="sustituida por un certificado de la empresa", empresa_id=empresa["id"],
-                  entorno=entorno)
+    ids = [i for ent in entornos_de(entorno)
+           for i in retirar(con, usuario_id=usuario_id, motivo="sustituida por un certificado de la empresa",
+                            empresa_id=empresa["id"], entorno=ent)]
     if retiradas is not None:
         retiradas.extend(ids)
     cur = con.execute("""INSERT INTO certificados (empresa_id, entorno, alias, sujeto, emisor, numero_serie, valido_desde,
@@ -520,8 +747,9 @@ def activar_empresa(con, *, empresa_id: int, certificado_id: int, usuario_id: in
     if not c["activo"]:
         con.execute("UPDATE certificados SET activo=1, version=version+1 WHERE id=?", (certificado_id,))
         cambios.append(("certificados", certificado_id))
-    retiradas = retirar(con, usuario_id=usuario_id, motivo="sustituida por un certificado de la empresa", empresa_id=empresa_id,
-                        entorno=c["entorno"])
+    retiradas = [i for ent in entornos_de(c["entorno"])
+                 for i in retirar(con, usuario_id=usuario_id, motivo="sustituida por un certificado de la empresa",
+                                  empresa_id=empresa_id, entorno=ent)]
     return retiradas, cambios
 
 
@@ -825,7 +1053,9 @@ def reproducir_diario(con, entradas: list[dict]) -> dict:
 
 
 def reconciliar_diario(con, entradas: list[dict]) -> int:
-    """Al arrancar: anota las filas cuya versión no figure aún en el diario (p. ej. caída antes de anotarlas)."""
+    """Al arrancar: anota las filas cuya versión no figure aún en el diario (p. ej. caída antes de anotarlas) y borra las
+    vistas previas de certificados caducadas (nunca se anotan en el diario)."""
+    purgar_previas(con)
     tablas = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if not set(TABLAS_DIARIO) <= tablas:
         return 0

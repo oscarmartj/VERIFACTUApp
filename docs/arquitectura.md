@@ -30,7 +30,8 @@ navegador ──HTTPS──> FastAPI (app/api.py) ──> SQLite (data/verifactu
 ## Modelo de datos (resumen; detalle en `app/migraciones/0001_inicial.sql`)
 
 - `usuarios` (con `superadmin`, `cambiar_clave`, `version` y `alta_origen`), `sesiones`, `miembros` (rol admin/emisor/lector por empresa y declaración de autorización), `invitaciones` (SHA-256 del token, empresa y rol, caducidad, uso y anulación) y `plataforma` (ajustes versionados, p. ej. `registro_abierto`).
-- `empresas` (NIF, razón social y **ámbito del emisor**: contribuyente, territorio, SII, exclusiones, origen de los PDF).
+- `empresas` (NIF, razón social, `alta_origen` —certificado, práctica o manual— y **ámbito del emisor**: contribuyente, territorio, SII, nota de casos especiales, origen de los PDF).
+- `certificados_previos` (0009): vista previa del certificado antes de crear la empresa, cifrada (AES-256-GCM, contexto ligado a la fila y al usuario), 15 minutos, del identificador solo su SHA-256; se borra al usarla, al caducar (en cada alta y al arrancar) y nunca va al diario.
 - `productor` (identidad del productor del sistema y número de instalación), `instalaciones`.
 - `series` + `series_contadores` (patrón confirmado, correlatividad por año).
 - `documentos` (original intacto + SHA-256, inspección, clasificación confirmada, bloqueo de emisión) y `extracciones` (valor, página, posición, método, confianza por campo).
@@ -43,6 +44,7 @@ navegador ──HTTPS──> FastAPI (app/api.py) ──> SQLite (data/verifactu
 - **Disparadores** impiden borrar facturas o registros y modificar sus campos fiscales.
 
 Migraciones: ficheros `app/migraciones/NNNN_*.sql`, aplicados en orden al arrancar y anotados en la tabla `migraciones`.
+`0010_preferencias.sql` añade `usuarios.modo_avanzado` (0/1, 0 por defecto): la preferencia «Modo avanzado» de cada persona.
 `0008_indices_restauracion.sql` añade los índices `registros(factura_id, secuencia)` y `facturas(rectifica_factura_id)`
 (estado de cada factura, anulación y restauración sin recorrer las tablas enteras).
 
@@ -165,15 +167,44 @@ avances que la base tiene y el diario no. `GET /api/empresas/{eid}/series` devue
   seguridad (carpeta `0700`, ficheros `0600`) y las copias apartadas al restaurar solo las puede leer el usuario del
   servicio, como el almacén, el diario y la clave maestra; al arrancar se ajustan las creadas antes con permisos más
   abiertos (`copias.proteger_ficheros`, `db.crear_privado`).
+- **Alta guiada por el certificado y modo práctica** (`app/api_certificados.py`, sección «Alta guiada»; migración 0009).
+  `POST /api/alta/certificados` abre el PKCS#12 en memoria (`certificados.analizar`) y guarda archivo y contraseña
+  **cifrados** en `certificados_previos` durante 15 minutos (`guardar_previa`); devuelve la empresa que identifica
+  (`empresa_del_certificado`: el NIF de la entidad —2.5.4.97— y O en sellos y representantes; el del titular y «APELLIDOS
+  NOMBRE» en persona física), la vigencia y avisos (caducidad en 30 días, nombre del representante distinto del de la
+  cuenta), sin decir si la empresa existe. `POST /api/alta/empresa` toma (y borra) la vista previa, crea la empresa con
+  `crear_empresa` (mismo 409 que el alta manual) y guarda el certificado con `entorno = todos` (la tabla `certificados` se
+  reconstruye en 0009 para admitirlo; `seleccionado` prefiere el del entorno concreto y, si no, el de los dos; su estado
+  «en uso» va al diario y se restaura como el de los demás). La relación se deduce del tipo de certificado y el tipo de
+  contribuyente de la letra del NIF. **No** marca el NIF como verificado: la aplicación no valida la cadena del
+  certificado (uno autofirmado parecería propio) y `nif_acreditado` sigue exigiendo al operador o una aceptación de la
+  AEAT con un certificado propio. El **modo práctica** lee el emisor de una factura sin guardar nada
+  (`/api/alta/practica/documentos`, mismos procesos limitados que la importación) y crea la empresa con
+  `alta_origen = practica`; `produccion.modo_practica` la mantiene en el simulador mientras no tenga certificado (los
+  requisitos de pruebas y producción ya exigen el certificado; el texto lo explica). Cada factura se cruza con el
+  certificado y el domicilio de la empresa en `certificados.cruces_factura` (avisos, nunca bloqueos: razón social frente
+  a la del certificado, código postal foral o distinto del configurado, caducidad del certificado), llamado desde
+  `emision.validar_borrador`.
+- **Tres preguntas y configuración reducida**: `POST /api/empresas/{eid}/tres-preguntas` guarda en una transacción las
+  tres respuestas expresas (sin valores por defecto), evalúa y confirma el ámbito (`borradores.evaluar_ambito`) y registra
+  la declaración de autorización. En `evaluar_ambito` el tipo de contribuyente se deduce del NIF y no bloquea, «otras
+  exclusiones» es una nota que no bloquea y un código postal foral en el domicilio con territorio común añade un aviso.
+  La única otra forma de confirmar el ámbito, `POST …/ambito/confirmar`, también exige las tres respuestas expresas en el
+  cuerpo (ninguna se da por «No», aunque `canarias_ceuta_melilla` tenga 0 por defecto en la tabla). `PUT /empresas/{eid}`
+  solo anula la confirmación si cambia uno de esos campos (o el tipo de contribuyente o la nota) o si el domicilio pasa a
+  un código postal foral sin territorio foral; guardar solo el domicilio no borra las respuestas.
+  `produccion.requisitos` marca cada requisito con `de` (`plataforma`, `empresa` o `usuario`) para que la empresa vea en
+  una línea lo que depende del operador.
 - Certificados: PKCS#12 y contraseña cifrados con AES-256-GCM; clave maestra en fichero `0600` **fuera** de la base de datos y de sus copias; durante el envío la clave privada se entrega al cliente TLS mediante ficheros anónimos en memoria (`memfd`), sin escribirse en disco. La vigencia se comprueba en cada uso. Nunca se devuelven a la interfaz ni se escriben en registros (ni en la actividad ni en el diario).
 - **Certificados por usuario («Mis certificados», `app/certificados.py`, `app/api_certificados.py`).** Un usuario carga su certificado una vez (mismas comprobaciones de archivo, contraseña y vigencia; cifrado con un contexto AEAD ligado a la fila y al propietario) y lo asigna a empresas que **administra**. Solo el propietario lo ve en su lista, lo asigna, lo retira o lo elimina (a cualquier otro usuario le responde 404); los administradores de la empresa ven cuál se usa (titular, vigencia, origen), pueden sustituirlo por otro, pero no descargarlo ni usarlo en otra empresa (no existe ninguna ruta de descarga). Si el propietario deja de ser administrador de la empresa o se desactiva su usuario, la asignación deja de poder usarse: se comprueba **en cada uso**. Eliminar sobrescribe el archivo cifrado (`secure_delete`) y retira sus asignaciones. Cualquier administrador de la empresa puede dejar de usar en ella una asignación (aunque sea de otro usuario), sin acceso al certificado. Cada uso (envío o consulta), cada asignación y cada retirada quedan en la actividad de la empresa y en «Ver usos» del propietario.
 - **Titularidad y representante.** Cada empresa y entorno usa un único certificado (de la empresa o asignado). Es **propio** si identifica a la empresa (sello o persona jurídica con su NIF, o representante de esa entidad) o si su titular persona física es el obligado; si no, es de un **tercero** y solo se usa si la empresa ha declarado una legitimación (apoderamiento en la AEAT o colaboración social) **para ese titular** (NIF y nombre) con evidencia y sin revocar. Con un tercero, cada envío lleva `Cabecera/Representante` (nombre y NIF del titular: la entidad en sellos y certificados de representante de persona jurídica). El nombre es el del **certificado** (O de la entidad; «APELLIDOS NOMBRE», como en el censo, en los de persona física), no el escrito al declarar la legitimación, que solo se usa si el certificado no trae ninguno; si difieren, la evaluación lo avisa (`aviso_nombre`) porque la AEAT contrasta el nombre con su censo (4124). La regla está en una sola función, `certificados.para_envio(con, empresa, entorno) -> (certificado, representante | None)`, que usa la remisión (`remision._enviar` obtiene cabecera y certificado TLS de la misma llamada) y también las consultas (`ConsultaFactuSistemaFacturacion`), que usan el mismo certificado pero van **sin** `Cabecera/IndicadorRepresentante` aunque haya representante: solo lo llevan al repetirse tras un 4140, y entonces el resultado es parcial (ver «Consulta a la AEAT»). Para otros servicios, `remision._preparar_destino(con, entorno, eid)` aplica los interruptores del servidor y esa misma regla y devuelve `(url, certificado, representante)`; el uso se audita solo (`certificado.uso`, `operacion: consulta`) al descifrar el certificado en `certificados.ficheros_pem`, justo antes de cada conexión TLS. En el simulador, una asignación que ya no puede usarse (propietario sin administración, eliminada, sin archivo o caducada) no bloquea: se envía sin certificado; un tercero utilizable sin legitimación sí se rechaza. La evidencia de una legitimación debe existir y ser un documento de la misma empresa. Un 4112 de la AEAT (titular no autorizado), un 4123 (NIF del representante no censado) o un 4124 (nombre del representante no censado) bloquean los registros con una explicación en español (`certificados.con_ayuda`); el simulador los reproduce con los modos «no_apoderado», «representante_nif_no_censado» y «representante_nombre_no_censado». La AEAT es quien verifica el apoderamiento, solo al remitir.
 - Cabeceras: CSP estricta, `X-Frame-Options: DENY`, `nosniff`, `no-referrer`.
 - Confirmaciones irreversibles (quitar a una persona, salir de una empresa, eliminar un certificado, revocar una
   legitimación, desactivar una cuenta, cambiar a PRODUCCIÓN…): el diálogo se abre con el foco en «Cancelar», de modo que
-  un Intro de más o una tecla mantenida no las ejecuta; Escape cierra sin hacer nada. Descartar un borrador, anular un
-  registro y avanzar el contador de una serie no empiezan en el botón (sino en el motivo, en los datos o en el cuerpo del
-  diálogo) y exigen además un motivo o una casilla de confirmación.
+  un Intro de más o una tecla mantenida no las ejecuta; Escape cierra sin hacer nada. Descartar un borrador (con motivos
+  rápidos) y emitir en el simulador o en pruebas también empiezan en «Cancelar». Anular un registro y avanzar el contador
+  de una serie no empiezan en el botón (sino en el motivo, en los datos o en el cuerpo del diálogo) y exigen además un
+  motivo o una casilla de confirmación; emitir en PRODUCCIÓN exige escribir el número de la factura.
 - Fechas para el usuario: la interfaz muestra las fechas y horas en hora peninsular (`Europe/Madrid`), sea cual sea la
   zona del navegador; también calcula así la fecha de hoy y el año y el mes que propone (ejemplo del patrón de una serie,
   año del avance de contador, ejercicio y periodo de la consulta a la AEAT). Los textos que compone el servidor (aviso de
@@ -222,12 +253,15 @@ avances que la base tiene y el diario no. `GET /api/empresas/{eid}/series` devue
   eso una invitación **solo vale mientras su creador pueda crearla** (cuenta activa y administrador de la empresa;
   operador activo, si es de la plataforma), comprobado al consultarla, al registrarse y al aceptarla, y degradar,
   quitar o desactivar a alguien anula además sus invitaciones pendientes.
-- **Registro cerrado e invitaciones de empresa**: con el registro cerrado, una invitación de empresa creada por un
-  usuario normal no crea cuentas (solo la acepta una cuenta existente; 403 igual exista o no el correo), porque
-  cualquiera podría dar de alta una empresa propia e invitar a correos arbitrarios. Las del operador sí, y el operador
-  puede permitirlo en general (`invitaciones_empresa_crean_cuentas`, versionado y anotado en el diario como
-  `registro_abierto`). Cupos en la base de datos para los usuarios (no para el operador): invitaciones pendientes por
-  empresa, invitaciones por persona y día y altas de empresas por persona y día.
+- **Registro cerrado e invitaciones de empresa**: el registro abierto a cualquiera sigue cerrado por defecto. Desde esta
+  versión, la invitación de un administrador de empresa **crea la cuenta** de la persona invitada con su único enlace
+  (`invitaciones_empresa_crean_cuentas`, por defecto `1`; antes `0`, y hacían falta dos enlaces y dos personas por alta).
+  Lo acotan el enlace de un solo uso, con caducidad y dirigido a un correo, y los límites de G1: por invitación, por quien
+  invita (usuario y empresa) y por dirección, que nunca pasan de la mitad del límite global de altas, más los cupos en la
+  base de datos para los usuarios (no para el operador): invitaciones pendientes por empresa, invitaciones por persona y
+  día y altas de empresas por persona y día. El operador puede desactivarlo (ajuste versionado y anotado en el diario);
+  entonces una invitación de empresa creada por un usuario normal solo la acepta una cuenta existente (403 igual exista o
+  no el correo). Quien acepta puede declarar a la vez su autorización (`declaro`).
 - **Miembros**: un administrador puede cambiar el rol de otro o quitarle el acceso (`DELETE
   /empresas/{eid}/miembros/{uid}`) y cualquiera puede salir; la empresa conserva siempre un administrador con la cuenta
   activa. La baja se anota como una instantánea de los miembros en el diario (sobrevive a una restauración).
@@ -488,6 +522,86 @@ diseños muy distintos (ver `docs/pruebas.md`).
    así se rechazan con 422), bases sin IVA sin causa de exención elegida (SIN_IVA), operaciones no sujetas y
    facturas demasiado largas para componer. Una retención que difiere en un céntimo de base × % (redondeo del emisor) se
    pide confirmar, como la cuota.
+
+## Revisión única del borrador y clasificación automática (carril A de «VERI*FACTU sencillo»)
+
+- **Qué se confirma.** `puede_emitir()` no cambia (sin bloqueos y todas las confirmaciones dadas) y `emitir` lo vuelve a
+  comprobar dentro de la expedición. Cambia el nivel de algunas incidencias: una lectura dudosa (`DUDOSO`) del IBAN, la
+  forma de pago, el vencimiento o una referencia (obra, pedido, partida…) es un **aviso** (`RE_CAMPOS_NO_FISCALES`: se
+  imprimen pero no forman parte del registro ni del contenido obligatorio del art. 6 RD 1619/2012); la duda sobre el NIF o
+  el nombre del **emisor** no se plantea si la lectura y el dato del borrador coinciden exactamente con el NIF o la razón
+  social de la empresa y lo dudoso es la lectura, no el papel (con `papel_dudoso` o un aviso sobre el rol deducido —la
+  empresa podría ser el cliente de una factura recibida— la duda se mantiene) (`dudoso_resuelto_por_empresa`: comprobación determinista; el registro usa además los datos
+  configurados y un NIF distinto bloquea con `EMISOR_NO_EMPRESA`); `RETENCION` es un aviso salvo que el total impreso se
+  haya reinterpretado (`liquido_impreso`); `FECHA_EXPEDICION` se responde indicando (o vaciando) la fecha de operación,
+  que queda en el historial, o confirmando que la operación es de hoy; la respuesta solo vale si el último cambio de la
+  fecha de operación es posterior al último de la fecha del documento (`emision.fecha_operacion_respondida`; en un mismo
+  guardado se anota después): si la fecha del documento cambia luego, se pregunta de nuevo. Los datos del cliente, los importes, los tipos,
+  las fechas y el número nunca se resuelven solos. `EXENTA_CAUSA` se confirma base por base.
+- **Arreglos de un clic.** `emision._anotar_arreglos` añade `arreglo` a las incidencias del número (siguiente número de la
+  serie detectada, o de la única serie confirmada de ese tipo en el entorno, o el número con los ceros de la serie); el
+  usuario lo aplica con un PATCH normal (se valida de nuevo y nunca avanza el contador). Nunca se propone un número ya
+  expedido (escrito de cualquier forma equivalente).
+- **Historial.** La nota es opcional; `cambios_borrador.motivo` guarda «[origen] nota» (`borradores.motivo_guardado`), con
+  el origen `manual`, `serie`, `calculado`, `certificado`, `ocr` o `pregunta`, sin migrar la tabla. Quién, cuándo, antes y
+  después se guardaban ya. La procedencia que envía el cliente la comprueba el servidor (`borradores.origen_comprobado`) y,
+  si no se cumple, el cambio queda como `manual`: `serie` solo con el número del arreglo que propone la validación,
+  `pregunta` solo para la fecha de operación (vaciada o igual a la fecha preguntada), `certificado` solo para el NIF o el
+  nombre del emisor iguales a los de la empresa, `calculado` solo para la base, la cuota o el total iguales a los
+  calculados con el desglose, `ocr` solo con el valor leído del documento para ese campo.
+- **Serie desde el borrador.** `POST /api/borradores/{bid}/serie` (admin) crea y confirma en una transacción la serie
+  propuesta por `series.proponer_patron` para el número del borrador, con el código interno de `series.codigo_propuesto`;
+  el cuerpo repite el patrón y el primer número vistos (409 si la propuesta ha cambiado). No se propone ni se crea (409)
+  una numeración que solape con otra serie activa de la empresa en el entorno (`series.solapan`: uno de los patrones lee
+  los números del otro, p. ej. `F-{aaaa}/{n}` y `F-{aaaa}/{n:4}`; sus contadores propondrían números ya expedidos) ni una
+  que empiece en un número ya expedido; todo se comprueba dentro de la transacción del alta. Las rectificativas («Corregir
+  esta factura», R4 por defecto) toman el número del contador de la serie de rectificativas o, si no existe, el 1 de la
+  propuesta `series.patron_rectificativa` (`R{n}/{aa}` para `{n}/{aa}`; nunca un patrón que lea los números de otra serie).
+- **Clasificación automática** (`borradores.admite_clasificacion_automatica`): solo `preparatorio` con confianza ≥ 0,9
+  (título de proforma, presupuesto o borrador leído con seguridad y emitido por la empresa), sin QR tributario, sin firma,
+  sin marcas VERI*FACTU y sin duplicados fiscales. Se confirma en nombre de quien sube el PDF (`confirmacion.automatica`,
+  actividad `documento.clasificado` con `automatica`) y se crea el borrador. Cambiar la clasificación de un documento a otra
+  distinta de `preparatorio` descarta sus borradores abiertos (nunca uno expedido; con factura → 409).
+- **Lectura «Nº: X» al 80 %.** No es un fallo de umbral: un rótulo débil («Nº:» suelto) limita a propósito la confianza del
+  número a 0,80 (puede ser el de una certificación o un pedido). Se mantiene y se resuelve con la revisión única.
+
+## Navegación por papel, modo avanzado y lenguaje llano (carril C de «VERI*FACTU sencillo»)
+
+- **Menú.** `NAVEGACION` (Documentos, Facturas, Configuración) y `NAVEGACION_MAS` (un `<details>` «Más», sin JavaScript en
+  línea): *Envíos a Hacienda* (`/remision`), *Dar de alta otra empresa*, *Declaración responsable* (también en el pie) y,
+  con el modo avanzado, *Consulta a Hacienda* (emisor o administrador), *Actividad* y *Mis certificados*. Las rutas no
+  cambian y siguen funcionando por su dirección (con una línea que dice que son del modo avanzado).
+- **Papeles.** La interfaz solo pinta lo que el papel permite (`tieneRol`): sin subida ni «Emitir» para un lector; sin
+  «Anular»/«Subsanar» para un emisor (las acciones de `acciones_permitidas` se filtran con el papel mínimo de su ruta:
+  corregir y reintentar, emisor; anular y subsanar, administrador); la configuración de un emisor o un lector es un
+  resumen sin formularios. El servidor no cambia: sigue comprobando el rol y responde 404 sin dar detalles; ante un 404 a
+  una petición que no es GET de quien sí es miembro, la interfaz relee `GET /api/yo` (el papel puede haber cambiado) y lo
+  explica en vez de «No encontrado».
+- **Modo avanzado.** `usuarios.modo_avanzado` (migración 0010), leído en `GET /api/yo` y `POST /api/sesion` y cambiado con
+  `PUT /api/yo/preferencias`. Solo decide qué se pinta: editor del patrón, «Probar un número», «Contadores por año» y
+  «Avanzar contador…»; detalle de la remisión (próximo envío, espera, HTTP, CSV, destino, error), la verificación de la
+  cadena y los modos del simulador; huella, CSV, XML, envíos y verificación del PDF de cada factura; códigos de
+  incidencia; «Mis certificados» y la legitimación completa; la marca de referencia de un documento. Lo que exige actuar
+  se ve siempre (banda de incidencia, facturas pendientes, sin confirmar y bloqueadas, una marca de referencia ya puesta,
+  la cadena atrasada al emitir).
+- **Lenguaje y formatos.** Entornos «Modo práctica: no se envía a Hacienda», «Pruebas de Hacienda (sin efectos
+  fiscales)» y «PRODUCCIÓN: facturas reales» (la etiqueta grande se ve siempre; el selector, solo si hay más de un
+  entorno habilitado); estados del envío según quién aceptó («Aceptada en la simulación» / «Aceptada por Hacienda»);
+  fechas «12/11/2026, 10:05»; importes «1.028,50 €» también en los campos editables (`valorControl`; se guardan igual,
+  `normalizarValor` admite coma y punto); acciones de la actividad en palabras; sin «Abrir el cotejo en la sede de la
+  AEAT» en el simulador.
+- **Primeros pasos → revisión.** El paso 4 lleva directamente a la revisión de la factura subida (o a la pregunta del
+  documento si no es una proforma clara) y muestra la numeración en cuanto se confirma desde esa revisión.
+- **Solo se expide lo que se vio.** Cada borrador lleva `version` (SHA-256 de sus datos guardados, confirmaciones
+  incluidas). El diálogo «Emitir» guarda la versión que muestra y la envía como `version_vista`; «He revisado…» envía la
+  versión de la revisión pintada. `emision.comprobar_version_vista` la compara con la fila (antes de generar el PDF y otra
+  vez dentro de la transacción de la expedición, junto a la comprobación de que el borrador no cambió) y responde 409
+  `borrador_cambiado` si otra persona u otra pestaña lo cambió: la interfaz cierra el diálogo, vuelve a leer y pintar la
+  revisión y lo explica. Sin `version_vista` (clientes de la API anteriores) el comportamiento es el de antes.
+- **Mensajes de la revisión.** Los de `borradores.validar` escriben los importes como en la factura (`_e`: «1.028,50 €»;
+  `_pct`: «12,5 %»), en palabras («El total (1.030,50 €) no es la base (850,00 €) más el IVA (178,50 €), que suman
+  1.028,50 €.») y sin códigos internos (la causa de exención por su nombre, no «E1 —»). Los hijos opcionales de la
+  interfaz se añaden con `anadir()` (el `append` nativo escribiría «null»).
 
 ## Operaciones exentas (E1–E6)
 

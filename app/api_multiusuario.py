@@ -56,6 +56,8 @@ def registro(body: dict, request: Request, response: Response, con=Depends(get_c
         raise HTTPException(422, str(e))
     if token is not None and not isinstance(token, str):
         raise HTTPException(422, "Invitación no válida")
+    if body.get("declaro") is not None and not isinstance(body.get("declaro"), bool):
+        raise HTTPException(422, "La declaración de autorización debe ser verdadero o falso")
     h = seguridad.hash_clave(clave)   # siempre, también si luego falla: el tiempo no revela si el correo existe
     if not mu.LIMITE_REGISTRO_GLOBAL.disponible():
         raise HTTPException(429, "La plataforma ha alcanzado el máximo de altas por hora. Inténtelo de nuevo más tarde.")
@@ -63,7 +65,7 @@ def registro(body: dict, request: Request, response: Response, con=Depends(get_c
         raise HTTPException(429, "Se ha alcanzado el máximo de altas por hora con invitaciones de quien le ha invitado o "
                                  "desde esta conexión. Inténtelo de nuevo más tarde.")
     try:
-        uid, eid = mu.registrar(con, email=email, nombre=nombre, hash_clave=h, token=token)
+        uid, eid = mu.registrar(con, email=email, nombre=nombre, hash_clave=h, token=token, declaro=body.get("declaro") is True)
     except mu.RegistroCerrado:
         raise HTTPException(403, "El registro de nuevas cuentas está cerrado. Solicite una invitación al operador de la "
                                  "plataforma o al administrador de su empresa.")
@@ -95,11 +97,12 @@ def invitacion_consulta(body: dict, request: Request, con=Depends(get_con)):
 
 @router.post("/invitaciones/aceptar")
 def invitacion_aceptar(body: dict, s=Depends(sesion), con=Depends(get_con)):
-    """Un usuario con cuenta acepta una invitación a una empresa dirigida a su correo."""
+    """Un usuario con cuenta acepta una invitación a una empresa dirigida a su correo (con `declaro`: y declara a la vez que
+    está autorizado a actuar en nombre de la empresa)."""
     if not isinstance(body.get("token"), str):
         raise HTTPException(422, "Invitación no válida")
     try:
-        eid = mu.aceptar_invitacion(con, usuario_id=s["usuario_id"], token=body.get("token"))
+        eid = mu.aceptar_invitacion(con, usuario_id=s["usuario_id"], token=body.get("token"), declaro=body.get("declaro") is True)
     except mu.RegistroNoPosible:
         raise HTTPException(409, "La invitación no es válida para esta cuenta: puede haber caducado, haberse usado ya o "
                                  "estar dirigida a otro correo.")
@@ -178,6 +181,17 @@ def yo_clave(body: dict, s=Depends(sesion), con=Depends(get_con)):
     except mu.ClaveIncorrecta:
         raise HTTPException(403, "La contraseña actual no es correcta")
     return {"ok": True}
+
+
+@router.put("/yo/preferencias")
+def yo_preferencias(body: dict, s=Depends(sesion), con=Depends(get_con)):
+    """Preferencias de la interfaz de la propia cuenta. Hoy, solo `modo_avanzado` (true/false): muestra las herramientas
+    técnicas en la interfaz. No da ni quita ningún permiso: el servidor sigue comprobando el rol en cada petición."""
+    if set(body) - {"modo_avanzado"} or not isinstance(body.get("modo_avanzado"), bool):
+        raise HTTPException(422, "Indique «modo_avanzado» (verdadero o falso)")
+    with db.transaccion(con):
+        con.execute("UPDATE usuarios SET modo_avanzado=? WHERE id=?", (int(body["modo_avanzado"]), s["usuario_id"]))
+    return {"ok": True, "modo_avanzado": int(body["modo_avanzado"])}
 
 
 # --- Panel del operador de la plataforma ------------------------------------------------------------------------------

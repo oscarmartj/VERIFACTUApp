@@ -80,7 +80,7 @@ def preparar_empresa(c: Cliente, empresa=EMPRESA_REPLICA, email="admin@ejemplo.t
 def configurar(c: Cliente, eid: int, patron="{n}/{aa}", siguiente=166, entorno="simulador"):
     c.ok(c.put(f"/api/empresas/{eid}", {"tipo_contribuyente": "sociedad_IS", "territorio": "comun", "sii": 0,
                                         "canarias_ceuta_melilla": 0, "otras_exclusiones": "", "origen_pdf": "plantilla_ofimatica"}))
-    c.ok(c.post(f"/api/empresas/{eid}/ambito/confirmar"))
+    c.ok(c.post(f"/api/empresas/{eid}/ambito/confirmar", {"territorio_foral": False, "sii": False, "canarias_ceuta_melilla": False}))
     c.ok(c.post(f"/api/empresas/{eid}/autorizacion-usuario", {"relacion": "administrador", "declaro": True}))
     s = c.ok(c.post(f"/api/empresas/{eid}/series", {"entorno": entorno, "codigo": "A", "patron": patron, "siguiente_numero": siguiente}))
     c.ok(c.post(f"/api/series/{s['id']}/confirmar"))

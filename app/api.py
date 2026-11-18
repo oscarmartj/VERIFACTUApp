@@ -175,11 +175,13 @@ class EmpresaYaDadaDeAlta(sqlite3.IntegrityError):
     """El NIF (o una forma equivalente: control con dígito o con letra) ya está dado de alta en la plataforma."""
 
 
-def crear_empresa(con, uid: int, nif: str, razon: str, domicilio: str | None) -> int:
+def crear_empresa(con, uid: int, nif: str, razon: str, domicilio: str | None, alta_origen: str | None = None) -> int:
     if multiusuario.nif_ya_dado_de_alta(con, nif):
         raise EmpresaYaDadaDeAlta(nif)
-    cur = con.execute("INSERT INTO empresas (nif, razon_social, domicilio, creado_en) VALUES (?,?,?,?)",
-                      (nif, razon.strip(), domicilio, db.ahora_iso()))
+    # El tipo de contribuyente se deduce de la letra del NIF (no cambia lo que la aplicación puede expedir)
+    cur = con.execute("""INSERT INTO empresas (nif, razon_social, domicilio, creado_en, tipo_contribuyente, alta_origen)
+                         VALUES (?,?,?,?,?,?)""", (nif, razon.strip(), domicilio, db.ahora_iso(),
+                                                   borradores.tipo_contribuyente_de_nif(nif), alta_origen))
     eid = cur.lastrowid
     con.execute("INSERT INTO miembros (usuario_id, empresa_id, rol, relacion) VALUES (?,?, 'admin', 'administrador')", (uid, eid))
     db.actividad(con, "empresa.creada", usuario_id=uid, empresa_id=eid)
@@ -199,7 +201,7 @@ def _login_resp(con, uid: int, response: Response):
     token, csrf = seguridad.crear_sesion(con, uid)
     response.set_cookie(COOKIE, token, httponly=True, samesite="strict", secure=ajustes().cookie_segura,
                         max_age=ajustes().sesion_horas * 3600, path="/")
-    u = db.fila(con, "SELECT id, email, nombre, superadmin, cambiar_clave, alta_origen FROM usuarios WHERE id=?", (uid,))
+    u = db.fila(con, "SELECT id, email, nombre, superadmin, cambiar_clave, alta_origen, modo_avanzado FROM usuarios WHERE id=?", (uid,))
     u["clave_restablecida_en"] = multiusuario.clave_restablecida_en(con, uid)
     return {"usuario": u, "csrf": csrf, "empresas": _empresas_de(con, uid)}
 
@@ -217,9 +219,10 @@ def login(body: dict, response: Response, con=Depends(get_con)):
 
 @router.get("/yo")
 def yo(s=Depends(sesion), con=Depends(get_con)):
-    u = db.fila(con, "SELECT superadmin, alta_origen FROM usuarios WHERE id=?", (s["usuario_id"],))
+    u = db.fila(con, "SELECT superadmin, alta_origen, modo_avanzado FROM usuarios WHERE id=?", (s["usuario_id"],))
     return {"usuario": {"id": s["usuario_id"], "email": s["email"], "nombre": s["nombre"], "superadmin": u["superadmin"],
                         "cambiar_clave": s.get("cambiar_clave", 0), "alta_origen": u["alta_origen"],
+                        "modo_avanzado": u["modo_avanzado"],
                         "clave_restablecida_en": multiusuario.clave_restablecida_en(con, s["usuario_id"])}, "csrf": s["csrf"],
             "empresas": _empresas_de(con, s["usuario_id"])}
 
@@ -244,6 +247,10 @@ def _empresa_out(con, eid, uid):
     e["productor"] = produccion.productor(con)
     e["casos_soportados"] = borradores.CASOS_SOPORTADOS
     e["avisos"] = [a for a in (remision.estado_cola(con, eid, ent)["aviso_incidencia"] for ent in ("simulador", "pruebas", "produccion")) if a]
+    # Alta guiada y configuración reducida: modo práctica, caducidad del certificado y lo que falta por responder
+    e["modo_practica"] = produccion.modo_practica(con, e)
+    e["avisos_configuracion"] = list(dict.fromkeys(
+        a for a in (certificados.aviso_caducidad(certificados.seleccionado(con, eid, ent)) for ent in certificados.ENTORNOS_CERT) if a))
     return e
 
 
@@ -267,10 +274,15 @@ def empresa_nueva(body: dict, s=Depends(sesion), con=Depends(get_con)):
     if not nifmod.es_valido(n):
         raise HTTPException(422, "NIF no válido")
     dom = _texto_xml(body.get("domicilio"), "Domicilio", 300) if body.get("domicilio") else None
+    # Modo práctica: datos propuestos a partir de una factura y confirmados por el usuario; solo simulador hasta que se
+    # cargue el certificado de la empresa (produccion.modo_practica)
+    if body.get("modo") is not None and body.get("modo") not in ("practica", "manual"):
+        raise HTTPException(422, "Modo de alta no válido")
     try:
         with db.transaccion(con):
             multiusuario.comprobar_cupo_empresas(con, s["usuario_id"])
-            eid = crear_empresa(con, s["usuario_id"], n, rs, dom)   # NIF único, también en sus formas equivalentes
+            eid = crear_empresa(con, s["usuario_id"], n, rs, dom,   # NIF único, también en sus formas equivalentes
+                                "practica" if body.get("modo") == "practica" else "manual")
     except sqlite3.IntegrityError:
         raise HTTPException(409, EMPRESA_YA_DADA_DE_ALTA)
     except multiusuario.CupoSuperado as e:
@@ -299,24 +311,66 @@ def empresa_put(eid: int, body: dict, s=Depends(sesion), con=Depends(get_con)):
     if not cambios:
         raise HTTPException(422, "Nada que actualizar")
     with db.transaccion(con):
+        antes = db.fila(con, "SELECT * FROM empresas WHERE id=?", (eid,))
         sets = ", ".join(f"{k}=?" for k in cambios)
-        con.execute(f"UPDATE empresas SET {sets}, ambito_confirmado_en=NULL, ambito_confirmado_por=NULL WHERE id=?",
-                    (*cambios.values(), eid))
+        con.execute(f"UPDATE empresas SET {sets} WHERE id=?", (*cambios.values(), eid))
         e = db.fila(con, "SELECT * FROM empresas WHERE id=?", (eid,))
+        # Las respuestas confirmadas solo se anulan si cambia algo que decide si se puede emitir (o el domicilio pasa a un
+        # código postal foral sin territorio foral: se vuelve a preguntar). Cambiar el domicilio o la razón social no las borra.
+        if _anula_ambito(antes, e):
+            con.execute("UPDATE empresas SET ambito_confirmado_en=NULL, ambito_confirmado_por=NULL WHERE id=?", (eid,))
         con.execute("UPDATE empresas SET ambito_resultado=? WHERE id=?", (json.dumps(borradores.evaluar_ambito(e), ensure_ascii=False), eid))
         db.actividad(con, "empresa.configuracion", usuario_id=s["usuario_id"], empresa_id=eid, detalle=cambios)
     return _empresa_out(con, eid, s["usuario_id"])
 
 
-@router.post("/empresas/{eid}/ambito/confirmar")
-def ambito_confirmar(eid: int, s=Depends(sesion), con=Depends(get_con)):
-    rol(con, s, eid, "admin")
+# Campos que deciden si la aplicación puede expedir para la empresa (las tres preguntas, el tipo de contribuyente y la nota).
+_CAMPOS_AMBITO = ("territorio", "sii", "canarias_ceuta_melilla", "tipo_contribuyente", "otras_exclusiones")
+_PREGUNTAS = ("territorio_foral", "sii", "canarias_ceuta_melilla")
+
+
+def _anula_ambito(antes: dict, despues: dict) -> bool:
+    if any(antes[k] != despues[k] for k in _CAMPOS_AMBITO):
+        return True
+    foral = lambda e: bool(borradores.provincia_foral(borradores.codigo_postal(e["domicilio"])))  # noqa: E731
+    return foral(despues) and not foral(antes) and despues["territorio"] not in borradores.TERRITORIOS_FORALES
+
+
+def _guardar_tres_respuestas(con, s, eid: int, body: dict, nota_siempre: bool) -> dict:
+    """Guarda las tres respuestas expresas (verdadero o falso; sin valor por defecto), evalúa y confirma el ámbito. Debe
+    llamarse dentro de una transacción con las respuestas ya validadas."""
     e = db.fila(con, "SELECT * FROM empresas WHERE id=?", (eid,))
-    amb = borradores.evaluar_ambito(e)
+    territorio = (e["territorio"] if e["territorio"] in borradores.TERRITORIOS_FORALES else "foral") \
+        if body["territorio_foral"] else "comun"
+    cambios = {"territorio": territorio, "sii": int(body["sii"]), "canarias_ceuta_melilla": int(body["canarias_ceuta_melilla"]),
+               "tipo_contribuyente": e["tipo_contribuyente"] or borradores.tipo_contribuyente_de_nif(e["nif"])}
+    if nota_siempre or "nota" in body:
+        cambios["otras_exclusiones"] = _texto_xml(body["nota"], "Nota", 500) if (body.get("nota") or "").strip() else None
+    con.execute(f"UPDATE empresas SET {', '.join(f'{k}=?' for k in cambios)} WHERE id=?", (*cambios.values(), eid))
+    amb = borradores.evaluar_ambito(db.fila(con, "SELECT * FROM empresas WHERE id=?", (eid,)))
+    con.execute("UPDATE empresas SET ambito_resultado=?, ambito_confirmado_en=?, ambito_confirmado_por=? WHERE id=?",
+                (json.dumps(amb, ensure_ascii=False), db.ahora_iso(), s["usuario_id"], eid))
+    db.actividad(con, "empresa.configuracion", usuario_id=s["usuario_id"], empresa_id=eid, detalle=cambios)
+    db.actividad(con, "empresa.ambito_confirmado", usuario_id=s["usuario_id"], empresa_id=eid, detalle=amb)
+    return amb
+
+
+def _validar_tres_respuestas(body) -> dict:
+    body = body if isinstance(body, dict) else {}
+    if not all(isinstance(body.get(k), bool) for k in _PREGUNTAS):
+        raise HTTPException(422, "Responda las tres preguntas (sí o no): territorio foral, SII y Canarias, Ceuta o Melilla")
+    _textos(body, ("nota", "relacion"), "La nota y la relación deben ser textos")
+    return body
+
+
+@router.post("/empresas/{eid}/ambito/confirmar")
+def ambito_confirmar(eid: int, body: dict | None = None, s=Depends(sesion), con=Depends(get_con)):
+    """Confirma el ámbito con las tres respuestas expresas en el cuerpo (`territorio_foral`, `sii`,
+    `canarias_ceuta_melilla`, verdadero o falso; opcional `nota`). Sin ellas, 422: ninguna respuesta se da por «No»."""
+    rol(con, s, eid, "admin")
+    body = _validar_tres_respuestas(body)
     with db.transaccion(con):
-        con.execute("UPDATE empresas SET ambito_resultado=?, ambito_confirmado_en=?, ambito_confirmado_por=? WHERE id=?",
-                    (json.dumps(amb, ensure_ascii=False), db.ahora_iso(), s["usuario_id"], eid))
-        db.actividad(con, "empresa.ambito_confirmado", usuario_id=s["usuario_id"], empresa_id=eid, detalle=amb)
+        _guardar_tres_respuestas(con, s, eid, body, nota_siempre=False)
     return _empresa_out(con, eid, s["usuario_id"])
 
 
@@ -332,6 +386,69 @@ def autorizacion_usuario(eid: int, body: dict, s=Depends(sesion), con=Depends(ge
                      detalle={"relacion": body["relacion"]})
     _anotar_miembros(con, eid)
     return _empresa_out(con, eid, s["usuario_id"])
+
+
+@router.post("/empresas/{eid}/tres-preguntas")
+def tres_preguntas(eid: int, body: dict, s=Depends(sesion), con=Depends(get_con)):
+    """«Tres preguntas sobre su empresa» en un solo paso: territorio foral, SII y Canarias/Ceuta/Melilla, cada una con su
+    respuesta expresa (verdadero o falso, sin valor por defecto), y la declaración de autorización del usuario. Guarda las
+    respuestas, evalúa y confirma el ámbito y registra la declaración. Opcional: `nota` (casos especiales; no impide
+    emitir) y `relacion` (si no, la que ya tenía). El tipo de contribuyente se deduce del NIF si no se había indicado."""
+    rol(con, s, eid, "admin")
+    body = _validar_tres_respuestas(body)
+    if body.get("declaro") is not True:
+        raise HTTPException(422, "Marque la declaración de que está autorizado a actuar en nombre de esta empresa")
+    if body.get("relacion") is not None and body["relacion"] not in multiusuario.RELACIONES:
+        raise HTTPException(422, "Relación no válida")
+    with db.transaccion(con):
+        _guardar_tres_respuestas(con, s, eid, body, nota_siempre=True)
+        m = db.fila(con, "SELECT relacion FROM miembros WHERE usuario_id=? AND empresa_id=?", (s["usuario_id"], eid))
+        relacion = body.get("relacion") or m["relacion"] or "administrador"
+        con.execute("UPDATE miembros SET relacion=?, declaracion_autorizacion_en=? WHERE usuario_id=? AND empresa_id=?",
+                    (relacion, db.ahora_iso(), s["usuario_id"], eid))
+        db.actividad(con, "usuario.declaracion_autorizacion", usuario_id=s["usuario_id"], empresa_id=eid,
+                     detalle={"relacion": relacion})
+    _anotar_miembros(con, eid)
+    return _empresa_out(con, eid, s["usuario_id"])
+
+
+# Programas de oficina (plantillas) en el productor o el creador del PDF; los demás generadores (programas de facturación,
+# bibliotecas de informes) se proponen como «programa de facturación». Solo es una propuesta y un aviso.
+_RE_OFIMATICA = re.compile(r"microsoft|word|excel|libreoffice|openoffice|google docs|pages|numbers|wps|onlyoffice|"
+                           r"writer|calc|quartz", re.I)
+
+
+@router.get("/empresas/{eid}/datos-propuestos")
+def datos_propuestos(eid: int, s=Depends(sesion), con=Depends(get_con)):
+    """Propuestas a partir de los documentos importados (para confirmar, nunca se aplican solas): domicilio y razón social
+    del emisor leídos en el documento más reciente cuyo emisor tiene el NIF de la empresa, y origen probable de los PDF
+    (productor y creador del PDF). También el aviso de territorio foral por el código postal."""
+    rol(con, s, eid)
+    e = db.fila(con, "SELECT * FROM empresas WHERE id=?", (eid,))
+    out: dict[str, Any] = {"domicilio": None, "razon_social": None, "documento": None, "origen_pdf": None,
+                           "aviso_territorio": None}
+    for d in db.filas(con, """SELECT d.id, d.nombre_archivo, d.inspeccion, x.datos FROM documentos d
+                             JOIN extracciones x ON x.id=(SELECT MAX(id) FROM extracciones WHERE documento_id=d.id)
+                             WHERE d.empresa_id=? ORDER BY d.id DESC LIMIT 20""", (eid,)):
+        ext = json.loads(d["datos"] or "{}")
+        em = ext.get("emisor") or {}
+        val = lambda k: ((em.get(k) or {}).get("valor") if isinstance(em.get(k), dict) else None)  # noqa: E731
+        if out["origen_pdf"] is None:
+            insp = json.loads(d["inspeccion"] or "{}")
+            gen = f"{insp.get('productor') or ''} {insp.get('creador') or ''}".strip()
+            if gen:
+                out["origen_pdf"] = {"valor": "plantilla_ofimatica" if _RE_OFIMATICA.search(gen) else "programa_facturacion",
+                                     "generador": gen[:120], "documento": d["nombre_archivo"]}
+        if out["domicilio"] is None and isinstance(val("nif"), str) and nifmod.normalizar(val("nif")) == e["nif"] \
+                and isinstance(val("domicilio"), str) and val("domicilio").strip():
+            out.update(domicilio=borradores.domicilio_propuesto(val("domicilio")),
+                       razon_social=val("nombre").strip()[:120] if isinstance(val("nombre"), str) else None,
+                       documento={"id": d["id"], "nombre": d["nombre_archivo"]})
+    cp = borradores.codigo_postal(out["domicilio"] or e["domicilio"])
+    if borradores.provincia_foral(cp):
+        out["aviso_territorio"] = (f"El domicilio (código postal {cp}, {borradores.provincia_foral(cp)}) está en un territorio "
+                                   "foral: si la empresa tributa en el País Vasco o en Navarra, VERI*FACTU no se le aplica.")
+    return out
 
 
 @router.post("/empresas/{eid}/miembros")
@@ -562,8 +679,9 @@ def documento_get(did: int, s=Depends(sesion), con=Depends(get_con)):
     if ext:
         ext.pop("_lineas_cabecera", None)
     b = db.fila(con, "SELECT id FROM borradores WHERE documento_id=? AND estado<>'descartado' ORDER BY id DESC LIMIT 1", (did,))
+    f = db.fila(con, "SELECT id FROM facturas WHERE documento_id=? LIMIT 1", (did,))
     return {"documento": d, "inspeccion": insp, "clasificacion_sugerida": sug, "extraccion": ext,
-            "borrador_id": b["id"] if b else None,
+            "borrador_id": b["id"] if b else None, "factura_id": f["id"] if f else None,
             "duplicados_fiscales": importacion.duplicados_fiscales(con, d["empresa_id"], did)}
 
 
@@ -596,14 +714,18 @@ def documento_clasificar(did: int, body: dict, s=Depends(sesion), con=Depends(ge
     insp = json.loads(d["inspeccion"] or "{}")
     if c == "preparatorio" and any(q.get("tributario") for q in insp.get("qr", [])):
         raise HTTPException(409, "El documento contiene un QR tributario: no puede tratarse como documento preparatorio")
-    sug = json.loads(d.get("clasificacion_motivo") or "{}")
-    sug["confirmacion"] = {"clasificacion": c, "motivo": body.get("motivo", ""), "usuario_id": s["usuario_id"]}
-    with db.transaccion(con):
-        con.execute("""UPDATE documentos SET clasificacion=?, clasificacion_motivo=?, clasificacion_confirmada_por=?,
-                       clasificacion_confirmada_en=? WHERE id=?""",
-                    (c, json.dumps(sug, ensure_ascii=False), s["usuario_id"], db.ahora_iso(), did))
-        db.actividad(con, "documento.clasificado", usuario_id=s["usuario_id"], empresa_id=d["empresa_id"], objeto="documento",
-                     objeto_id=did, detalle={"clasificacion": c, "motivo": body.get("motivo", "")})
+    _textos(body, ("motivo",), "Motivo: debe ser un texto")
+    # El motivo es una nota opcional: la clasificación, quién y cuándo quedan registrados igualmente
+    try:
+        importacion.confirmar_clasificacion(con, did, c, s["usuario_id"], motivo=(body.get("motivo") or "")[:500])
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    if c == "preparatorio" and body.get("crear_borrador") is True:
+        # «No, todavía no la he entregado»: se clasifica y se abre el borrador con una sola acción
+        try:
+            importacion.crear_borrador(con, documento_id=did, usuario_id=s["usuario_id"])
+        except ValueError as e:
+            raise HTTPException(409, str(e))
     return documento_get(did, s, con)
 
 
@@ -638,13 +760,55 @@ def _borrador_out(con, b: dict, entorno: str = "simulador") -> dict:
         ext.pop("_lineas_cabecera", None)
     cambios = db.filas(con, """SELECT c.en, u.nombre usuario, c.campo, c.valor_anterior, c.valor_nuevo, c.motivo
                               FROM cambios_borrador c JOIN usuarios u ON u.id=c.usuario_id WHERE borrador_id=? ORDER BY c.id""", (b["id"],))
-    return {"id": b["id"], "estado": b["estado"], "documento_id": b["documento_id"], "factura_id": b["factura_id"],
-            "rectifica_factura_id": b["rectifica_factura_id"], "datos": json.loads(b["datos"]), "incidencias": inc,
+    for c in cambios:
+        c["origen"], c["nota"] = borradores.separar_motivo(c["motivo"])
+        c["motivo"] = c["nota"]          # la nota del usuario, como antes (la procedencia va aparte)
+    datos = json.loads(b["datos"])
+    doc = db.fila(con, "SELECT clasificacion, clasificacion_motivo FROM documentos WHERE id=?", (b["documento_id"],)) \
+        if b["documento_id"] else None
+    conf_clas = (_json_dict(doc["clasificacion_motivo"]).get("confirmacion") or {}) if doc else {}
+    return {"id": b["id"], "version": emision.version_borrador(b["datos"]), "estado": b["estado"],
+            "documento_id": b["documento_id"], "factura_id": b["factura_id"],
+            "rectifica_factura_id": b["rectifica_factura_id"], "datos": datos, "incidencias": inc,
             "puede_emitir": borradores.puede_emitir(inc), "cambios": cambios, "procedencia": ext,
             "entorno_validado": entorno,
             "serie_detectada": {k: serie[k] for k in ("id", "codigo", "patron", "numero_detectado", "siguiente_numero")} if serie else None,
-            "serie_propuesta": _serie_propuesta(json.loads(b["datos"]).get("num_serie")) if not serie else None,
+            "serie_propuesta": _serie_propuesta_borrador(con, b, empresa, entorno, datos) if not serie else None,
+            "clasificacion_automatica": bool(isinstance(conf_clas, dict) and conf_clas.get("automatica")
+                                             and doc["clasificacion"] == "preparatorio"),
+            "emisor_es_empresa": isinstance(datos.get("emisor"), dict)
+            and nifmod.normalizar(str(datos["emisor"].get("nif") or "")) == nifmod.normalizar(empresa.get("nif") or ""),
             "entornos_disponibles": [k for k, v in _entornos().items() if v]}
+
+
+def _json_dict(v) -> dict:
+    try:
+        d = json.loads(v or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def _serie_propuesta_borrador(con, b: dict, empresa: dict, entorno: str, datos: dict) -> dict | None:
+    """Serie que se propone crear desde el borrador para su número (que no encaja con ninguna serie confirmada): patrón,
+    primer número, ejemplos de los números que expedirá («F-2026/0240», «F-2026/0241»), código interno, tipo y entorno.
+    El administrador la confirma con POST /api/borradores/{bid}/serie.
+    No se propone (None) si el patrón solapa con otra serie activa de la empresa en el entorno (leería sus números y su
+    contador propondría números ya expedidos: «F-{aaaa}/{n}» frente a «F-{aaaa}/{n:4}») ni si el número ya está expedido."""
+    ns = datos.get("num_serie") if isinstance(datos, dict) else None
+    p = _serie_propuesta(ns)
+    if not p:
+        return None
+    tipo = "rectificativa" if b.get("rectifica_factura_id") else "ordinaria"
+    anio = p.get("anio") or db.ahora().year
+    if series.patrones_solapados(con, empresa["id"], entorno, p["patron"], anio):
+        return None
+    if importacion.facturas_mismo_numero(con, empresa["id"], nifmod.normalizar(empresa.get("nif") or ""), ns,
+                                         patrones=[p["patron"]]):
+        return None
+    return dict(p, tipo=tipo, entorno=entorno, ejemplos=series.ejemplos(p["patron"], p["numero"], anio),
+                codigo=series.codigo_propuesto(con, empresa["id"], entorno, p["patron"], tipo),
+                hay_otras=bool(series.series_confirmadas(con, empresa["id"], entorno, tipo)))
 
 
 @router.get("/borradores/{bid}")
@@ -666,19 +830,39 @@ def borrador_patch(bid: int, body: dict, entorno: str = "simulador", s=Depends(s
         cambios = body.get("cambios") or []
         if not isinstance(cambios, list):
             raise HTTPException(422, "«cambios» debe ser una lista")
+        ent_val = entorno if entorno in ("simulador", "pruebas", "produccion") else "simulador"
+        # arreglos de un clic que propone ahora la validación: solo con ellos un cambio puede atribuirse a la serie
+        arreglos = {i["arreglo"]["valor"] for i in emision.validar_borrador(con, b, ent_val)[0]
+                    if isinstance(i.get("arreglo"), dict) and i["arreglo"].get("campo") == "num_serie"} \
+            if any(isinstance(c, dict) and c.get("origen") == "serie" for c in cambios) else set()
+        empresa = emision.cargar_empresa(con, b["empresa_id"])
+        ext = emision.extraccion_de(con, b) if any(isinstance(c, dict) and c.get("origen") == "ocr" for c in cambios) else None
+        historial = []
         for c in cambios:
             try:
                 if not isinstance(c, dict) or not isinstance(c.get("motivo") or "", str):
-                    raise ValueError("Cada cambio debe indicar «campo», «valor» y «motivo» (texto)")
+                    raise ValueError("Cada cambio debe indicar «campo» y «valor» (y, si quiere, una nota en «motivo», texto)")
                 if not borradores.texto_codificable(c.get("motivo") or ""):
                     raise ValueError("motivo: el texto contiene caracteres no válidos (sustitutos UTF-16 sueltos)")
+                if c.get("origen") is not None and c.get("origen") not in borradores.ORIGENES_CAMBIO:
+                    raise ValueError("origen: debe ser " + ", ".join(borradores.ORIGENES_CAMBIO))
+                previos = datos
                 anterior, datos = borradores.aplicar_cambio(datos, c["campo"], c.get("valor"))
             except (ValueError, KeyError, IndexError, TypeError) as e:
                 raise HTTPException(422, str(e))
+            # la procedencia la comprueba el servidor: si no se cumple, el cambio queda como manual
+            origen = borradores.origen_comprobado(c.get("origen"), c["campo"], c.get("valor"), antes=previos, despues=datos,
+                                                  empresa=empresa, extraccion=ext, arreglos=arreglos)
+            historial.append((c["campo"], anterior, c.get("valor"), borradores.motivo_guardado(origen, c.get("motivo"))))
+        # En un mismo guardado, la respuesta a la pregunta de la fecha (fecha de operación) se anota después del cambio de la
+        # fecha del documento al que responde (la pregunta solo se da por respondida si es posterior)
+        historial.sort(key=lambda r: r[0] == "fecha_operacion")
+        for campo, anterior, nuevo, motivo in historial:
+            # La nota es opcional: el historial guarda siempre quién, cuándo, el valor anterior, el nuevo y su procedencia
             con.execute("""INSERT INTO cambios_borrador (borrador_id, usuario_id, en, campo, valor_anterior, valor_nuevo, motivo)
-                           VALUES (?,?,?,?,?,?,?)""", (bid, s["usuario_id"], db.ahora_iso(), c["campo"],
-                                                       json.dumps(anterior, ensure_ascii=False), json.dumps(c.get("valor"), ensure_ascii=False),
-                                                       (c.get("motivo") or "")[:300]))
+                           VALUES (?,?,?,?,?,?,?)""", (bid, s["usuario_id"], db.ahora_iso(), campo,
+                                                       json.dumps(anterior, ensure_ascii=False), json.dumps(nuevo, ensure_ascii=False),
+                                                       motivo))
         datos["confirmaciones"] = []  # cualquier cambio exige volver a confirmar
         con.execute("UPDATE borradores SET datos=?, actualizado_en=? WHERE id=?", (json.dumps(datos, ensure_ascii=False), db.ahora_iso(), bid))
     return borrador_get(bid, entorno, s, con)
@@ -692,6 +876,11 @@ def borrador_confirmar(bid: int, body: dict, entorno: str = "simulador", s=Depen
         b = db.fila(con, "SELECT * FROM borradores WHERE id=?", (bid,))
         if b["estado"] in ("emitido", "descartado") or b["factura_id"]:
             raise HTTPException(409, "El borrador ya no es editable")
+        try:
+            # «He revisado…» confirma los valores que se mostraron: si el borrador cambió entretanto, 409
+            emision.comprobar_version_vista(b["datos"], body.get("version_vista"))
+        except emision.BorradorCambiado as e:
+            return JSONResponse({"detail": str(e), "codigo": e.codigo}, status_code=409)
         datos = json.loads(b["datos"])
         claves = body.get("claves") or []
         if not isinstance(claves, list) or not all(isinstance(k, str) and len(k) <= 200 for k in claves):
@@ -701,6 +890,56 @@ def borrador_confirmar(bid: int, body: dict, entorno: str = "simulador", s=Depen
         con.execute("UPDATE borradores SET datos=?, actualizado_en=? WHERE id=?", (json.dumps(datos, ensure_ascii=False), db.ahora_iso(), bid))
         db.actividad(con, "borrador.confirmaciones", usuario_id=s["usuario_id"], empresa_id=b["empresa_id"], objeto="borrador",
                      objeto_id=bid, detalle={"claves": body.get("claves")})
+    return borrador_get(bid, entorno, s, con)
+
+
+@router.post("/borradores/{bid}/serie")
+def borrador_serie(bid: int, body: dict, s=Depends(sesion), con=Depends(get_con)):
+    """«Esta será la serie F-2026/0240, F-2026/0241… ¿Correcto?»: crea y confirma, en una sola acción del administrador, la
+    serie propuesta a partir del número del borrador (patrón y primer número = el número del borrador). El cuerpo repite el
+    patrón y el primer número que el usuario ha visto: si la propuesta ha cambiado (otro número guardado entretanto), 409.
+    El código interno se propone solo (series.codigo_propuesto). Nunca avanza ni cambia una serie existente."""
+    b = _obj(con, "borradores", bid)
+    rol(con, s, b["empresa_id"], "admin")
+    entorno = body.get("entorno")
+    if entorno not in ("simulador", "pruebas", "produccion"):
+        raise HTTPException(422, "Entorno no válido")
+    with db.transaccion(con):
+        # todo dentro de la transacción (BEGIN IMMEDIATE): otra serie creada a la vez no puede colarse entre la comprobación
+        # de solapamiento y el alta
+        b = db.fila(con, "SELECT * FROM borradores WHERE id=?", (bid,))
+        if b["estado"] in ("emitido", "descartado") or b["factura_id"]:
+            raise HTTPException(409, "El borrador ya no es editable")
+        empresa = emision.cargar_empresa(con, b["empresa_id"])
+        datos = json.loads(b["datos"])
+        tipo = "rectificativa" if b["rectifica_factura_id"] else "ordinaria"
+        ns = datos.get("num_serie") if isinstance(datos.get("num_serie"), str) else ""
+        if series.identificar(con, empresa["id"], entorno, ns, db.ahora().year, tipo):
+            raise HTTPException(409, "El número ya corresponde a una serie confirmada")
+        pp = _serie_propuesta(ns)
+        solapadas = series.patrones_solapados(con, empresa["id"], entorno, pp["patron"], pp.get("anio") or db.ahora().year) \
+            if pp else []
+        if solapadas:
+            raise HTTPException(409, f"Esta numeración se confunde con la de la serie «{solapadas[0]['codigo']}» "
+                                     f"({solapadas[0]['patron']}): corrija el número de la factura o configure la serie en "
+                                     "Configuración")
+        p = _serie_propuesta_borrador(con, b, empresa, entorno, datos)
+        if not p:
+            raise HTTPException(409, "No se puede proponer una serie a partir de este número: configúrela en Configuración")
+        if body.get("patron") != p["patron"] or body.get("siguiente_numero") != p["numero"]:
+            raise HTTPException(409, "La propuesta de serie ha cambiado: revísela de nuevo")
+        try:
+            cur = con.execute("""INSERT INTO series (empresa_id, entorno, codigo, patron, descripcion, tipo, siguiente_numero,
+                                 confirmada_por, confirmada_en) VALUES (?,?,?,?,?,?,?,?,?)""",
+                              (empresa["id"], entorno, p["codigo"], p["patron"], "Creada desde el borrador", tipo, p["numero"],
+                               s["usuario_id"], db.ahora_iso()))
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "Ya existe una serie con ese código: vuelva a intentarlo")
+        sid = cur.lastrowid
+        db.actividad(con, "serie.creada", usuario_id=s["usuario_id"], empresa_id=empresa["id"], objeto="serie", objeto_id=sid,
+                     detalle={"entorno": entorno, "codigo": p["codigo"], "patron": p["patron"], "tipo": tipo,
+                              "siguiente_numero": p["numero"], "borrador_id": bid})
+        db.actividad(con, "serie.confirmada", usuario_id=s["usuario_id"], empresa_id=empresa["id"], objeto="serie", objeto_id=sid)
     return borrador_get(bid, entorno, s, con)
 
 
@@ -748,11 +987,15 @@ def borrador_emitir(bid: int, body: dict, request: Request, s=Depends(sesion), c
         raise HTTPException(422, "Entorno no válido")
     try:
         fid = emision.emitir(con, borrador_id=bid, usuario_id=s["usuario_id"], entorno=entorno,
-                             clave_idempotencia=str(body.get("clave_idempotencia") or ""))
+                             clave_idempotencia=str(body.get("clave_idempotencia") or ""),
+                             version_vista=body.get("version_vista"))
     except produccion.EntornoNoHabilitado as e:
         raise HTTPException(403, str(e))
     except emision.ErrorEmision as e:
-        return JSONResponse({"detail": str(e), "incidencias": e.incidencias}, status_code=409)
+        out = {"detail": str(e), "incidencias": e.incidencias}
+        if e.codigo:
+            out["codigo"] = e.codigo
+        return JSONResponse(out, status_code=409)
     tr = getattr(request.app.state, "trabajador", None)
     if tr:
         tr.despertar()
@@ -899,7 +1142,7 @@ def factura_rectificativa(fid: int, body: dict, s=Depends(sesion), con=Depends(g
     _textos(body, ("motivo", "tipo"), "Motivo y tipo de rectificativa deben ser textos")
     try:
         return {"borrador_id": emision.borrador_rectificativa(con, factura_id=fid, usuario_id=s["usuario_id"],
-                                                              tipo=body.get("tipo", "R1"), motivo=(body.get("motivo") or "")[:300])}
+                                                              tipo=body.get("tipo") or "R4", motivo=(body.get("motivo") or "")[:300])}
     except emision.ErrorEmision as e:
         raise HTTPException(409, str(e))
 
@@ -1056,6 +1299,10 @@ def produccion_get(eid: int, s=Depends(sesion), con=Depends(get_con)):
     req_p = produccion.requisitos(con, e, s["usuario_id"], "pruebas")
     return {"requisitos": req, "habilitada": all(r["cumplido"] for r in req),
             "requisitos_pruebas": req_p, "pruebas_habilitadas": all(r["cumplido"] for r in req_p),
+            # La empresa ve en una línea lo que depende de la plataforma (el operador ve el detalle)
+            "plataforma": dict(produccion.plataforma(req), texto=produccion.TEXTO_PLATAFORMA_PENDIENTE["produccion"]),
+            "plataforma_pruebas": dict(produccion.plataforma(req_p), texto=produccion.TEXTO_PLATAFORMA_PENDIENTE["pruebas"]),
+            "modo_practica": produccion.modo_practica(con, e),
             "resumen_primer_envio": dict(produccion.resumen_primer_envio(con, e),
                                          texto_confirmacion_requerido=f"AUTORIZO EL ENVÍO REAL A LA AEAT DE {e['nif']}")}
 

@@ -161,6 +161,96 @@ def proponer_patron(num_serie: str, anio: int) -> dict | None:
     return {"patron": patron, "numero": numero, "anio": r["anio"], "ancho": ancho(patron)}
 
 
+def ejemplos(patron: str, numero: int, anio: int, cuantos: int = 2) -> list[str]:
+    """Los números que expedirá la serie a partir de `numero` («F-2026/0240», «F-2026/0241»): así se muestra al usuario."""
+    try:
+        return [formatear(patron, numero + i, anio) for i in range(cuantos) if numero + i <= MAX_NUMERO]
+    except ValueError:
+        return []
+
+
+def codigo_propuesto(con, empresa_id: int, entorno: str, patron: str, tipo: str = "ordinaria") -> str:
+    """Código interno de una serie creada desde el borrador: las letras fijas del patrón («F-{aaaa}/{n:4}» → «F»), «R» en
+    una rectificativa sin letras y «A» en una ordinaria sin letras; si ya existe en ese entorno, con un sufijo («F2»)."""
+    letras = re.sub(r"[^A-Za-z0-9]", "", RE_MARCADOR.sub("", patron or ""))[:12].upper()
+    base = letras or ("R" if tipo == "rectificativa" else "A")
+    usados = {r["codigo"] for r in db.filas(con, "SELECT codigo FROM series WHERE empresa_id=? AND entorno=?",
+                                            (empresa_id, entorno))}
+    if base not in usados:
+        return base
+    n = 2
+    while f"{base}{n}" in usados:
+        n += 1
+    return f"{base}{n}"
+
+
+def patron_rectificativa(patron_ordinario: str, otros: list[str] | None = None) -> str | None:
+    """Patrón propuesto para la serie de rectificativas a partir del de la factura rectificada: sus letras iniciales
+    cambiadas por «R» («F-{aaaa}/{n:4}» → «R-{aaaa}/{n:4}») o «R» delante si no empieza por letras («{n}/{aa}» →
+    «R{n}/{aa}»). No puede leer los números de ninguna otra serie (`otros`), ni estos los suyos: si choca, «RECT-» delante.
+    None si el patrón no es válido."""
+    try:
+        validar_patron(patron_ordinario)
+    except ValueError:
+        return None
+    m = re.match(r"[A-Za-z]+", patron_ordinario)
+    candidatos = (["R" + patron_ordinario[m.end():]] if m else []) + ["R" + patron_ordinario, "RECT-" + patron_ordinario]
+    otros = [p for p in (otros or []) if isinstance(p, str)] + [patron_ordinario]
+    for c in candidatos:
+        try:
+            validar_patron(c)
+            if not any(solapan(c, o) for o in otros):
+                return c
+        except ValueError:
+            continue
+    return None
+
+
+def solapan(patron: str, otro: str, anio: int = 2026) -> bool:
+    """True si uno de los dos patrones lee números escritos con el otro (con cualquier ancho del número: «F-{aaaa}/{n}» y
+    «F-{aaaa}/{n:4}» leen los mismos números). Dos series así darían por buenos números de la otra y sus contadores
+    propondrían números ya expedidos. Un patrón no válido no solapa (no puede crearse)."""
+    try:
+        validar_patron(patron)
+        validar_patron(otro)
+    except ValueError:
+        return False
+    for n in (7, 240, 123456):
+        try:
+            if _lee(otro, formatear(patron, n, anio)) or _lee(patron, formatear(otro, n, anio)):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _lee(patron: str, numero: str) -> bool:
+    try:
+        return probar(patron, numero, estricto=False)["coincide"]
+    except (ValueError, re.error):
+        return False
+
+
+def siguiente_texto(con, serie: dict, anio_expedicion: int) -> str | None:
+    """Siguiente número de una serie confirmada para el año de expedición, escrito con su patrón (None si no se puede)."""
+    try:
+        anio_c = anio_expedicion if tiene_anio(serie["patron"]) else 0
+        return formatear(serie["patron"], siguiente(con, serie["id"], anio_c), anio_c or anio_expedicion)
+    except (ValueError, TypeError, KeyError):
+        return None
+
+
+def patrones_solapados(con, empresa_id: int, entorno: str, patron: str, anio: int) -> list[dict]:
+    """Series activas de la empresa en el entorno (de cualquier tipo, confirmadas o no) cuyo patrón solapa con `patron`."""
+    return [s for s in db.filas(con, "SELECT id, codigo, patron, tipo FROM series WHERE empresa_id=? AND entorno=? AND activa=1",
+                                (empresa_id, entorno)) if solapan(patron, s["patron"], anio)]
+
+
+def series_confirmadas(con, empresa_id: int, entorno: str, tipo: str = "ordinaria") -> list[dict]:
+    return db.filas(con, """SELECT * FROM series WHERE empresa_id=? AND entorno=? AND activa=1 AND tipo=?
+                            AND confirmada_en IS NOT NULL ORDER BY id""", (empresa_id, entorno, tipo))
+
+
 def siguiente(con, serie_id: int, anio: int) -> int:
     c = db.fila(con, "SELECT siguiente FROM series_contadores WHERE serie_id=? AND anio=?", (serie_id, anio))
     if c:

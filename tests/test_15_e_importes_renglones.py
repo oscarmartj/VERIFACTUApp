@@ -309,7 +309,7 @@ def test_escaneo_cifra_con_espacios_y_total_ilegible():
     assert (d["importe_total"], d["total_a_pagar"]) == ("786.50", "663.00")
     inc = _validar(ext, d)
     no_leido = [i for i in inc if i["codigo"] == "TOTAL_NO_LEIDO"]
-    assert no_leido and "retención" in no_leido[0]["mensaje"] and "663.00" in no_leido[0]["mensaje"]
+    assert no_leido and "retención" in no_leido[0]["mensaje"] and "663,00 €" in no_leido[0]["mensaje"]
     assert not _codigos(inc, "bloqueo") & {"TOTAL_DESCUADRE", "PAGAR_DESCUADRE", "RET_DESCUADRE"}
 
 

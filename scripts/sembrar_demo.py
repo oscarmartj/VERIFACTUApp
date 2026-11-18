@@ -37,7 +37,8 @@ def main():
             tc.put(f"/api/empresas/{eid}", json={"tipo_contribuyente": "sociedad_IS", "territorio": "comun", "sii": 0,
                                                  "canarias_ceuta_melilla": 0, "origen_pdf": "plantilla_ofimatica",
                                                  "origen_pdf_detalle": "Plantilla de procesador de textos (sintético)"}, headers=h)
-            tc.post(f"/api/empresas/{eid}/ambito/confirmar", headers=h)
+            tc.post(f"/api/empresas/{eid}/ambito/confirmar", json={"territorio_foral": False, "sii": False,
+                                                                  "canarias_ceuta_melilla": False}, headers=h)
             tc.post(f"/api/empresas/{eid}/autorizacion-usuario", json={"relacion": "administrador", "declaro": True}, headers=h)
             s = tc.post(f"/api/empresas/{eid}/series", json={"entorno": "simulador", "codigo": "A", "patron": patron,
                                                              "siguiente_numero": sig, "descripcion": "Serie del simulador"}, headers=h).json()

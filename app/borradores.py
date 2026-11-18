@@ -11,7 +11,33 @@ from decimal import Decimal, InvalidOperation
 
 from . import db
 from . import nif as nifmod
-from .importes import q2
+from .importes import fmt_es, fmt_porcentaje, q2
+
+
+def _e(v) -> str:
+    """Importe para un mensaje al usuario, en formato español: «1.028,50 €». Si no es una cifra, el texto tal cual."""
+    if v is None or v == "":
+        return "—"
+    try:
+        return fmt_es(Decimal(str(v).strip()))
+    except (InvalidOperation, ValueError, TypeError):
+        return str(v)
+
+
+def _pct(v) -> str:
+    """Porcentaje para un mensaje al usuario: «21 %», «12,5 %»."""
+    try:
+        return f"{fmt_porcentaje(Decimal(str(v)))} %"
+    except (InvalidOperation, ValueError, TypeError):
+        return f"{v} %"
+
+
+def _num(v) -> str:
+    """Cantidad para un mensaje al usuario, con coma decimal y sin ceros sobrantes: «2», «1,5»."""
+    try:
+        return fmt_porcentaje(Decimal(str(v)))
+    except (InvalidOperation, ValueError, TypeError):
+        return str(v)
 
 UMBRAL_CONFIANZA = 0.85
 TIPOS_IVA_SOPORTADOS = {Decimal("21"), Decimal("10"), Decimal("4")}
@@ -230,6 +256,29 @@ def clasificar(ext: dict, inspeccion: dict, empresa: dict, duplicados: list[dict
             "motivos": motivos + ["El NIF de la empresa no figura como emisor ni como destinatario."]}
 
 
+CONFIANZA_CLASIFICACION_AUTOMATICA = 0.9
+
+
+def admite_clasificacion_automatica(sug: dict, inspeccion: dict, ext: dict, duplicados: list[dict] | None) -> bool:
+    """La sugerencia se aplica sin preguntar (el documento se trata como proforma o borrador y se abre su borrador) solo si es
+    «preparatorio» con confianza ≥ 0,9 (título de proforma, presupuesto o borrador leído con seguridad y emitido por la
+    empresa), sin QR tributario, sin firma electrónica, sin marcas de un sistema VERI*FACTU y sin otro PDF ni factura con el
+    mismo emisor y número. En cualquier otro caso se pregunta al usuario. El borrador sigue necesitando la revisión y la
+    acción expresa de emitir; el usuario puede cambiar la clasificación mientras no se haya expedido."""
+    if not isinstance(sug, dict) or sug.get("sugerida") != "preparatorio":
+        return False
+    if not isinstance(sug.get("confianza"), (int, float)) or sug["confianza"] < CONFIANZA_CLASIFICACION_AUTOMATICA:
+        return False
+    insp = inspeccion if isinstance(inspeccion, dict) else {}
+    if any(q.get("tributario") for q in insp.get("qr") or [] if isinstance(q, dict)):
+        return False
+    if insp.get("firmado") or any(f.get("firmado") for f in insp.get("firmas") or [] if isinstance(f, dict)):
+        return False
+    if "verifactu_existente" in ((ext or {}).get("indicios") or {}):
+        return False
+    return not duplicados
+
+
 def _cifras_extraccion(ext: dict) -> tuple[list[dict], str | None, str | None, str | None]:
     """Desglose sujeto, base imponible, cuota y total del borrador a partir de la extracción (antes de proponer exentas)."""
     desglose = []
@@ -363,7 +412,7 @@ def _proponer_exencion(ext: dict, desglose: list[dict], base_txt, cuota_txt,
             return desglose, cuota_txt, base_txt
         if origen is not None:
             origen.update(respaldo, base=str(resto),
-                          calculo=f"base imponible leída {q2(base)} − bases sujetas {q2(b_suj)}")
+                          calculo=f"base imponible leída, {_e(base)}, menos las bases con IVA, {_e(b_suj)}")
     return sujetas + [fila_exenta(str(resto), causa, motivo)], cuota_txt, base_txt
 
 
@@ -515,7 +564,7 @@ def _mixta_impresa(ext: dict, sujetas: list[dict], base: Decimal | None, cuota: 
     if respaldo is None:
         return None
     if origen is not None:
-        origen.update(respaldo, base=str(resto), calculo=f"total impreso {q2(total)} − bases sujetas y cuotas {b_suj + c_suj}")
+        origen.update(respaldo, base=str(resto), calculo=f"total impreso, {_e(total)}, menos las bases con IVA y su IVA, {_e(b_suj + c_suj)}")
     return filas + [fila_exenta(str(resto), causa, motivo)], str(c_suj), str(q2(b_suj + resto))
 
 
@@ -747,10 +796,15 @@ def _saneado(datos: dict) -> tuple[dict, list[str]]:
 
 
 def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extraccion: dict | None = None,
-            serie: dict | None = None, es_rectificativa: bool = False, cambiados: set[str] | None = None) -> list[dict]:
-    """Devuelve incidencias: nivel 'bloqueo' (impide emitir), 'confirmar' (requiere confirmación expresa) o 'aviso'."""
+            serie: dict | None = None, es_rectificativa: bool = False, cambiados: set[str] | None = None,
+            fecha_respondida: bool | None = None) -> list[dict]:
+    """Devuelve incidencias: nivel 'bloqueo' (impide emitir), 'confirmar' (requiere confirmación expresa) o 'aviso'.
+    `fecha_respondida`: la fecha de operación se cambió DESPUÉS del último cambio de la fecha del documento (la pregunta
+    de la fecha está respondida para la fecha actual); sin indicarlo, basta con que se haya cambiado alguna vez."""
     inc: list[dict] = []
     cambiados = cambiados or set()
+    if fecha_respondida is None:
+        fecha_respondida = "fecha_operacion" in cambiados
 
     def add(nivel, campo, codigo, mensaje, ref=None):
         # ref: lo que se confirma (p. ej. los documentos duplicados); si cambia, la confirmación dada ya no vale
@@ -776,7 +830,7 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
     # --- Ámbito del emisor
     amb = empresa.get("ambito_dict") or {}
     if not empresa.get("ambito_confirmado_en"):
-        add("bloqueo", "empresa", "AMBITO_SIN_CONFIRMAR", "Confirme el ámbito del emisor en la configuración.")
+        add("bloqueo", "empresa", "AMBITO_SIN_CONFIRMAR", "Responda las tres preguntas sobre su empresa (Configuración).")
     elif not amb.get("puede_emitir"):
         add("bloqueo", "empresa", "AMBITO_NO_SOPORTADO", "; ".join(amb.get("motivos", ["Ámbito no soportado"])))
 
@@ -899,7 +953,10 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
     fd = datos.get("fecha_documento")
     if fd and fd > hoy:
         add("bloqueo", "fecha_documento", "FECHA_FUTURA", "La fecha del documento es posterior a hoy.")
-    if fd and fd != hoy:
+    # Documento con otra fecha: se pregunta si la operación se realizó entonces. La respuesta es indicar la fecha de operación
+    # (el usuario la escribe o la elige en la pregunta: queda en el historial) o confirmar que la operación es de hoy.
+    # La respuesta vale para la fecha del documento a la que respondía: si esta cambia después, se pregunta de nuevo
+    if fd and fd != hoy and not fecha_respondida:
         add("confirmar", "fecha_documento", "FECHA_EXPEDICION",
             f"El documento está fechado el {db.legible(fd, hora=False)}; la factura se expedirá con fecha de hoy "
             f"({db.legible(hoy, hora=False)}). "
@@ -933,8 +990,8 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
             and (cuota is None or q2(cuota) == 0):
         # factura sin IVA repercutido (p. ej. alquiler de vivienda): total = base, sin cuota ni desglose
         add("bloqueo", "desglose", "SIN_IVA",
-            f"La factura no repercute IVA: el total ({q2(total)}) es igual a la base imponible y no hay cuota. Si la operación "
-            "está exenta, añada en el desglose una base exenta y elija la causa de exención (E1–E6) y la mención legal; "
+            f"La factura no repercute IVA: el total ({_e(total)}) es igual a la base imponible y no hay IVA. Si la operación "
+            "está exenta, añada en el desglose una base exenta y elija la causa de exención y la mención legal; "
             "si está sujeta a IVA, indique el tipo, la base y la cuota en el desglose y corrija la cuota y el total. Las "
             "operaciones no sujetas al impuesto no están soportadas.")
     elif not desglose:
@@ -961,8 +1018,8 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
             add("bloqueo", f"desglose.{i}", "DESGLOSE_INCOMPLETO", "Desglose incompleto (tipo, base y cuota).")
             continue
         if t not in TIPOS_IVA_SOPORTADOS:
-            add("bloqueo", f"desglose.{i}.tipo_iva", "TIPO_NO_SOPORTADO", f"Tipo de IVA {t} % no soportado." + (
-                " Si la operación está exenta, márquela como exenta en el desglose y elija la causa (E1–E6)."
+            add("bloqueo", f"desglose.{i}.tipo_iva", "TIPO_NO_SOPORTADO", f"Tipo de IVA del {_pct(t)} no soportado." + (
+                " Si la operación está exenta, márquela como exenta en el desglose y elija la causa de exención."
                 if t == 0 and c == 0 else ""))
         if (d.get("calificacion") or "S1") != "S1" or (d.get("clave_regimen") or "01") != "01" \
                 or (d.get("impuesto") or "01") != "01":
@@ -974,7 +1031,7 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
         if esperado != q2(c):
             nivel = "confirmar" if abs(esperado - c) <= Decimal("0.01") else "bloqueo"
             add(nivel, f"desglose.{i}.cuota", "CUOTA_DESCUADRE",
-                f"Cuota {q2(c)} ≠ base {q2(b)} × {t} % = {esperado}.")
+                f"El IVA de la fila {i + 1} ({_e(c)}) no es el {_pct(t)} de su base ({_e(b)}), que da {_e(esperado)}.")
         if not es_rectificativa and (b < 0 or c < 0):
             add("bloqueo", f"desglose.{i}", "NEGATIVO", "Importes negativos: use el procedimiento de rectificación.")
         suma_base += b
@@ -982,23 +1039,23 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
     if base is None:
         add("bloqueo", "base_imponible", "BASE_FALTA", "Falta la base imponible.")
     elif desglose and q2(suma_base) != q2(base):
-        add("bloqueo", "base_imponible", "BASE_DESCUADRE", f"La suma de bases por tipo ({q2(suma_base)}) ≠ base ({q2(base)}).")
+        add("bloqueo", "base_imponible", "BASE_DESCUADRE", f"La suma de las bases de cada tipo de IVA ({_e(suma_base)}) no coincide con la base imponible ({_e(base)}).")
     if cuota is None:
         add("bloqueo", "cuota_total", "CUOTA_FALTA", "Falta la cuota de IVA." + (
             " Todas las bases son exentas: indique 0.00." if desglose and all(es_exenta(x) for x in desglose) else ""))
     elif desglose and q2(suma_cuota) != q2(cuota):
-        add("bloqueo", "cuota_total", "CUOTA_TOTAL_DESCUADRE", f"La suma de cuotas ({q2(suma_cuota)}) ≠ cuota total ({q2(cuota)}).")
+        add("bloqueo", "cuota_total", "CUOTA_TOTAL_DESCUADRE", f"La suma del IVA de cada tipo ({_e(suma_cuota)}) no coincide con el IVA total ({_e(cuota)}).")
     tf_ext = (extraccion or {}).get("total_factura")
     total_no_leido = isinstance(tf_ext, dict) and "valor" in tf_ext and tf_ext["valor"] is None
     sin_clasificar = [str(x) for x in tf_ext.get("sin_clasificar") or []] if total_no_leido else []
     if total is None:
         add("bloqueo", "importe_total", "TOTAL_FALTA", "Falta el total de la factura." + (
             f" No se ha identificado en el documento: el cuadro de totales imprime cifras que no se han podido interpretar "
-            f"({'; '.join(sin_clasificar)}) y no coinciden con base + cuota. Indique el total impreso; si incluye otros "
+            f"({'; '.join(_e(x) for x in sin_clasificar)}) y no coinciden con la base más el IVA. Indique el total impreso; si incluye otros "
             "conceptos (tasas, suplidos…), la factura no puede expedirse con esta aplicación." if sin_clasificar else ""))
     elif base is not None and cuota is not None and q2(base + cuota) != q2(total):
         add("bloqueo", "importe_total", "TOTAL_DESCUADRE",
-            f"Total {q2(total)} ≠ base {q2(base)} + cuota {q2(cuota)} = {q2(base + cuota)}.")
+            f"El total ({_e(total)}) no es la base ({_e(base)}) más el IVA ({_e(cuota)}), que suman {_e(base + cuota)}.")
     if total is not None and abs(total) >= Decimal("100000000"):
         add("bloqueo", "importe_total", "MACRODATO", "Importes ≥ 100.000.000 € (macrodato) no soportados.")
     # Total no leído en el documento: datos_desde_extraccion lo deduce como base + cuota, lo que siempre cuadra
@@ -1007,9 +1064,10 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
         ret_i = _dec((datos.get("retencion") or {}).get("importe"))
         ret_i = ret_i if ret_i is not None and ret_i > 0 else None
         add("confirmar", "importe_total", "TOTAL_NO_LEIDO",
-            f"No se ha leído el total de la factura en el documento: se ha calculado como base + cuota ({q2(total)})"
-            + (f", y el importe a pagar como ese total menos la retención ({q2(total - ret_i)})" if ret_i else "") + ". "
-            + (f"El cuadro de totales imprime además cifras sin interpretar ({'; '.join(sin_clasificar)}). " if sin_clasificar else "")
+            f"No se ha leído el total de la factura en el documento: se ha calculado como la base más el IVA ({_e(total)})"
+            + (f", y el importe a pagar como ese total menos la retención ({_e(total - ret_i)})" if ret_i else "") + ". "
+            + (f"El cuadro de totales imprime además cifras sin interpretar ({'; '.join(_e(x) for x in sin_clasificar)}). "
+               if sin_clasificar else "")
             + "Compruebe en el original que el total impreso es ese"
             + (" (o, si ya descuenta la retención, el importe a pagar)" if ret_i else "")
             + " y que no incluye otros conceptos (tasas, suplidos, portes…); si es distinto, corríjalo.")
@@ -1018,8 +1076,8 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
     bajo_total = [str(x) for x in tf_ext.get("bajo_total") or []] if isinstance(tf_ext, dict) and not total_no_leido else []
     if bajo_total and total is not None and "importe_total" not in cambiados:
         add("confirmar", "importe_total", "TOTAL_CIFRAS_DEBAJO",
-            f"Bajo el total leído ({q2(total)}) el cuadro de totales imprime cifras que no se han podido interpretar "
-            f"({'; '.join(bajo_total)}), alguna mayor que el total. Compruebe en el original que el total de la factura y el "
+            f"Bajo el total leído ({_e(total)}) el cuadro de totales imprime cifras que no se han podido interpretar "
+            f"({'; '.join(_e(x) for x in bajo_total)}), alguna mayor que el total. Compruebe en el original que el total de la factura y el "
             "importe a pagar son esos: si la factura suma otros conceptos (tasas, portes, suplidos…), no puede expedirse con "
             "esta aplicación.")
     # Total leído que, sumado a otras cifras sin interpretar, da otra cifra impresa en el documento (cuadro horizontal,
@@ -1027,8 +1085,8 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
     suma_otra = tf_ext.get("suma_otra") if isinstance(tf_ext, dict) and not total_no_leido and not bajo_total else None
     if isinstance(suma_otra, dict) and total is not None and "importe_total" not in cambiados:
         add("confirmar", "importe_total", "TOTAL_OTRA_CIFRA",
-            f"El documento imprime {suma_otra.get('cifra')}, que es el total leído ({q2(total)}) más "
-            f"{' + '.join(str(x) for x in suma_otra.get('sumandos') or [])}, cifras que no se han podido interpretar. "
+            f"El documento imprime {_e(suma_otra.get('cifra'))}, que es el total leído ({_e(total)}) más "
+            f"{' más '.join(_e(x) for x in suma_otra.get('sumandos') or [])}, cifras que no se han podido interpretar. "
             "Compruebe en el original que el total de la factura y el importe a pagar son esos: si la factura suma otros "
             "conceptos (tasas, portes, suplidos…), no puede expedirse con esta aplicación.")
     # Líneas
@@ -1049,7 +1107,8 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
         cant, precio = _dec(l.get("cantidad")), _dec(l.get("precio"))
         if cant is not None and precio is not None and q2(cant * precio) != q2(imp):
             add("bloqueo", f"lineas.{i}.importe", "LINEA_DESCUADRE",
-                f"Línea {i + 1}: {cant} × {precio} = {q2(cant * precio)} ≠ importe {q2(imp)}.")
+                f"Línea {i + 1}: la cantidad ({_num(cant)}) por el precio ({_e(precio)}) da {_e(cant * precio)}, pero el importe "
+                f"es {_e(imp)}.")
         elif cant is None and precio is not None and q2(precio) != q2(imp):
             # sin cantidad, el precio unitario debe coincidir con el importe (cantidad 1); si no, falta la cantidad
             # o el «precio» es otra cifra (p. ej. la cantidad leída en una columna deducida). Un descuento de la línea
@@ -1060,15 +1119,16 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
             if Decimal(0) < imp < precio and ("descuento" in (datos.get("indicios") or [])
                                               or re.search(rf"\b{_RE_PAL_DTO}\b", str(l.get("concepto") or ""), re.I)):
                 add("confirmar", f"lineas.{i}.cantidad", "LINEA_SIN_CANTIDAD",
-                    f"Línea {i + 1}: el importe {q2(imp)} es menor que el precio {q2(precio)} y no consta la cantidad; el "
+                    f"Línea {i + 1}: el importe ({_e(imp)}) es menor que el precio ({_e(precio)}) y no consta la cantidad; el "
                     "documento menciona un descuento. Compruebe en el original la cantidad, el precio y el descuento de la línea.")
             else:
                 add("bloqueo", f"lineas.{i}.cantidad", "LINEA_SIN_CANTIDAD",
-                    f"Línea {i + 1}: el precio {q2(precio)} no coincide con el importe {q2(imp)} y no consta la cantidad. "
+                    f"Línea {i + 1}: el precio ({_e(precio)}) no coincide con el importe ({_e(imp)}) y no consta la cantidad. "
                     "Indique la cantidad o corrija el precio.")
     if con_importe and base is not None and q2(suma_lineas) != q2(base):
         add("bloqueo", "lineas", "LINEAS_DESCUADRE",
-            f"La suma de las líneas ({q2(suma_lineas)}) ≠ base imponible ({q2(base)}). Revise descuentos o suplidos.")
+            f"La suma de las líneas ({_e(suma_lineas)}) no coincide con la base imponible ({_e(base)}). Revise descuentos o "
+            "suplidos.")
     if not lineas:
         add("aviso", "lineas", "SIN_LINEAS", "No se han identificado líneas de detalle.")
     elif extraccion and extraccion.get("lineas") and extraccion.get("aviso_lineas"):
@@ -1088,12 +1148,13 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
                 # un céntimo de diferencia es un redondeo distinto (o truncado) del emisor, como en la cuota: se confirma
                 esperado_r = q2(base * rp / 100)
                 add("confirmar" if abs(esperado_r - q2(ri)) <= Decimal("0.01") else "bloqueo", "retencion.importe",
-                    "RET_DESCUADRE", f"Retención {q2(ri)} ≠ base × {rp} % = {esperado_r}."
+                    "RET_DESCUADRE", f"La retención ({_e(ri)}) no es el {_pct(rp)} de la base, que da {_e(esperado_r)}."
                     + (" La diferencia de un céntimo suele ser un redondeo distinto del emisor: compruébelo en el original."
                        if abs(esperado_r - q2(ri)) <= Decimal("0.01") else ""))
             if total is not None and pagar is not None and q2(total - ri) != q2(pagar):
                 add("bloqueo", "total_a_pagar", "PAGAR_DESCUADRE",
-                    f"Total a pagar {q2(pagar)} ≠ total {q2(total)} − retención {q2(ri)} = {q2(total - ri)}.")
+                    f"El importe a pagar ({_e(pagar)}) no es el total ({_e(total)}) menos la retención ({_e(ri)}), que da "
+                    f"{_e(total - ri)}.")
             if rp is None:
                 add("bloqueo", "retencion.porcentaje", "RET_PORCENTAJE_FALTA",
                     "No consta el porcentaje de la retención: indíquelo (el PDF lo muestra y se comprueba con la base).")
@@ -1119,19 +1180,23 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
                     "IRPF») y que no se descuenta ninguna garantía del importe a pagar.")
             elif rp is not None and not habitual:
                 add("confirmar", "retencion.porcentaje", "RET_TIPO_INUSUAL",
-                    f"La retención del {rp.normalize():f} % no corresponde a un tipo habitual de IRPF (1, 2, 7, 15 o 19 %). "
+                    f"La retención del {_pct(rp)} no corresponde a un tipo habitual de IRPF (1, 2, 7, 15 o 19 %). "
                     "Confirme que es una retención de IRPF y no de garantía u otro concepto: el PDF la mostrará como "
                     "«Retención IRPF».")
             # «TOTAL» impreso igual a base + cuota − retención: se ha reinterpretado como importe a pagar y el total de la
             # factura se ha calculado; la confirmación lo dice expresamente
             liq = tf_ext.get("liquido_impreso") if isinstance(tf_ext, dict) else None
-            reinterpretado = (f" El documento imprime como total {liq}, que ya descuenta la retención: se ha tomado como "
-                              f"importe a pagar y el total de la factura se ha calculado como base + cuota ({q2(total)}). "
+            reinterpretado = (f" El documento imprime como total {_e(liq)}, que ya descuenta la retención: se ha tomado como "
+                              f"importe a pagar y el total de la factura se ha calculado como la base más el IVA "
+                              f"({_e(total)}). "
                               "Compruébelo en el original."
                               if liq and total is not None and not {"importe_total", "total_a_pagar"} & cambiados else "")
-            add("confirmar", "retencion", "RETENCION",
+            # Sin reinterpretar el total impreso es solo una explicación del tratamiento (aviso); si se ha reinterpretado,
+            # hay un dato que comprobar en el original y se pide confirmarlo
+            add("confirmar" if reinterpretado else "aviso", "retencion", "RETENCION",
                 "La factura incluye retención: el registro VERI*FACTU recoge el importe total (bases + cuotas) y el "
-                "PDF muestra el importe a pagar neto de retención." + reinterpretado + " Confirme este tratamiento.")
+                "PDF muestra el importe a pagar neto de retención." + reinterpretado
+                + (" Confirme este tratamiento." if reinterpretado else ""))
     elif pagar is not None and total is not None and q2(pagar) != q2(total):
         add("bloqueo", "total_a_pagar", "PAGAR_DISTINTO",
             "El importe a pagar difiere del total sin retención identificada (¿suplidos, anticipos?). Caso no soportado.")
@@ -1166,6 +1231,13 @@ def validar(con, empresa: dict, documento: dict | None, datos: dict, *, extracci
             ruta = _ruta_borrador(d["campo"])
             if ruta and ruta not in cambiados and (ruta, str(d["valor"])) not in dudosos_vistos:
                 dudosos_vistos.add((ruta, str(d["valor"])))  # tipo_iva y desglose.0.tipo_iva: la misma lectura, una vez
+                if dudoso_resuelto_por_empresa(ruta, d["valor"], empresa, datos, extraccion):
+                    continue
+                if RE_CAMPOS_NO_FISCALES.match(ruta):
+                    add("aviso", ruta, "DUDOSO",
+                        f"Compruebe este dato en el original (lectura dudosa, {d['metodo']}, confianza {d['confianza']:.0%}): "
+                        f"«{d['valor']}». Se imprime en la factura, pero no se comunica a la AEAT: no impide emitir.")
+                    continue
                 add("confirmar", ruta, "DUDOSO",
                     f"Lectura dudosa{'' if CAMPOS_EDITABLES.match(ruta) else ' de «' + d['campo'] + '»'} ({d['metodo']}, "
                     f"confianza {d['confianza']:.0%}): «{d['valor']}». Corrija o confirme.")
@@ -1209,11 +1281,11 @@ def _validar_fila_exenta(add, i: int, d: dict, clase: str, b: Decimal | None, es
         nota = (str(ext_exencion.get("texto") or "")[:120] if isinstance(ext_exencion, dict) and ext_exencion.get("iva")
                 and not ext_exencion.get("causa") else "")
         add("bloqueo", campo, "SIN_IVA",
-            f"La fila {i + 1} del desglose no repercute IVA (base {q2(b) if b is not None else 'sin indicar'}, sin tipo ni "
-            "cuota). "
+            f"La fila {i + 1} del desglose no repercute IVA (base {_e(b) if b is not None else 'sin indicar'}, sin tipo ni "
+            "IVA). "
             + (f"El documento menciona una exención («{nota}») pero no cita el artículo de la Ley 37/1992 que da su causa: "
                "no se propone ninguna. " if nota else "")
-            + "Si la operación está exenta, elija la causa de exención (E1–E6) y revise la mención legal que se "
+            + "Si la operación está exenta, elija la causa de exención y revise la mención legal que se "
             "imprimirá en la factura; si está sujeta a IVA, indique el tipo y la cuota y corrija la cuota y el total. Las "
             "operaciones no sujetas al impuesto no están soportadas.")
         return
@@ -1228,7 +1300,7 @@ def _validar_fila_exenta(add, i: int, d: dict, clase: str, b: Decimal | None, es
             f"«{causa}» no es una causa de exención admitida (E1, E2, E3, E4 o E6).")
     elif causa in CAUSAS_NO_SOPORTADAS:
         add("bloqueo", f"{campo}.operacion_exenta", "EXENTA_NO_SOPORTADA",
-            f"{causa} ({info['nombre'].lower()}): la AEAT exige identificar al destinatario con su NIF-IVA de otro Estado "
+            f"{info['nombre']}: la AEAT exige identificar al destinatario con su NIF-IVA de otro Estado "
             "miembro (IDOtro, validación 1289) y la aplicación solo admite destinatarios con NIF español. Las entregas "
             "intracomunitarias no están soportadas.")
     t, c = _dec(d.get("tipo_iva")), _dec(d.get("cuota"))
@@ -1264,8 +1336,8 @@ def _validar_fila_exenta(add, i: int, d: dict, clase: str, b: Decimal | None, es
     leida = (isinstance(ext_exencion, dict) and ext_exencion.get("causa") == causa and ext_exencion.get("articulo")
              and ext_exencion.get("texto"))
     add("confirmar", campo, "EXENTA_CAUSA",
-        f"Base exenta de la fila {i + 1} ({q2(b) if b is not None else '—'}): {causa} — {info['nombre']}"
-        + (f", con clave de régimen {info['clave_regimen']} (exportación)" if info["clave_regimen"] != "01" else "")
+        f"Base exenta de la fila {i + 1} ({_e(b)}): {info['nombre']}"
+        + (" (se declara como exportación)" if info["clave_regimen"] != "01" else "")
         + f". Mención en la factura: «{motivo[:200]}». "
         + (f"Propuesta a partir del texto del documento («{str(ext_exencion['texto'])[:120]}»). " if leida else "")
         + (_texto_origen(origen) if leida and origen and b is not None and _dec(origen.get("base")) == q2(b) else "")
@@ -1279,8 +1351,8 @@ def _validar_fila_exenta(add, i: int, d: dict, clase: str, b: Decimal | None, es
 def _texto_origen(origen: dict) -> str:
     """Frase de la confirmación EXENTA_CAUSA que explica de dónde sale una base exenta calculada como diferencia."""
     lineas = [x for x in origen.get("lineas") or [] if isinstance(x, (list, tuple)) and len(x) == 2]
-    citadas = [f"«{c}» ({imp})" for c, imp in lineas[:3]] + ([f"{len(lineas) - 3} más"] if len(lineas) > 3 else [])
-    out = f"Esta base exenta ({origen.get('base')}) se ha calculado como diferencia ({origen.get('calculo')})"
+    citadas = [f"«{c}» ({_e(imp)})" for c, imp in lineas[:3]] + ([f"{len(lineas) - 3} más"] if len(lineas) > 3 else [])
+    out = f"Esta base exenta ({_e(origen.get('base'))}) se ha calculado como diferencia ({origen.get('calculo')})"
     if origen.get("impresa"):
         out += " y coincide con la base exenta impresa en el documento"
     if citadas:
@@ -1322,6 +1394,139 @@ def _descuentos_linea(extraccion: dict | None, i: int, linea: dict) -> list[Deci
 _RE_PAL_DTO = r"(?:dto|dcto|descto|desc|descuento|bonif|bonificaci[oó]n|rappel|rebaja)"
 
 
+# Datos que no forman parte del registro de facturación ni del contenido obligatorio de la factura (art. 6 RD 1619/2012):
+# se imprimen en el PDF, pero no se comunican a la AEAT. Una lectura dudosa en ellos se señala (aviso, en ámbar y editable)
+# sin exigir una confirmación expresa
+RE_CAMPOS_NO_FISCALES = re.compile(r"^(referencias\.[a-z_]{1,30}|forma_pago|iban|vencimiento)$")
+
+
+def dudoso_resuelto_por_empresa(ruta: str, valor, empresa: dict, datos: dict, extraccion: dict | None = None) -> bool:
+    """Lectura dudosa del NIF o del nombre del EMISOR que coincide exactamente con los de la empresa configurada (su NIF
+    o su razón social, sin distinguir tildes, mayúsculas ni puntuación) y con el dato del borrador: se comprueba de forma
+    determinista y no se pide confirmar (un NIF distinto ya bloquea con EMISOR_NO_EMPRESA, y el registro usa siempre el
+    NIF y la razón social configurados). Solo resuelve una duda de LECTURA: si lo dudoso es el PAPEL (la empresa podría
+    ser el cliente de una factura recibida: «papel_dudoso» o un aviso sobre el rol deducido), la duda se mantiene. Nunca se
+    aplica a datos del cliente, importes, tipos, fechas ni al número."""
+    nif_ext = ((extraccion or {}).get("emisor") or {}).get("nif") if isinstance((extraccion or {}).get("emisor"), dict) else None
+    if isinstance(nif_ext, dict) and (nif_ext.get("papel_dudoso") or any(
+            re.search(r"\b(rol|papel|papeles)\b", str(a), re.I) for a in nif_ext.get("avisos") or [])):
+        return False
+    em = datos.get("emisor") if isinstance(datos.get("emisor"), dict) else {}
+    if ruta == "emisor.nif":
+        n = nifmod.normalizar(str(valor or ""))
+        return bool(n) and n == nifmod.normalizar(empresa.get("nif") or "") \
+            and nifmod.normalizar(str(em.get("nif") or "")) == n
+    if ruta == "emisor.nombre":
+        k = _clave(valor)
+        return bool(k) and k == _clave(empresa.get("razon_social")) and _clave(em.get("nombre")) == k
+    return False
+
+
+# --- Procedencia de los cambios del borrador -----------------------------------------------------------------------------
+# El historial (cambios_borrador) guarda quién, cuándo, el valor anterior y el nuevo. La procedencia del valor nuevo y la
+# nota opcional del usuario se guardan juntas en «motivo» como «[origen] nota» (sin migrar la tabla)
+ORIGENES_CAMBIO = {
+    "manual": "Corrección manual",
+    "serie": "Siguiente número de la serie",
+    "calculado": "Calculado",
+    "certificado": "Datos de la empresa",
+    "ocr": "Lectura del documento",
+    "pregunta": "Respuesta a una pregunta de la revisión",
+}
+_RE_MOTIVO = re.compile(r"^\[(manual|serie|calculado|certificado|ocr|pregunta)\]\s?(.*)$", re.S)
+
+
+def motivo_guardado(origen: str | None, nota: str | None) -> str:
+    """Texto que se guarda en el historial: la procedencia y la nota del usuario (opcional)."""
+    o = origen if origen in ORIGENES_CAMBIO else "manual"
+    return f"[{o}] {(nota or '').strip()}".strip()[:300]
+
+
+def _iguales(a, b) -> bool:
+    if a is None or b is None:
+        return a is None and b is None
+    da, db_ = _dec(a), _dec(b)
+    if da is not None and db_ is not None:
+        return da == db_
+    return str(a).strip() == str(b).strip()
+
+
+def _valores_extraidos(extraccion: dict | None, campo: str) -> list:
+    """Valores leídos del documento que corresponden al campo `campo` del borrador."""
+    out = []
+
+    def visitar(c, ruta):
+        if isinstance(c, dict) and "valor" in c and "confianza" in c:
+            if _ruta_borrador(ruta) == campo:
+                out.append(c["valor"])
+        elif isinstance(c, dict):
+            for k, v in c.items():
+                if k not in ("paginas", "indicios", "nifs_no_validos"):
+                    visitar(v, f"{ruta}.{k}" if ruta else k)
+        elif isinstance(c, list):
+            for i, v in enumerate(c):
+                visitar(v, f"{ruta}.{i}")
+    if isinstance(extraccion, dict):
+        visitar(extraccion, "")
+    return out
+
+
+def origen_comprobado(origen: str | None, campo: str, valor, *, antes: dict, despues: dict, empresa: dict,
+                      extraccion: dict | None = None, arreglos: set | None = None) -> str:
+    """Procedencia que se guarda en el historial. La que indica el cliente solo se acepta si el servidor la comprueba;
+    si no, el cambio queda como «manual» (el historial no puede atribuir a la serie, al cálculo, a los datos de la empresa
+    o a la lectura un valor escrito a mano):
+    - serie: el número es el del arreglo de un clic que propone ahora la validación (`arreglos`);
+    - pregunta: la fecha de operación, vaciada o igual a la fecha del documento o a la de operación que se preguntaba;
+    - certificado: el NIF o el nombre del emisor iguales a los de la empresa;
+    - calculado: la base, la cuota o el importe total iguales a los calculados con el desglose (o base + cuota);
+    - ocr: el valor leído del documento para ese campo."""
+    if origen not in ORIGENES_CAMBIO or origen == "manual":
+        return "manual"
+    if origen == "serie":
+        ok = campo == "num_serie" and isinstance(valor, str) and valor in (arreglos or set())
+    elif origen == "pregunta":
+        ok = campo == "fecha_operacion" and (valor is None or (isinstance(valor, str) and valor in (
+            antes.get("fecha_documento"), antes.get("fecha_operacion"))))
+    elif origen == "certificado":
+        if campo == "emisor.nif":
+            n = nifmod.normalizar(str(valor or ""))
+            ok = bool(n) and n == nifmod.normalizar(empresa.get("nif") or "")
+        elif campo == "emisor.nombre":
+            k = _clave(valor)
+            ok = bool(k) and k == _clave(empresa.get("razon_social"))
+        else:
+            ok = False
+    elif origen == "calculado":
+        filas = [x for x in despues.get("desglose") or [] if isinstance(x, dict)]
+
+        def suma(k):
+            vals = [_dec(x.get(k)) if x.get(k) not in (None, "") else Decimal("0") for x in filas]
+            return None if not filas or any(v is None for v in vals) else sum(vals, Decimal("0"))
+        if campo == "base_imponible":
+            esperado = suma("base")
+        elif campo == "cuota_total":
+            esperado = suma("cuota")
+        elif campo == "importe_total":
+            b_, c_ = _dec(despues.get("base_imponible")), _dec(despues.get("cuota_total"))
+            esperado = b_ + c_ if b_ is not None and c_ is not None else None
+        else:
+            esperado = None
+        ok = esperado is not None and _dec(valor) is not None and _dec(valor) == esperado
+    elif origen == "ocr":
+        ok = valor not in (None, "") and any(_iguales(v, valor) for v in _valores_extraidos(extraccion, campo))
+    else:
+        ok = False
+    return origen if ok else "manual"
+
+
+def separar_motivo(m) -> tuple[str, str]:
+    """(origen, nota) de un motivo guardado. Los cambios anteriores a esta versión no llevan procedencia: eran manuales."""
+    t = str(m or "")
+    r = _RE_MOTIVO.match(t)
+    return (r.group(1), r.group(2).strip()) if r else ("manual", t.strip())
+
+
 def _ruta_borrador(ruta_ext: str) -> str | None:
     mapa = {"numero": "num_serie", "fecha": "fecha_documento", "base_imponible": "base_imponible",
             "cuota_iva": "cuota_total", "total_factura": "importe_total", "total_a_pagar": "total_a_pagar",
@@ -1360,39 +1565,95 @@ def puede_emitir(incidencias: list[dict]) -> bool:
 
 
 # --- Ámbito del emisor ---------------------------------------------------------------
+# Tres preguntas que excluyen de VERI*FACTU o de lo que la aplicación implementa, siempre con respuesta expresa (sin
+# respuesta por defecto): territorio foral (art. 1.3 RRSIF), SII (art. 3.3 RRSIF) y Canarias, Ceuta o Melilla (IGIC/IPSI).
+# El tipo de contribuyente no cambia el resultado: se deduce del NIF si no se ha indicado. Las «otras particularidades»
+# son una nota que no impide emitir (los casos no soportados se bloquean al revisar cada factura).
+TERRITORIOS_FORALES = ("pais_vasco", "navarra", "foral")
+# Prefijo del código postal de las provincias forales (Álava, Gipuzkoa, Bizkaia; Navarra)
+CP_FORALES = {"01": "Álava", "20": "Gipuzkoa", "48": "Bizkaia", "31": "Navarra"}
+_RE_CP = re.compile(r"(?<![\d.,])(0[1-9]|[1-4]\d|5[0-2])(\d{3})(?![\d.,])")
+
+
+def codigo_postal(domicilio) -> str | None:
+    """Código postal español de un domicilio (el último número de 5 cifras con un prefijo de provincia válido)."""
+    if not isinstance(domicilio, str):
+        return None
+    m = list(_RE_CP.finditer(domicilio))
+    return m[-1].group(1) + m[-1].group(2) if m else None
+
+
+_RE_CONTACTO = re.compile(r"[\s,;·|–-]*(?:\b(?:tel[eé]fono|tel[fé]?|tfno|m[oó]vil|fax)\b\.?\s*:?\s*[+(\d]"
+                          r"|\b(?:e-?mail|correo(?: electr[oó]nico)?|web)\s*:|\bwww\.|[^\s,;]+@[^\s,;]+).*$", re.I | re.S)
+
+
+def domicilio_propuesto(domicilio) -> str | None:
+    """Domicilio leído de una factura para PROPONERLO a la empresa: sin el teléfono, el correo o la web que suelen ir detrás
+    (el usuario lo ve y lo confirma o corrige)."""
+    if not isinstance(domicilio, str):
+        return None
+    t = re.sub(r"\s+", " ", _RE_CONTACTO.sub("", domicilio)).strip(" ,;·-")
+    return t[:300] or None
+
+
+def provincia_foral(cp: str | None) -> str | None:
+    """Provincia foral del código postal (Álava, Gipuzkoa, Bizkaia o Navarra) o None."""
+    return CP_FORALES.get((cp or "")[:2]) if cp else None
+
+
+def tipo_contribuyente_de_nif(nif) -> str:
+    """Tipo de contribuyente deducido de la letra del NIF: DNI/NIE → persona física (IRPF); A, B, C, D, F, G, R, U, V →
+    sociedad o entidad (Impuesto sobre Sociedades); E, H (comunidades de bienes y de propietarios) → entidad en régimen de
+    atribución de rentas; los demás (J, N, P, Q, S, W…) → otro. No cambia lo que la aplicación puede expedir."""
+    t = nifmod.tipo(nifmod.normalizar(nif or "")) if isinstance(nif, str) else None
+    if t in ("DNI", "NIE", "NIF_ESPECIAL"):
+        return "persona_fisica_IRPF"
+    letra = (nifmod.normalizar(nif or "")[:1] if isinstance(nif, str) else "")
+    if t == "PERSONA_JURIDICA" and letra in "ABCDFGRUV":
+        return "sociedad_IS"
+    if t == "PERSONA_JURIDICA" and letra in "EH":
+        return "entidad_renta"
+    return "otro"
+
+
 def evaluar_ambito(e: dict) -> dict:
     """Determina si la aplicación puede emitir para este emisor (solo supuestos implementados)."""
     motivos, puede = [], True
-    if e.get("territorio") in ("pais_vasco", "navarra"):
+    if e.get("territorio") in TERRITORIOS_FORALES:
         puede = False
         motivos.append("Territorio foral: VERI*FACTU (RD 1007/2023) no aplica a los obligados de los territorios "
                        "forales del País Vasco y Navarra, que tienen sus propios sistemas (TicketBAI / Navarra).")
     elif e.get("territorio") != "comun":
         puede = False
-        motivos.append("Indique el territorio fiscal.")
+        motivos.append("Indique si la empresa tributa en un territorio foral (País Vasco o Navarra).")
     if e.get("sii") is None:
         puede = False
         motivos.append("Indique si la empresa lleva los libros registro del IVA mediante el SII.")
     elif int(e.get("sii")):
         puede = False
         motivos.append("Las empresas que llevan los libros por el SII están excluidas del RD 1007/2023 (art. 3).")
-    if e.get("tipo_contribuyente") not in ("sociedad_IS", "persona_fisica_IRPF", "entidad_renta", "otro"):
-        puede = False
-        motivos.append("Indique el tipo de contribuyente.")
     if int(e.get("canarias_ceuta_melilla") or 0):
         puede = False
         motivos.append("Operaciones en Canarias, Ceuta o Melilla (IGIC/IPSI) no implementadas.")
-    if e.get("otras_exclusiones"):
-        puede = False
-        motivos.append("Se han indicado otras exclusiones o particularidades: " + str(e["otras_exclusiones"]))
+    if e.get("otras_exclusiones") and str(e["otras_exclusiones"]).strip():
+        # Nota de la empresa: no impide emitir (antes cualquier texto, incluso «Ninguna», bloqueaba toda la emisión)
+        motivos.append("NOTA (no impide emitir): " + str(e["otras_exclusiones"]).strip()[:500])
     if e.get("origen_pdf") == "programa_facturacion":
         motivos.append("AVISO: los PDF proceden de un programa de facturación. Ese programa puede ser por sí mismo un "
                        "sistema informático de facturación sujeto al RD 1007/2023; esta aplicación no lo adapta. Las "
                        "facturas deben expedirse solo desde esta aplicación y el programa de origen debe limitarse a "
                        "documentos preparatorios.")
+    cp = codigo_postal(e.get("domicilio"))
+    if provincia_foral(cp) and e.get("territorio") not in TERRITORIOS_FORALES:
+        motivos.append(f"AVISO: el domicilio fiscal configurado (código postal {cp}, {provincia_foral(cp)}) está en un "
+                       "territorio foral. Si la empresa tributa en el País Vasco o en Navarra, VERI*FACTU no se le aplica: "
+                       "compruebe la respuesta sobre el territorio.")
     if puede:
         motivos.append("Supuesto implementado: territorio común, sin SII, sin exclusiones indicadas. Operaciones de IVA en "
                        "régimen general sujetas a los tipos del 21, 10 o 4 % y operaciones exentas (E1–E4 y E6), con la causa "
                        "confirmada en cada factura; las no sujetas, la inversión del sujeto pasivo y el recargo de "
                        "equivalencia siguen sin soportarse.")
-    return {"puede_emitir": puede, "motivos": motivos}
+    tipo = e.get("tipo_contribuyente") if e.get("tipo_contribuyente") in ("sociedad_IS", "persona_fisica_IRPF",
+                                                                           "entidad_renta", "otro") else None
+    return {"puede_emitir": puede, "motivos": motivos,
+            "tipo_contribuyente": tipo or tipo_contribuyente_de_nif(e.get("nif")), "tipo_deducido": tipo is None}
